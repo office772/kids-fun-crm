@@ -2,26 +2,62 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --crm-bg: #FDF8F0;
+    --crm-primary: #6D436D;
+    --crm-accent: #D29486;
+    --crm-action: #FAD980;
+    --crm-text: #5E4B35;
+    --crm-border-radius: 12px;
+    --crm-button-radius: 50px;
+    --border: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --radius: 0.625rem;
   }
-}
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  * {
+    border-color: oklch(0.922 0 0);
+  }
+
+  body {
+    background-color: var(--crm-bg);
+    color: var(--crm-text);
+    font-family: var(--font-rubik), Rubik, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+  }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
   }
+
+  .font-rubik {
+    font-family: var(--font-rubik), Rubik, sans-serif;
+  }
+
+  .font-amatic {
+    font-family: var(--font-amatic), cursive;
+  }
+}
+
+/* Hide scrollbar for horizontal tab navigation */
+.overflow-x-auto::-webkit-scrollbar {
+  display: none;
+}
+
+/* Smooth transitions */
+.smooth-transition {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hover-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px -8px rgba(109, 67, 109, 0.2);
 }
