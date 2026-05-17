@@ -37,8 +37,17 @@ function handleActiveFlow(session: BotSession, userMessage: string, intent: BotI
     return { ...handleLateCampFlow(session, userMessage), intent }
   }
 
-  // ברירת מחדל — כוונה חדשה עוקפת מסלול ישן
-  return handleNewIntent(session, userMessage, intent)
+  // כוונה חדשה מפורשת — מתחילים מסלול חדש
+  if (intent !== 'לא_ידוע' && intent !== 'שאלה_כללית') {
+    session.currentFlow = undefined
+    return handleNewIntent(session, userMessage, intent)
+  }
+
+  // הודעה לא מובנת בתוך מסלול
+  return {
+    text: 'לא הבנתי 😊 אפשר לנסות שוב?',
+    intent,
+  }
 }
 
 function handleNewIntent(session: BotSession, userMessage: string, intent: BotIntent): BotResponse & { intent: BotIntent } {
@@ -46,8 +55,8 @@ function handleNewIntent(session: BotSession, userMessage: string, intent: BotIn
     case 'רישום_צהרון':
       return {
         ...handleRegistrationFlow(session, userMessage),
-        intent,
-        nextFlow: 'register_start'
+        intent
+        // nextFlow comes from handleRegistrationFlow itself: 'register_child_name'
       }
 
     case 'רישום_קייטנה':
