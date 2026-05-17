@@ -186,11 +186,15 @@ export function BotContentManager() {
             {/* Active toggle */}
             <button
               onClick={() => toggleActive(item.id)}
-              className="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors mt-0.5"
-              style={{ background: item.is_active ? 'var(--crm-primary)' : '#d1d5db' }}
-              title={item.is_active ? 'פעיל — לחץ לכיבוי' : 'כבוי — לחץ להפעלה'}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all hover:opacity-80 flex-shrink-0"
+              style={
+                item.is_active
+                  ? { background: '#e8d5e8', color: '#6D436D', border: '1px solid #c9a8c9' }
+                  : { background: '#f5f5f4', color: '#a8a29e', border: '1px solid #e5e7eb' }
+              }
             >
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${item.is_active ? 'translate-x-6' : 'translate-x-1'}`} />
+              <span className="w-2 h-2 rounded-full" style={{ background: item.is_active ? '#6D436D' : '#d1d5db' }} />
+              {item.is_active ? 'פעיל' : 'כבוי'}
             </button>
 
             {/* Content */}
@@ -407,12 +411,12 @@ function CategoryBadge({ category }: { category: BotContentCategory }) {
 }
 
 const FLOW_COLORS: Record<BotContentFlow, { bg: string; color: string }> = {
-  general:       { bg: '#f5f5f4', color: '#78716c' },
-  'צהרון':       { bg: '#e8d5e8', color: '#6D436D' },
-  'קייטנה':      { bg: '#d5e8e8', color: '#2A6B6B' },
-  'ביטול':       { bg: '#f5dde5', color: '#7d2d4a' },
-  'תשלום':       { bg: '#fce9e6', color: '#a05a4f' },
-  'לוז':         { bg: '#fef3c7', color: '#b45309' },
+  general:       { bg: '#f5f5f4',  color: '#78716c' },
+  'צהרון':       { bg: '#6D436D',  color: '#ffffff' },
+  'קייטנה':      { bg: '#2A6B6B',  color: '#ffffff' },
+  'ביטול':       { bg: '#f5dde5',  color: '#7d2d4a' },
+  'תשלום':       { bg: '#fce9e6',  color: '#a05a4f' },
+  'לוז':         { bg: '#fef3c7',  color: '#b45309' },
   'איסוף_מוקדם': { bg: '#fef9c3', color: '#854d0e' },
 }
 
@@ -422,6 +426,6 @@ function FlowBadge({ flow }: { flow: BotContentFlow }) {
   }
   const { bg, color } = FLOW_COLORS[flow] ?? { bg: '#f5f5f4', color: '#78716c' }
   return (
-    <span className="text-xs px-2 py-0.5 rounded-full font-medium border" style={{ background: bg, color, borderColor: color + '40' }}>{labels[flow]}</span>
+    <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: bg, color }}>{labels[flow]}</span>
   )
 }
