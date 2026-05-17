@@ -38,9 +38,6 @@
     font-family: var(--font-rubik), Rubik, sans-serif;
   }
 
-  .font-amatic {
-    font-family: var(--font-amatic), cursive;
-  }
 }
 
 /* Hide scrollbar for horizontal tab navigation */

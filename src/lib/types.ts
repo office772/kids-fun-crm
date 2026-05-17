@@ -127,6 +127,36 @@ export interface CalendarEvent {
   created_at: string
 }
 
+// ─── BotContent ────────────────────────────────────────────────────────────
+export type BotContentCategory = 'general' | 'registration' | 'cancellation' | 'payment' | 'schedule' | 'camp'
+export type BotContentFlow = 'general' | 'צהרון' | 'קייטנה' | 'ביטול' | 'תשלום' | 'לוז' | 'איסוף_מוקדם'
+
+export interface BotContent {
+  id: string
+  key: string
+  title: string
+  content: string       // supports {שם} {ילד} {קישור} placeholders
+  category: BotContentCategory
+  flow: BotContentFlow
+  step_label: string
+  is_active: boolean
+  created_at: string
+}
+
+// ─── SystemSettings ────────────────────────────────────────────────────────
+export type SettingValueType = 'text' | 'url' | 'boolean' | 'number' | 'json'
+export type SettingCategory = 'details' | 'whatsapp' | 'flow' | 'payments'
+
+export interface SystemSetting {
+  id: string
+  category: SettingCategory
+  key: string
+  label: string
+  value: string
+  value_type: SettingValueType
+  description?: string
+}
+
 // Bot types
 export type BotIntent =
   | 'רישום_צהרון'

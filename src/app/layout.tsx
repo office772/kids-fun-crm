@@ -1,17 +1,11 @@
 import type { Metadata } from 'next'
-import { Rubik, Amatic_SC } from 'next/font/google'
+import { Rubik } from 'next/font/google'
 import './globals.css'
 
 const rubik = Rubik({
   subsets: ['hebrew', 'latin'],
-  weight: ['300', '400', '500', '600', '700'],
+  weight: ['300', '400', '500', '600', '700', '800', '900'],
   variable: '--font-rubik',
-})
-
-const amaticSC = Amatic_SC({
-  subsets: ['hebrew', 'latin'],
-  weight: ['400', '700'],
-  variable: '--font-amatic',
 })
 
 export const metadata: Metadata = {
@@ -22,7 +16,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="he" dir="rtl">
-      <body className={`${rubik.variable} ${amaticSC.variable} antialiased`}
+      <body className={`${rubik.variable} antialiased`}
         style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif' }}>
         {children}
       </body>

@@ -43,6 +43,7 @@ export function handleRegistrationFlow(session: BotSession, userMessage: string)
   }
 
   if (step === 'register_child_name') {
+    session.collectedData.child_name = userMessage
     return {
       text: `תודה! *${userMessage}* — איזה שם יפה 💛\n\nבאיזו כיתה הילד/ה?`,
       nextFlow: 'register_class'
@@ -50,12 +51,14 @@ export function handleRegistrationFlow(session: BotSession, userMessage: string)
   }
 
   if (step === 'register_class') {
+    session.collectedData.class_name = userMessage
+    const childName = session.collectedData.child_name || 'הילד/ה'
     return {
-      text: `מצוין! כיתה *${userMessage}*.\n\nאני בודקת מקום פנוי... 🔍\n\nיש מקום! ✅\n\nשולחת לך קישור לטופס הרישום המלא. אחרי שתמלא/י, נאשר את ההרשמה ונשלח אישור.\n\n📋 *[קישור לטופס רישום]*\n\nיש שאלות? אני כאן!`,
+      text: `מצוין! כיתה *${userMessage}*.\n\nאני בודקת מקום פנוי... 🔍\n\nיש מקום! ✅\n\nשולחת לך קישור לטופס הרישום המלא. אחרי שתמלא/י, נאשר את ההרשמה ונשלח אישור.\n\n📋 *[קישור לטופס רישום]*\n\n*${childName}* יצטרף/תצטרף אלינו בקרוב! 🎉`,
       isComplete: true,
       createTask: {
         type: 'שאלה כללית',
-        description: `בקשת רישום לצהרון — ילד/ה בכיתה ${userMessage}`,
+        description: `בקשת רישום לצהרון — ${childName} כיתה ${userMessage}`,
         priority: 'רגיל'
       }
     }

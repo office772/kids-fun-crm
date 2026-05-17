@@ -13,7 +13,7 @@ const config: Config = {
         foreground: "var(--foreground)",
       },
       fontFamily: {
-        assistant: ['var(--font-assistant)', 'Assistant', 'sans-serif'],
+        rubik: ['var(--font-rubik)', 'Rubik', 'sans-serif'],
       },
     },
   },

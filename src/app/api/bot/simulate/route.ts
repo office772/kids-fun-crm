@@ -32,7 +32,9 @@ export async function POST(req: NextRequest) {
       session.currentFlow = response.nextFlow
     } else if (response.isComplete) {
       session.currentFlow = undefined
+      // שמירת נתונים שנאספו להצגה בסימולטור — לא מנקה אותם
     }
+
     simulatorSessions.set(sessionId, session)
 
     return NextResponse.json({
@@ -40,7 +42,9 @@ export async function POST(req: NextRequest) {
       intent: response.intent,
       escalate: response.escalate || false,
       createTask: response.createTask || null,
-      currentFlow: session.currentFlow || null
+      currentFlow: session.currentFlow || null,
+      collectedData: session.collectedData || {},
+      isComplete: response.isComplete || false,
     })
 
   } catch (error) {
