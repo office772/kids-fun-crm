@@ -1,8 +1,8 @@
 'use client'
 
-import { LayoutDashboard, Users, ClipboardList, MessageSquare } from 'lucide-react'
+import { LayoutDashboard, Users, ClipboardList, MessageSquare, Bot } from 'lucide-react'
 
-type ActiveTab = 'overview' | 'parents' | 'tasks' | 'simulator'
+type ActiveTab = 'overview' | 'parents' | 'tasks' | 'simulator' | 'bot'
 
 interface NavLink {
   id: ActiveTab
@@ -20,6 +20,7 @@ const navLinks: NavLink[] = [
   { id: 'parents', label: 'הורים', icon: <Users size={18} /> },
   { id: 'tasks', label: 'פניות', icon: <ClipboardList size={18} /> },
   { id: 'simulator', label: 'סימולטור', icon: <MessageSquare size={18} /> },
+  { id: 'bot', label: 'ניהול בוט', icon: <Bot size={18} /> },
 ]
 
 export function Navigation({ activeTab, onTabChange }: Props) {
@@ -41,7 +42,7 @@ export function Navigation({ activeTab, onTabChange }: Props) {
         <div className="flex-shrink-0">
           <span
             className="text-3xl font-bold leading-none tracking-wide"
-            style={{ fontFamily: 'var(--font-amatic), cursive', color: 'var(--crm-primary)' }}
+            style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
           >
             🌟 Kids &amp; Fun
           </span>

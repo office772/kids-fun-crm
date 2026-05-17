@@ -8,8 +8,10 @@ import { ParentsList } from '@/components/dashboard/ParentsList'
 import { TaskList } from '@/components/dashboard/TaskList'
 import { StatusBadge } from '@/components/dashboard/StatusBadge'
 import { AddParentModal } from '@/components/dashboard/AddParentModal'
+import { BotContentManager } from '@/components/dashboard/BotContentManager'
+import { SystemSettings } from '@/components/dashboard/SystemSettings'
 
-type ActiveTab = 'overview' | 'parents' | 'tasks' | 'simulator'
+type ActiveTab = 'overview' | 'parents' | 'tasks' | 'simulator' | 'bot'
 
 export default function DashboardPage() {
   const [parents, setParents] = useState<Parent[]>([])
@@ -138,7 +140,7 @@ export default function DashboardPage() {
               <div>
                 <h1
                   className="text-5xl font-bold leading-none mb-1"
-                  style={{ fontFamily: 'var(--font-amatic), cursive', color: 'var(--crm-primary)' }}
+                  style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
                 >
                   סקירה כללית
                 </h1>
@@ -204,7 +206,7 @@ export default function DashboardPage() {
               <div>
                 <h2
                   className="text-3xl font-bold mb-4"
-                  style={{ fontFamily: 'var(--font-amatic), cursive', color: 'var(--crm-primary)' }}
+                  style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
                 >
                   📋 פניות אחרונות
                 </h2>
@@ -215,7 +217,7 @@ export default function DashboardPage() {
                   <h2
                     className="text-3xl font-bold"
                     style={{
-                      fontFamily: 'var(--font-amatic), cursive',
+                      fontFamily: 'var(--font-rubik), Rubik, sans-serif',
                       color: 'var(--crm-primary)',
                     }}
                   >
@@ -250,7 +252,7 @@ export default function DashboardPage() {
               <div>
                 <h1
                   className="text-5xl font-bold leading-none mb-1"
-                  style={{ fontFamily: 'var(--font-amatic), cursive', color: 'var(--crm-primary)' }}
+                  style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
                 >
                   הורים
                 </h1>
@@ -368,7 +370,7 @@ export default function DashboardPage() {
               <div>
                 <h1
                   className="text-5xl font-bold leading-none mb-1"
-                  style={{ fontFamily: 'var(--font-amatic), cursive', color: 'var(--crm-primary)' }}
+                  style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
                 >
                   פניות
                 </h1>
@@ -383,13 +385,18 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* ── ניהול בוט ─────────────────────────────────────────── */}
+        {activeTab === 'bot' && (
+          <BotManagementTab />
+        )}
+
         {/* ── סימולטור ──────────────────────────────────────────── */}
         {activeTab === 'simulator' && (
           <div className="space-y-6">
             <div>
               <h1
                 className="text-5xl font-bold leading-none mb-1"
-                style={{ fontFamily: 'var(--font-amatic), cursive', color: 'var(--crm-primary)' }}
+                style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
               >
                 סימולטור בוט
               </h1>
@@ -419,6 +426,64 @@ export default function DashboardPage() {
           editParent={editingParent}
         />
       )}
+    </div>
+  )
+}
+
+// =========================================
+// BotManagementTab
+// =========================================
+function BotManagementTab() {
+  const [subTab, setSubTab] = useState<'content' | 'settings'>('content')
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-end justify-between">
+        <div>
+          <h1
+            className="text-5xl font-bold leading-none mb-1"
+            style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
+          >
+            ניהול בוט
+          </h1>
+          <p className="text-sm" style={{ color: 'var(--crm-text)', opacity: 0.6 }}>
+            הגדרת תכני הבוט, הודעות ופרמטרים מערכתיים
+          </p>
+        </div>
+      </div>
+
+      {/* Sub-tabs */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setSubTab('content')}
+          className="px-5 py-2 rounded-full text-sm font-semibold transition-all"
+          style={
+            subTab === 'content'
+              ? { background: 'var(--crm-primary)', color: '#fff' }
+              : { background: '#fff', color: 'var(--crm-text)', border: '1px solid #e5e7eb', opacity: 0.7 }
+          }
+        >
+          💬 תכני הודעות
+        </button>
+        <button
+          onClick={() => setSubTab('settings')}
+          className="px-5 py-2 rounded-full text-sm font-semibold transition-all"
+          style={
+            subTab === 'settings'
+              ? { background: 'var(--crm-primary)', color: '#fff' }
+              : { background: '#fff', color: 'var(--crm-text)', border: '1px solid #e5e7eb', opacity: 0.7 }
+          }
+        >
+          ⚙️ הגדרות מערכת
+        </button>
+      </div>
+
+      {/* Content */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        {subTab === 'content' && <BotContentManager />}
+        {subTab === 'settings' && <SystemSettings />}
+      </div>
     </div>
   )
 }
