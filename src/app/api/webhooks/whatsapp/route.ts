@@ -67,8 +67,8 @@ export async function POST(req: NextRequest) {
       collectedData: {}
     }
 
-    // עיבוד ההודעה
-    const response = processMessage(session, text)
+    // עיבוד ההודעה (async — כולל LLM fallback)
+    const response = await processMessage(session, text)
 
     // עדכון session
     if (response.nextFlow) {

@@ -17,8 +17,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(data)
   }
 
-  const { createClient } = await import('@/lib/supabase/server')
-  const supabase = await createClient()
+  const { createServiceClient } = await import("@/lib/supabase/server")
+  const supabase = createServiceClient()
 
   let query = supabase
     .from('tasks')
@@ -40,8 +40,8 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ id, status })
   }
 
-  const { createClient } = await import('@/lib/supabase/server')
-  const supabase = await createClient()
+  const { createServiceClient } = await import("@/lib/supabase/server")
+  const supabase = createServiceClient()
 
   const { data, error } = await supabase
     .from('tasks')

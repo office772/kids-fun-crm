@@ -45,7 +45,11 @@ export interface Registration {
   child_id?: string
   type: RegistrationType
   status: RegistrationStatus
+  area_code?: string
+  area_label?: string
   waiting_list_position?: number
+  payment_method?: string
+  payment_setup_at?: string
   approved_at?: string
   notes?: string
   branch_id?: string
@@ -116,6 +120,31 @@ export interface Task {
   parent?: Parent
 }
 
+// ─── Registration Timeline ───────────────────────────────────────────────────
+export type TimelineEventType =
+  | 'status_change'
+  | 'message_sent'
+  | 'message_received'
+  | 'payment'
+  | 'task_created'
+  | 'task_resolved'
+  | 'system_note'
+  | 'escalation'
+
+export interface RegistrationTimeline {
+  id: string
+  registration_id?: string
+  parent_id: string
+  event_type: TimelineEventType
+  old_value?: string
+  new_value?: string
+  description: string
+  performed_by: 'בוט' | 'נציג' | 'מערכת' | 'הורה'
+  metadata?: Record<string, unknown>
+  branch_id?: string
+  created_at: string
+}
+
 export interface CalendarEvent {
   id: string
   title: string
@@ -124,6 +153,19 @@ export interface CalendarEvent {
   is_closed: boolean
   notes?: string
   branch_id?: string
+  created_at: string
+}
+
+// ─── FAQ ─────────────────────────────────────────────────────────────────────
+export type FAQCategory = 'תשלומים' | 'לוז' | 'קייטנה' | 'ביטול' | 'כללי'
+
+export interface FAQ {
+  id: string
+  key: string           // מפתח ייחודי, למשל: 'sibling_discount'
+  question: string      // שאלה לתצוגה
+  answer: string        // תשובה — תומכת ב-{שם}, {ילד} placeholders
+  category: FAQCategory
+  is_active: boolean
   created_at: string
 }
 
@@ -167,7 +209,10 @@ export type BotIntent =
   | 'בדיקת_תשלום'
   | 'כשל_תשלום'
   | 'כשל_תשלום_יזום'
+  | 'אפשרויות_תשלום'   // הורה שואל על שיטות תשלום / רוצה לשנות שיטה
   | 'רשימת_המתנה'
+  | 'הצעת_מקום_יזומה'  // מהמערכת — כשנפתח מקום ברשימת המתנה
+  | 'בקשת_נציג'
   | 'שאלה_כללית'
   | 'לא_ידוע'
 

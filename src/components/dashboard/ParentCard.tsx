@@ -121,8 +121,8 @@ export function ParentCard({ parent, onClose, onEdit, onDelete }: Props) {
 
               {/* משימות פתוחות */}
               {openTasks.length > 0 && (
-                <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                  <h3 className="font-bold text-red-700 mb-3 text-base">⚠️ פניות פתוחות</h3>
+                <div className="rounded-xl p-4" style={{ background: '#FCEAEA', border: '1px solid #EF444433' }}>
+                  <h3 className="font-bold mb-3 text-base" style={{ color: '#EF4444' }}>⚠️ פניות פתוחות</h3>
                   <div className="space-y-2">
                     {openTasks.map(task => (
                       <div key={task.id} className="flex items-start justify-between gap-3">
@@ -139,8 +139,8 @@ export function ParentCard({ parent, onClose, onEdit, onDelete }: Props) {
 
               {/* הערות */}
               {parent.notes && (
-                <div className="bg-blue-50 rounded-xl p-4">
-                  <h3 className="font-bold text-blue-700 mb-2">📝 הערות</h3>
+                <div className="rounded-xl p-4" style={{ background: '#F0EBF3' }}>
+                  <h3 className="font-bold mb-2" style={{ color: '#6D436D' }}>📝 הערות</h3>
                   <p className="text-stone-700">{parent.notes}</p>
                 </div>
               )}
@@ -153,10 +153,11 @@ export function ParentCard({ parent, onClose, onEdit, onDelete }: Props) {
                 [...(parent.conversations || [])].reverse().map(msg => (
                   <div
                     key={msg.id}
-                    className={`rounded-xl p-3 max-w-[85%] ${msg.direction === 'נכנס'
-                      ? 'bg-stone-100 mr-auto'
-                      : 'bg-amber-50 border border-amber-200 ml-auto'
-                    }`}
+                    className="rounded-xl p-3 max-w-[85%]"
+                    style={msg.direction === 'נכנס'
+                      ? { background: '#F0F1F2', marginRight: 'auto' }
+                      : { background: '#FEF9C3', border: '1px solid #FAD98066', marginLeft: 'auto' }
+                    }
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-xs font-medium text-stone-400">
@@ -200,7 +201,10 @@ export function ParentCard({ parent, onClose, onEdit, onDelete }: Props) {
                   setDeleting(false)
                 }}
                 disabled={deleting}
-                className="flex-1 bg-red-500 hover:bg-red-600 disabled:opacity-60 text-white font-bold py-3 rounded-xl transition-colors"
+                className="flex-1 font-bold py-3 rounded-xl transition-colors disabled:opacity-60 text-white"
+                style={{ background: '#EF4444' }}
+                onMouseOver={e => (e.currentTarget.style.background = '#DC2626')}
+                onMouseOut={e => (e.currentTarget.style.background = '#EF4444')}
               >
                 {deleting ? 'מוחק...' : 'כן, מחק'}
               </button>

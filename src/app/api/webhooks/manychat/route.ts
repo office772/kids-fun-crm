@@ -1,297 +1,171 @@
-import { NextRequest, NextResponse } from 'next/server'
-
 /**
  * POST /api/webhooks/manychat
  *
- * Receives incoming events from ManyChat / uchat.
- * Each message arrives as JSON with at minimum:
- *   { phone, message, subscriber_id?, first_name?, last_name? }
+ * מקבל הודעות נכנסות מ-ManyChat / uchat.
+ * פורמט בסיסי: { phone, message, first_name?, last_name? }
  *
  * Flow:
- *  1. Validate the shared secret header
- *  2. Identify the parent by phone (or create a new lead record)
- *  3. Run intent classification
- *  4. Run the matching flow handler
- *  5. Log the conversation to Supabase (demo: in-memory store)
- *  6. Return { reply } — ManyChat sends this text back to the user
+ *  1. אימות secret header
+ *  2. טעינת הורה מ-Supabase לפי טלפון (או יצירת רשומה חדשה)
+ *  3. טעינת session (מ-Supabase) או יצירת session חדש
+ *  4. processMessage → handler.ts → flows.ts
+ *  5. עדכון session ב-Supabase
+ *  6. רישום שיחה ב-conversations
+ *  7. יצירת task ב-Supabase אם הבוט ביקש
+ *  8. החזרת { reply, intent } ל-ManyChat
  */
 
-// ─── Shared secret validation ─────────────────────────────────────────────────
-const WEBHOOK_SECRET = process.env.MANYCHAT_WEBHOOK_SECRET ?? 'dev-secret'
+import { NextRequest, NextResponse } from 'next/server'
+import { createServiceClient } from '@/lib/supabase/server'
+import { processMessage } from '@/lib/bot/handler'
+import type { BotSession, TaskPriority } from '@/lib/types'
+
+// ─── Auth ──────────────────────────────────────────────────────────────────────
+const WEBHOOK_SECRET = process.env.WHATSAPP_WEBHOOK_SECRET ?? 'dev-secret'
 
 function isAuthorized(req: NextRequest): boolean {
+  if (WEBHOOK_SECRET === 'dev-secret') return true
   const header =
     req.headers.get('x-webhook-secret') ||
     req.headers.get('x-manychat-secret') ||
     req.headers.get('authorization')?.replace('Bearer ', '')
-  if (WEBHOOK_SECRET === 'dev-secret') return true
   return header === WEBHOOK_SECRET
 }
 
-// ─── In-memory session store (replaced by Supabase later) ────────────────────
-interface Session {
-  phone: string
-  currentFlow: string | null
-  step: number
-  collectedData: Record<string, string>
-  lastActivity: number
+// ─── TaskType mapper ───────────────────────────────────────────────────────────
+// ממפה את הטיפוס החופשי שחוזר מ-flows.ts לערך חוקי בטבלת tasks
+function toTaskType(raw: string): string {
+  if (/ביטול חריג/.test(raw)) return 'ביטול חריג'
+  if (/ביטול/.test(raw)) return 'ביטול חריג'
+  if (/כשל תשלום|תזכורת כשל/.test(raw)) return 'כשל תשלום'
+  if (/רישום מאוחר|קייטנה/.test(raw)) return 'רישום מאוחר'
+  if (/רשימת המתנה|המתנה/.test(raw)) return 'רשימת המתנה'
+  if (/תלונה/.test(raw)) return 'תלונה'
+  return 'שאלה כללית'
 }
 
-const sessions = new Map<string, Session>()
-
-function getSession(phone: string): Session {
-  const existing = sessions.get(phone)
-  if (existing) {
-    existing.lastActivity = Date.now()
-    return existing
-  }
-  const fresh: Session = {
+// ─── Session helpers ───────────────────────────────────────────────────────────
+function makeNewSession(phone: string, parentId?: string, parentName?: string): BotSession {
+  return {
+    sessionId: `${phone}-${Date.now()}`,
     phone,
-    currentFlow: null,
-    step: 0,
+    parentId,
+    parentName,
+    messages: [],
+    currentFlow: undefined,
     collectedData: {},
-    lastActivity: Date.now(),
   }
-  sessions.set(phone, fresh)
-  return fresh
 }
 
-function clearSession(phone: string) {
-  sessions.delete(phone)
+async function loadSession(
+  supabase: ReturnType<typeof createServiceClient>,
+  phone: string
+): Promise<BotSession | null> {
+  const { data } = await supabase
+    .from('bot_sessions')
+    .select('session_data, last_activity')
+    .eq('phone', phone)
+    .single()
+
+  if (!data) return null
+
+  // פג תוקף אחרי 30 דקות של חוסר פעילות
+  const lastActivity = new Date(data.last_activity).getTime()
+  if (Date.now() - lastActivity > 30 * 60 * 1000) return null
+
+  return data.session_data as BotSession
 }
 
-// ─── Intent classifier ────────────────────────────────────────────────────────
-type BotIntent =
-  | 'רישום_צהרון'
-  | 'רישום_קייטנה'
-  | 'ביטול'
-  | 'שאלת_לוז'
-  | 'איסוף_מוקדם'
-  | 'בדיקת_תשלום'
-  | 'כשל_תשלום'
-  | 'רשימת_המתנה'
-  | 'שאלה_כללית'
-  | 'לא_ידוע'
-
-function classifyIntent(text: string): BotIntent {
-  const t = text.trim()
-
-  if (/^1$/.test(t)) return 'רישום_צהרון'
-  if (/^2$/.test(t)) return 'רישום_קייטנה'
-  if (/^3$/.test(t)) return 'ביטול'
-  if (/^4$/.test(t)) return 'שאלת_לוז'
-  if (/^5$/.test(t)) return 'בדיקת_תשלום'
-  if (/^6$/.test(t)) return 'איסוף_מוקדם'
-
-  if (/רישום|להירשם|הרשמה/i.test(t) && /צהרון/i.test(t)) return 'רישום_צהרון'
-  if (/קייטנה|summer|camp/i.test(t)) return 'רישום_קייטנה'
-  if (/ביטול|לבטל/i.test(t)) return 'ביטול'
-  if (/שעות|לוח זמנים|לוז|חגים|סגור|פתוח|מתי/i.test(t)) return 'שאלת_לוז'
-  if (/איסוף מוקדם|לאסוף מוקדם/i.test(t)) return 'איסוף_מוקדם'
-  if (/כשל|נכשל|דחיית|חיוב נדחה|בנק/i.test(t)) return 'כשל_תשלום'
-  if (/תשלום|לשלם|חשבונית|חוב/i.test(t)) return 'בדיקת_תשלום'
-  if (/המתנה|תור|מקום/i.test(t)) return 'רשימת_המתנה'
-  if (/שלום|היי|הי|בוקר|ערב|עזרה|help/i.test(t)) return 'שאלה_כללית'
-
-  return 'לא_ידוע'
-}
-
-// ─── Flow handlers ────────────────────────────────────────────────────────────
-
-function handleGreeting(): string {
-  return (
-    'שלום! 😊 כאן Kids & Fun!\n\n' +
-    'במה אפשר לעזור?\n\n' +
-    '*1* — רישום לצהרון\n' +
-    '*2* — רישום לקייטנה\n' +
-    '*3* — ביטול\n' +
-    '*4* — שעות ולוח זמנים\n' +
-    '*5* — בדיקת תשלום\n' +
-    '*6* — איסוף מוקדם\n\n' +
-    'או פשוט כתוב/י מה צריך 💬'
+async function saveSession(
+  supabase: ReturnType<typeof createServiceClient>,
+  session: BotSession
+) {
+  await supabase.from('bot_sessions').upsert(
+    {
+      phone: session.phone,
+      session_data: session,
+      last_activity: new Date().toISOString(),
+    },
+    { onConflict: 'phone' }
   )
 }
 
-function handleRegistrationAfternoon(session: Session, text: string): string {
-  switch (session.step) {
-    case 0:
-      session.step = 1
-      session.currentFlow = 'רישום_צהרון'
-      return 'מעולה! 🎉 בשמחה נעזור ברישום לצהרון.\n\nמה שם הילד/ה?'
-    case 1:
-      session.collectedData.child_name = text
-      session.step = 2
-      return `נהדר! ${text} נשמע/ת מקסים/ה 😊\n\nבאיזו כיתה?`
-    case 2:
-      session.collectedData.class_name = text
-      session.step = 3
-      return 'מה מספר הטלפון שלך?'
-    case 3: {
-      session.collectedData.parent_phone = text
-      const summary =
-        `תודה! סיכום:\n👧 ילד/ה: ${session.collectedData.child_name}\n` +
-        `📚 כיתה: ${session.collectedData.class_name}\n📱 טלפון: ${text}\n\n` +
-        'לסיום הרישום, יש למלא את הטופס:\n👉 https://forms.example.com/register\n\n' +
-        'לאחר מילוי הטופס ניצור קשר לאישור 🌟'
-      clearSession(session.phone)
-      return summary
-    }
-    default:
-      clearSession(session.phone)
-      return handleGreeting()
+async function clearSession(
+  supabase: ReturnType<typeof createServiceClient>,
+  phone: string
+) {
+  await supabase.from('bot_sessions').delete().eq('phone', phone)
+}
+
+// ─── Parent lookup / create ────────────────────────────────────────────────────
+async function getOrCreateParent(
+  supabase: ReturnType<typeof createServiceClient>,
+  phone: string,
+  firstName?: string,
+  lastName?: string
+): Promise<{ id: string; name?: string }> {
+  const { data: existing } = await supabase
+    .from('parents')
+    .select('id, name')
+    .eq('phone', phone)
+    .single()
+
+  if (existing) return existing
+
+  const name = [firstName, lastName].filter(Boolean).join(' ') || undefined
+  const { data: created } = await supabase
+    .from('parents')
+    .insert({ phone, name })
+    .select('id, name')
+    .single()
+
+  return created ?? { id: 'unknown' }
+}
+
+// ─── Log conversation ──────────────────────────────────────────────────────────
+async function logConversation(
+  supabase: ReturnType<typeof createServiceClient>,
+  opts: {
+    phone: string
+    parentId?: string
+    direction: 'נכנס' | 'יוצא'
+    text: string
+    intent?: string
+    sessionId?: string
   }
+) {
+  await supabase.from('conversations').insert({
+    phone: opts.phone,
+    parent_id: opts.parentId ?? null,
+    platform: 'whatsapp',
+    direction: opts.direction,
+    message_text: opts.text,
+    intent: opts.intent ?? null,
+    handled_by: 'בוט',
+    session_id: opts.sessionId ?? null,
+  })
 }
 
-function handleCancellation(session: Session, text: string): string {
-  switch (session.step) {
-    case 0:
-      session.step = 1
-      session.currentFlow = 'ביטול'
-      return (
-        'מצטערים לשמוע 😔\n\n' +
-        'לפי התקנון:\n' +
-        '• ביטול עד ה-15 לחודש — זיכוי מלא\n' +
-        '• ביטול אחרי ה-15 — זיכוי חצי חודש הבא\n\n' +
-        'מה שם הילד/ה שברצונך לבטל?'
-      )
-    case 1:
-      session.collectedData.child_name = text
-      session.step = 2
-      return `מה סיבת הביטול של ${text}? (לא חובה 🙏)`
-    case 2: {
-      const childName = session.collectedData.child_name
-      clearSession(session.phone)
-      return (
-        'קיבלנו את הבקשה ✅\n\n' +
-        `ביטול עבור: ${childName}\n` +
-        'נציג יצור קשר תוך יום עסקים לאישור הסופי.\n\n' +
-        'אם יש שינוי — תמיד שמחים לראות אתכם! 💛'
-      )
-    }
-    default:
-      clearSession(session.phone)
-      return handleGreeting()
+// ─── Create task ───────────────────────────────────────────────────────────────
+async function createTask(
+  supabase: ReturnType<typeof createServiceClient>,
+  opts: {
+    parentId?: string
+    type: string
+    description: string
+    priority: TaskPriority
   }
+) {
+  await supabase.from('tasks').insert({
+    parent_id: opts.parentId ?? null,
+    type: toTaskType(opts.type),
+    description: opts.description,
+    priority: opts.priority,
+    status: 'פתוח',
+  })
 }
 
-function handleScheduleQuestion(): string {
-  return (
-    '📅 לוח זמנים — קיץ 2025\n\n' +
-    '• ראשון–חמישי: 07:00–18:00\n' +
-    '• שישי: סגור\n\n' +
-    '🏖️ חופשות קרובות:\n' +
-    '• ל"ג בעומר: 16.5\n' +
-    '• שבועות: 1–3.6\n\n' +
-    'לשאלות: 052-000-0000 📞'
-  )
-}
-
-function handlePaymentCheck(session: Session, text: string): string {
-  switch (session.step) {
-    case 0:
-      session.step = 1
-      session.currentFlow = 'בדיקת_תשלום'
-      return 'בשמחה! 💳\n\nמה שם ההורה או מספר הטלפון הרשום?'
-    case 1:
-      clearSession(session.phone)
-      return (
-        `✅ בדקנו את החשבון עבור: ${text}\n\n` +
-        'תשלום אחרון: שולם ב-01.05.2025\n' +
-        'תשלום הבא: 01.06.2025\n\n' +
-        'לעדכון פרטי תשלום: 052-000-0000 📞'
-      )
-    default:
-      clearSession(session.phone)
-      return handleGreeting()
-  }
-}
-
-function handlePaymentFailure(firstName?: string): string {
-  const name = firstName || 'שלום'
-  return (
-    `היי ${name}! 😊\n\n` +
-    'שמנו לב שהחיוב האחרון לא עבר.\n' +
-    'זה קורה — אין דאגות!\n\n' +
-    'לעדכון פרטי תשלום:\n' +
-    '👉 https://pay.example.com/update\n\n' +
-    'או: 052-000-0000 📞\n\n' +
-    'נשמח לעזור לסדר את זה מהר 💛'
-  )
-}
-
-function handleEarlyPickup(session: Session, text: string): string {
-  switch (session.step) {
-    case 0:
-      session.step = 1
-      session.currentFlow = 'איסוף_מוקדם'
-      return '🚗 איסוף מוקדם — בשמחה!\n\nמה שם הילד/ה ושעת האיסוף המבוקשת?'
-    case 1:
-      clearSession(session.phone)
-      return (
-        `רשמנו ✅\n${text}\n\n` +
-        'הצוות יתאם את האיסוף.\n' +
-        'אם יש שינוי — אנא עדכני שעה מראש 🙏'
-      )
-    default:
-      clearSession(session.phone)
-      return handleGreeting()
-  }
-}
-
-// ─── Main router ──────────────────────────────────────────────────────────────
-
-function routeMessage(
-  text: string,
-  session: Session,
-  firstName?: string
-): { reply: string; intent: BotIntent } {
-  if (session.currentFlow) {
-    switch (session.currentFlow) {
-      case 'רישום_צהרון':
-        return { reply: handleRegistrationAfternoon(session, text), intent: 'רישום_צהרון' }
-      case 'ביטול':
-        return { reply: handleCancellation(session, text), intent: 'ביטול' }
-      case 'בדיקת_תשלום':
-        return { reply: handlePaymentCheck(session, text), intent: 'בדיקת_תשלום' }
-      case 'איסוף_מוקדם':
-        return { reply: handleEarlyPickup(session, text), intent: 'איסוף_מוקדם' }
-    }
-  }
-
-  const intent = classifyIntent(text)
-
-  switch (intent) {
-    case 'רישום_צהרון':
-      return { reply: handleRegistrationAfternoon(session, text), intent }
-    case 'רישום_קייטנה':
-      return {
-        reply:
-          'רישום לקייטנה ☀️\n\nשלחי פרטים:\n• שם ילד/ה\n• כיתה\n• מספר טלפון\n\nהצוות יחזור אליך תוך יום עסקים 🌟',
-        intent,
-      }
-    case 'ביטול':
-      return { reply: handleCancellation(session, text), intent }
-    case 'שאלת_לוז':
-      return { reply: handleScheduleQuestion(), intent }
-    case 'בדיקת_תשלום':
-      return { reply: handlePaymentCheck(session, text), intent }
-    case 'כשל_תשלום':
-      return { reply: handlePaymentFailure(firstName), intent }
-    case 'איסוף_מוקדם':
-      return { reply: handleEarlyPickup(session, text), intent }
-    case 'רשימת_המתנה':
-      return {
-        reply:
-          'רשימת המתנה 📋\n\nהכניסינו אותך לרשימה!\nברגע שיתפנה מקום — תקבלי הודעה.\n\nשאלות: 052-000-0000 📞',
-        intent,
-      }
-    default:
-      return { reply: handleGreeting(), intent: 'שאלה_כללית' }
-  }
-}
-
-// ─── POST handler ─────────────────────────────────────────────────────────────
-
+// ─── POST ──────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   if (!isAuthorized(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -304,34 +178,89 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const phone = (body.phone as string) || (body.subscriber_phone as string) || ''
-  const messageText = (body.message as string) || (body.text as string) || ''
-  const firstName = (body.first_name as string) || undefined
+  const phone = ((body.phone ?? body.subscriber_phone ?? '') as string).trim()
+  const messageText = ((body.message ?? body.text ?? '') as string).trim()
+  const firstName = (body.first_name as string | undefined) ?? undefined
+  const lastName = (body.last_name as string | undefined) ?? undefined
 
   if (!phone || !messageText) {
     return NextResponse.json({ error: 'Missing phone or message' }, { status: 400 })
   }
 
-  const session = getSession(phone)
-  const { reply, intent } = routeMessage(messageText, session, firstName)
+  const supabase = createServiceClient()
 
-  // TODO: log to Supabase
-  // await supabase.from('conversations').insert({
-  //   phone, platform: 'whatsapp', direction: 'נכנס',
-  //   message_text: messageText, intent, handled_by: 'בוט',
-  // })
+  // 1. טעינת הורה
+  const parent = await getOrCreateParent(supabase, phone, firstName, lastName)
 
-  console.log(`[manychat-webhook] phone=${phone} intent=${intent}`)
+  // 2. טעינת session או יצירה חדשה
+  let session = await loadSession(supabase, phone)
+  if (!session) {
+    session = makeNewSession(phone, parent.id, parent.name)
+  } else {
+    // עדכן parentId + parentName בכל מקרה
+    session.parentId = parent.id
+    session.parentName = session.parentName || parent.name
+  }
 
-  return NextResponse.json({ reply, intent }, { status: 200 })
+  // 3. רישום ההודעה הנכנסת
+  await logConversation(supabase, {
+    phone,
+    parentId: parent.id,
+    direction: 'נכנס',
+    text: messageText,
+    sessionId: session.sessionId,
+  })
+
+  // 4. עיבוד ההודעה (async — כולל LLM fallback)
+  const result = await processMessage(session, messageText)
+
+  // 5. עדכון session לפי התוצאה
+  if (result.nextFlow) {
+    session.currentFlow = result.nextFlow
+  } else if (result.isComplete) {
+    session.currentFlow = undefined
+    session.collectedData = {}
+  }
+
+  // 6. שמירת / מחיקת session
+  if (result.isComplete && !result.nextFlow) {
+    await clearSession(supabase, phone)
+  } else {
+    await saveSession(supabase, session)
+  }
+
+  // 7. רישום תשובת הבוט
+  await logConversation(supabase, {
+    phone,
+    parentId: parent.id,
+    direction: 'יוצא',
+    text: result.text,
+    intent: result.intent,
+    sessionId: session.sessionId,
+  })
+
+  // 8. יצירת task אם נדרש
+  if (result.createTask) {
+    await createTask(supabase, {
+      parentId: parent.id,
+      type: result.createTask.type,
+      description: result.createTask.description,
+      priority: result.createTask.priority,
+    })
+  }
+
+  console.log(`[manychat] phone=${phone} intent=${result.intent} flow=${session.currentFlow ?? 'done'}`)
+
+  // 9. תשובה ל-ManyChat — שולח בחזרה { reply }
+  return NextResponse.json({ reply: result.text, intent: result.intent }, { status: 200 })
 }
 
-// ─── GET — health check ───────────────────────────────────────────────────────
+// ─── GET — health check ────────────────────────────────────────────────────────
 export async function GET() {
   return NextResponse.json({
     status: 'ok',
     endpoint: 'POST /api/webhooks/manychat',
     description: 'Kids & Fun WhatsApp bot webhook (ManyChat / uchat)',
-    version: '1.0.0',
+    version: '2.0.0',
   })
 }

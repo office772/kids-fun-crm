@@ -9,9 +9,13 @@ import { TaskList } from '@/components/dashboard/TaskList'
 import { StatusBadge } from '@/components/dashboard/StatusBadge'
 import { AddParentModal } from '@/components/dashboard/AddParentModal'
 import { BotContentManager } from '@/components/dashboard/BotContentManager'
+import { BotFAQManager } from '@/components/dashboard/BotFAQManager'
+import { BotAssets } from '@/components/dashboard/BotAssets'
 import { SystemSettings } from '@/components/dashboard/SystemSettings'
+import { RegistrationsList } from '@/components/dashboard/RegistrationsList'
+import { ParentDetail } from '@/components/dashboard/ParentDetail'
 
-type ActiveTab = 'overview' | 'parents' | 'tasks' | 'simulator' | 'bot'
+type ActiveTab = 'overview' | 'parents' | 'tasks' | 'registrations' | 'simulator' | 'bot' | 'assets'
 
 export default function DashboardPage() {
   const [parents, setParents] = useState<Parent[]>([])
@@ -23,6 +27,7 @@ export default function DashboardPage() {
   const [editingParent, setEditingParent] = useState<Parent | null>(null)
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [statusFilter, setStatusFilter] = useState<string>('הכל')
+  const [detailParentId, setDetailParentId] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
     try {
@@ -156,19 +161,20 @@ export default function DashboardPage() {
                 <h2 className="font-bold text-base mb-3" style={{ color: '#7d2d4a' }}>⚠️ התראות דחופות</h2>
                 <div className="grid gap-3 md:grid-cols-2">
                   {failedPayments.map(parent => (
-                    <div
+                    <button
                       key={parent.id}
-                      className="bg-white rounded-xl p-3 flex items-center justify-between shadow-sm border"
+                      className="bg-white rounded-xl p-3 flex items-center justify-between shadow-sm border w-full text-right hover:shadow-md transition-shadow"
                       style={{ borderColor: '#e8c4d0' }}
+                      onClick={() => setDetailParentId(parent.id)}
                     >
                       <div>
                         <p className="font-semibold" style={{ color: 'var(--crm-text)' }}>
                           {parent.name || parent.phone}
                         </p>
-                        <p className="text-sm" style={{ color: '#9d3d5e' }}>💳 כשל בתשלום — יצירת קשר נדרשת</p>
+                        <p className="text-sm" style={{ color: '#9d3d5e' }}>💳 כשל בתשלום — לחץ לפרטים</p>
                       </div>
                       <StatusBadge status="נכשל" size="sm" />
-                    </div>
+                    </button>
                   ))}
                   {urgentTasks
                     .filter(t => !failedPayments.find(p => p.id === t.parent_id))
@@ -385,9 +391,49 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* ── רישומים ───────────────────────────────────────────── */}
+        {activeTab === 'registrations' && (
+          <div className="space-y-6">
+            <div className="flex items-end justify-between">
+              <div>
+                <h1
+                  className="text-5xl font-bold leading-none mb-1"
+                  style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
+                >
+                  רישומים
+                </h1>
+                <p className="text-sm" style={{ color: 'var(--crm-text)', opacity: 0.6 }}>
+                  ניהול רישומים לצהרון ולקייטנה — שינוי סטטוס, אישור והכנסה לתור המתנה
+                </p>
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+              <RegistrationsList onOpenParent={id => setDetailParentId(id)} />
+            </div>
+          </div>
+        )}
+
         {/* ── ניהול בוט ─────────────────────────────────────────── */}
         {activeTab === 'bot' && (
           <BotManagementTab />
+        )}
+
+        {/* ── קבצים וקישורים ───────────────────────────────────── */}
+        {activeTab === 'assets' && (
+          <div className="space-y-6">
+            <div>
+              <h1
+                className="text-5xl font-bold leading-none mb-1"
+                style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
+              >
+                קבצים וקישורים
+              </h1>
+              <p className="text-sm" style={{ color: 'var(--crm-text)', opacity: 0.6 }}>
+                ניהול קישורים, קבצי PDF ותמונות שהבוט שולח
+              </p>
+            </div>
+            <BotAssets />
+          </div>
         )}
 
         {/* ── סימולטור ──────────────────────────────────────────── */}
@@ -426,6 +472,15 @@ export default function DashboardPage() {
           editParent={editingParent}
         />
       )}
+
+      {/* Parent detail slide-in */}
+      {detailParentId && (
+        <ParentDetail
+          parentId={detailParentId}
+          onClose={() => setDetailParentId(null)}
+          onRefresh={fetchData}
+        />
+      )}
     </div>
   )
 }
@@ -434,7 +489,7 @@ export default function DashboardPage() {
 // BotManagementTab
 // =========================================
 function BotManagementTab() {
-  const [subTab, setSubTab] = useState<'content' | 'settings'>('content')
+  const [subTab, setSubTab] = useState<'content' | 'faq' | 'settings'>('content')
 
   return (
     <div className="space-y-6">
@@ -467,6 +522,17 @@ function BotManagementTab() {
           💬 תכני הודעות
         </button>
         <button
+          onClick={() => setSubTab('faq')}
+          className="px-5 py-2 rounded-full text-sm font-semibold transition-all"
+          style={
+            subTab === 'faq'
+              ? { background: 'var(--crm-primary)', color: '#fff' }
+              : { background: '#fff', color: 'var(--crm-text)', border: '1px solid #e5e7eb', opacity: 0.7 }
+          }
+        >
+          ❓ שאלות ותשובות
+        </button>
+        <button
           onClick={() => setSubTab('settings')}
           className="px-5 py-2 rounded-full text-sm font-semibold transition-all"
           style={
@@ -482,6 +548,7 @@ function BotManagementTab() {
       {/* Content */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
         {subTab === 'content' && <BotContentManager />}
+        {subTab === 'faq' && <BotFAQManager />}
         {subTab === 'settings' && <SystemSettings />}
       </div>
     </div>
@@ -531,31 +598,61 @@ function StatCard({
 // BotSimulator (inline)
 // =========================================
 const FLOW_LABELS: Record<string, { label: string; emoji: string; steps: string[] }> = {
-  register_child_name: { label: 'רישום לצהרון', emoji: '🎒', steps: ['שם ילד/ה', 'כיתה', 'אישור'] },
-  register_class:      { label: 'רישום לצהרון', emoji: '🎒', steps: ['שם ילד/ה ✓', 'כיתה', 'אישור'] },
-  camp_late_name:      { label: 'קייטנה (אחרי סגירה)', emoji: '🏕️', steps: ['שם ילד/ה', 'כיתה', 'המתנה'] },
-  camp_late_class:     { label: 'קייטנה (אחרי סגירה)', emoji: '🏕️', steps: ['שם ילד/ה ✓', 'כיתה', 'המתנה'] },
+  // ── רישום לצהרון ──
+  register_child_name:    { label: 'רישום לצהרון',     emoji: '🎒', steps: ['שם ילד/ה', 'כיתה', 'מסגרת'] },
+  register_class:         { label: 'רישום לצהרון',     emoji: '🎒', steps: ['שם ✓', 'כיתה', 'מסגרת'] },
+  register_framework:     { label: 'רישום לצהרון',     emoji: '🎒', steps: ['שם ✓', 'כיתה ✓', 'מסגרת'] },
+  register_waiting_confirm: { label: 'רשימת המתנה',   emoji: '⏳', steps: ['אישור המתנה'] },
+  // ── ביטול ──
+  cancel_child:              { label: 'ביטול',          emoji: '❌', steps: ['שם ילד/ה', 'אישור'] },
+  cancel_confirm_before15:   { label: 'ביטול (לפני 15)', emoji: '❌', steps: ['אישור'] },
+  cancel_confirm_after15:    { label: 'ביטול (אחרי 15)', emoji: '❌', steps: ['אישור תקנון'] },
+  // ── קייטנה ──
+  camp_menu:             { label: 'קייטנה',             emoji: '🏕️', steps: ['בחירת תרחיש'] },
+  camp_check_name:       { label: 'בדיקת רישום קייטנה', emoji: '🔍', steps: ['שם ילד/ה', 'ת"ז'] },
+  camp_check_id:         { label: 'בדיקת רישום קייטנה', emoji: '🔍', steps: ['שם ✓', 'ת"ז'] },
+  camp_problem_desc:     { label: 'בעיה בהרשמה',        emoji: '⚠️', steps: ['תיאור הבעיה'] },
+  camp_late_name:        { label: 'קייטנה (אחרי סגירה)', emoji: '🏕️', steps: ['שם ילד/ה', 'כיתה'] },
+  camp_late_class:       { label: 'קייטנה (אחרי סגירה)', emoji: '🏕️', steps: ['שם ✓', 'כיתה'] },
+  // ── איסוף מוקדם ──
+  pickup_child:          { label: 'איסוף מוקדם',        emoji: '🚗', steps: ['שם ילד/ה', 'שעה', 'אוסף/ת'] },
+  pickup_time:           { label: 'איסוף מוקדם',        emoji: '🚗', steps: ['שם ✓', 'שעה', 'אוסף/ת'] },
+  pickup_collector:      { label: 'איסוף מוקדם',        emoji: '🚗', steps: ['שם ✓', 'שעה ✓', 'אוסף/ת'] },
+  // ── כשל תשלום ──
+  payment_fail_type:          { label: 'כשל תשלום',        emoji: '💳', steps: ['בחירת סוג', 'פרטים'] },
+  payment_fail_schedule_call: { label: 'תיאום שיחה',        emoji: '📞', steps: ['זמן מועדף'] },
+  payment_fail_method_choice: { label: 'שינוי אמצעי תשלום', emoji: '💳', steps: ['בחירת אמצעי'] },
+  payment_fail_new_date:      { label: 'שינוי תאריך חיוב',  emoji: '📅', steps: ['תאריך חדש'] },
+  payment_fail_remind_when:   { label: 'תזכורת לחזרה',      emoji: '🔔', steps: ['מתי לחזור'] },
+  payment_fail_describe:      { label: 'בעיית תשלום',        emoji: '💳', steps: ['תיאור הבעיה'] },
 }
 
 const INTENT_LABELS: Record<string, { label: string; color: string; bg: string }> = {
-  'רישום_צהרון':  { label: 'רישום צהרון', color: '#6D436D', bg: '#e8d5e8' },
-  'רישום_קייטנה': { label: 'רישום קייטנה', color: '#2A6B6B', bg: '#d5e8e8' },
-  'ביטול':        { label: 'ביטול', color: '#7d2d4a', bg: '#f5dde5' },
-  'שאלת_לוז':     { label: 'שאלת לו"ז', color: '#b45309', bg: '#fef3c7' },
-  'בדיקת_תשלום':  { label: 'תשלום', color: '#a05a4f', bg: '#fce9e6' },
-  'כשל_תשלום':    { label: 'כשל תשלום', color: '#7d2d4a', bg: '#f5dde5' },
-  'איסוף_מוקדם':  { label: 'איסוף מוקדם', color: '#854d0e', bg: '#fef9c3' },
-  'שאלה_כללית':   { label: 'ברכה כללית', color: '#78716c', bg: '#f5f5f4' },
-  'לא_ידוע':      { label: 'לא זוהה', color: '#9ca3af', bg: '#f9fafb' },
+  'רישום_צהרון':    { label: 'רישום צהרון',    color: '#6D436D', bg: '#e8d5e8' },
+  'רישום_קייטנה':  { label: 'רישום קייטנה',   color: '#2A6B6B', bg: '#d5e8e8' },
+  'ביטול':          { label: 'ביטול',           color: '#7d2d4a', bg: '#f5dde5' },
+  'שאלת_לוז':       { label: 'שאלת לו"ז',       color: '#b45309', bg: '#fef3c7' },
+  'בדיקת_תשלום':   { label: 'תשלום',            color: '#a05a4f', bg: '#fce9e6' },
+  'כשל_תשלום':     { label: 'כשל תשלום',        color: '#7d2d4a', bg: '#f5dde5' },
+  'כשל_תשלום_יזום':{ label: 'כשל תשלום (יזום)', color: '#7d2d4a', bg: '#f5dde5' },
+  'איסוף_מוקדם':   { label: 'איסוף מוקדם',      color: '#854d0e', bg: '#fef9c3' },
+  'בקשת_נציג':     { label: 'בקשת נציגה',       color: '#1d4ed8', bg: '#dbeafe' },
+  'רשימת_המתנה':   { label: 'רשימת המתנה',       color: '#6b7280', bg: '#f3f4f6' },
+  'שאלה_כללית':    { label: 'ברכה כללית',        color: '#78716c', bg: '#f5f5f4' },
+  'לא_ידוע':       { label: 'לא זוהה',           color: '#9ca3af', bg: '#f9fafb' },
 }
 
 const QUICK_TESTS = [
-  { label: 'רישום לצהרון', msg: 'אני רוצה לרשום את הילד לצהרון' },
-  { label: 'קייטנה', msg: 'מה עם הקייטנה בקיץ?' },
-  { label: 'ביטול', msg: 'אני רוצה לבטל' },
-  { label: 'שעות', msg: 'מה השעות שלכם?' },
-  { label: 'בעיה בתשלום', msg: 'יש לי בעיה עם התשלום' },
-  { label: 'איסוף מוקדם', msg: 'אני צריכה לאסוף מוקדם היום' },
+  { label: '1 — רישום צהרון',  msg: '1' },
+  { label: '2 — קייטנה',       msg: '2' },
+  { label: '3 — ביטול',        msg: '3' },
+  { label: '4 — שעות',         msg: '4' },
+  { label: '5 — תשלום',        msg: '5' },
+  { label: '6 — איסוף מוקדם', msg: '6' },
+  { label: 'כשל תשלום',        msg: 'יש לי בעיה עם התשלום' },
+  { label: 'כרטיס נכשל',       msg: 'הכרטיס שלי לא עבר' },
+  { label: 'שאלת חגים',        msg: 'אילו חגים יש השנה?' },
+  { label: 'לדבר עם נציגה',   msg: 'אני רוצה לדבר עם נציגה' },
 ]
 
 interface SimMessage {

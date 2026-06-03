@@ -8,8 +8,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json(parent)
   }
 
-  const { createClient } = await import('@/lib/supabase/server')
-  const supabase = await createClient()
+  const { createServiceClient } = await import("@/lib/supabase/server")
+  const supabase = createServiceClient()
   const { data, error } = await supabase
     .from('parents')
     .select('*, children(*), payments(*), tasks(*), registrations(*), conversations(*)')
@@ -48,8 +48,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json(DEMO_PARENTS[idx])
   }
 
-  const { createClient } = await import('@/lib/supabase/server')
-  const supabase = await createClient()
+  const { createServiceClient } = await import("@/lib/supabase/server")
+  const supabase = createServiceClient()
 
   const cleanPhone = phone?.replace(/\D/g, '').replace(/^0/, '972')
 
@@ -86,8 +86,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     return NextResponse.json({ success: true })
   }
 
-  const { createClient } = await import('@/lib/supabase/server')
-  const supabase = await createClient()
+  const { createServiceClient } = await import("@/lib/supabase/server")
+  const supabase = createServiceClient()
 
   const { error } = await supabase.from('parents').delete().eq('id', params.id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

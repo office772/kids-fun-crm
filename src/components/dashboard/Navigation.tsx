@@ -1,8 +1,9 @@
 'use client'
 
-import { LayoutDashboard, Users, ClipboardList, MessageSquare, Bot } from 'lucide-react'
+import { LayoutDashboard, Users, ClipboardList, MessageSquare, Bot, FileText, Settings, Link2 } from 'lucide-react'
+import Link from 'next/link'
 
-type ActiveTab = 'overview' | 'parents' | 'tasks' | 'simulator' | 'bot'
+type ActiveTab = 'overview' | 'parents' | 'tasks' | 'registrations' | 'simulator' | 'bot' | 'assets'
 
 interface NavLink {
   id: ActiveTab
@@ -18,9 +19,11 @@ interface Props {
 const navLinks: NavLink[] = [
   { id: 'overview', label: 'סקירה', icon: <LayoutDashboard size={18} /> },
   { id: 'parents', label: 'הורים', icon: <Users size={18} /> },
+  { id: 'registrations', label: 'רישומים', icon: <FileText size={18} /> },
   { id: 'tasks', label: 'פניות', icon: <ClipboardList size={18} /> },
-  { id: 'simulator', label: 'סימולטור', icon: <MessageSquare size={18} /> },
-  { id: 'bot', label: 'ניהול בוט', icon: <Bot size={18} /> },
+  { id: 'simulator', label: 'סימולטור',        icon: <MessageSquare size={18} /> },
+  { id: 'bot',       label: 'תוכן הבוט',       icon: <Bot size={18} /> },
+  { id: 'assets',    label: 'קבצים וקישורים',  icon: <Link2 size={18} /> },
 ]
 
 export function Navigation({ activeTab, onTabChange }: Props) {
@@ -70,12 +73,22 @@ export function Navigation({ activeTab, onTabChange }: Props) {
           })}
         </nav>
 
-        {/* Left: Date */}
-        <div
-          className="flex-shrink-0 text-sm text-right hidden sm:block"
-          style={{ color: 'var(--crm-text)', opacity: 0.6 }}
-        >
-          {today}
+        {/* Left: Date + Admin link */}
+        <div className="flex-shrink-0 flex items-center gap-4">
+          <Link
+            href="/admin"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all hover:bg-[#f5e6d8]"
+            style={{ color: 'var(--crm-text)', opacity: 0.75 }}
+          >
+            <Settings size={15} />
+            <span className="hidden sm:inline">פאנל ניהול</span>
+          </Link>
+          <div
+            className="text-sm text-right hidden sm:block"
+            style={{ color: 'var(--crm-text)', opacity: 0.6 }}
+          >
+            {today}
+          </div>
         </div>
       </div>
     </header>

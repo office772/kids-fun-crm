@@ -22,17 +22,24 @@ export async function POST(req: NextRequest) {
       phone: 'simulator',
       parentName: parentName || 'הורה לדוגמה',
       messages: [],
-      collectedData: {}
+      collectedData: {},
     }
 
-    const response = processMessage(session, message)
+    // processMessage הוא עכשיו async (LLM fallback)
+    const response = await processMessage(session, message)
 
     // עדכון session
     if (response.nextFlow) {
       session.currentFlow = response.nextFlow
     } else if (response.isComplete) {
       session.currentFlow = undefined
-      // שמירת נתונים שנאספו להצגה בסימולטור — לא מנקה אותם
+      // שמירת נתונים שנאספו להצגה בסימולטור — לא מנקה
+    }
+
+    // שמירת ההודעה בהיסטוריה (לcontext של LLM)
+    session.messages.push({ role: 'user', text: message, timestamp: new Date() })
+    if (response.text) {
+      session.messages.push({ role: 'bot', text: response.text, timestamp: new Date(), intent: response.intent })
     }
 
     simulatorSessions.set(sessionId, session)
@@ -46,7 +53,6 @@ export async function POST(req: NextRequest) {
       collectedData: session.collectedData || {},
       isComplete: response.isComplete || false,
     })
-
   } catch (error) {
     console.error('Simulator error:', error)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })

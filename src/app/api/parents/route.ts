@@ -18,8 +18,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(data)
   }
 
-  const { createClient } = await import('@/lib/supabase/server')
-  const supabase = await createClient()
+  const { createServiceClient } = await import("@/lib/supabase/server")
+  const supabase = createServiceClient()
 
   let query = supabase
     .from('parents')

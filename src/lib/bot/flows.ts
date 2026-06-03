@@ -1,302 +1,67 @@
-import { BotIntent, BotSession } from '@/lib/types'
+import { BotSession } from '@/lib/types'
+import {
+  createPayPlusPaymentLink,
+  getInvoiceLink,
+  formatBankTransferMessage,
+  loadParentRegistrationContext,
+  DEFAULT_MONTHLY_FEE,
+  type PaymentMethod,
+} from './payment-helpers'
 
 export interface BotResponse {
   text: string
-  escalate?: boolean       // האם להסלים לנציג אנושי
+  escalate?: boolean
   createTask?: {
     type: string
     description: string
     priority: 'דחוף' | 'גבוה' | 'רגיל'
   }
-  nextFlow?: string        // המסלול הבא לאחר תשובה זו
-  isComplete?: boolean     // האם המסלול הסתיים
+  nextFlow?: string
+  isComplete?: boolean
 }
 
 const BOT_NAME = 'Kids & Fun'
 
-// =========================================
-// בדיקת שעות פעילות
-// =========================================
+// ─── utils ────────────────────────────────────────────────────────────────────
 export function isBusinessHours(): boolean {
   const now = new Date()
-  const day = now.getDay() // 0=ראשון, 6=שבת
+  const day = now.getDay() // 0=ראשון
   const hour = now.getHours()
-
-  const businessDays = [0, 1, 2, 3, 4] // ראשון-חמישי
-  const startHour = 8
-  const endHour = 17
-
-  return businessDays.includes(day) && hour >= startHour && hour < endHour
+  return [0, 1, 2, 3, 4].includes(day) && hour >= 8 && hour < 17
 }
 
-// =========================================
-// מסלול 1: רישום לצהרון
-// =========================================
-export function handleRegistrationFlow(session: BotSession, userMessage: string): BotResponse {
-  const step = session.currentFlow
-
-  if (!step || step === 'register_start') {
-    return {
-      text: `היי ${session.parentName || 'שם'} 😊\n\nשמחים שאתם רוצים להצטרף אלינו!\n\nכדי לרשום את הילד/ה לצהרון, אני צריכה כמה פרטים קטנים:\n\n*מה שם הילד/ה?*`,
-      nextFlow: 'register_child_name'
-    }
-  }
-
-  if (step === 'register_child_name') {
-    session.collectedData.child_name = userMessage
-    return {
-      text: `תודה! *${userMessage}* — איזה שם יפה 💛\n\nבאיזו כיתה הילד/ה?`,
-      nextFlow: 'register_class'
-    }
-  }
-
-  if (step === 'register_class') {
-    session.collectedData.class_name = userMessage
-    const childName = session.collectedData.child_name || 'הילד/ה'
-    return {
-      text: `מצוין! כיתה *${userMessage}*.\n\nאני בודקת מקום פנוי... 🔍\n\nיש מקום! ✅\n\nשולחת לך קישור לטופס הרישום המלא. אחרי שתמלא/י, נאשר את ההרשמה ונשלח אישור.\n\n📋 *[קישור לטופס רישום]*\n\n*${childName}* יצטרף/תצטרף אלינו בקרוב! 🎉`,
-      isComplete: true,
-      createTask: {
-        type: 'שאלה כללית',
-        description: `בקשת רישום לצהרון — ${childName} כיתה ${userMessage}`,
-        priority: 'רגיל'
-      }
-    }
-  }
-
-  return { text: 'משהו השתבש, בוא/י נתחיל מחדש. מה שמך?' }
+function isYes(msg: string): boolean {
+  return /^(כן|אכן|בטח|כן בבקשה|רוצה|אוקי|ok|yes|מאשר|מאשרת|בסדר|טוב|ברור|בטח שכן|בהחלט)/i.test(msg.trim())
 }
 
-// =========================================
-// מסלול 3: ביטול לפי תקנון
-// =========================================
-export function handleCancellationFlow(session: BotSession): BotResponse {
-  const today = new Date().getDate()
-  const dayOfMonth = today
-
-  const policyText = `📋 *מדיניות ביטולים — Kids & Fun*\n\n` +
-    `• ביטול *עד ה-15 לחודש* ← זיכוי מלא, הילד/ה ממשיך/ה עד סוף החודש\n` +
-    `• ביטול *אחרי ה-15 לחודש* ← זיכוי לחצי חודש הבא\n\n`
-
-  if (dayOfMonth <= 15) {
-    return {
-      text: policyText +
-        `📅 היום ה-${dayOfMonth} לחודש — אתם *בתוך חלון הביטול*.\n\n` +
-        `כדי לאשר את הביטול, אני צריכה לדעת:\n*מאיזה תאריך תרצו להפסיק?*`,
-      createTask: {
-        type: 'ביטול חריג',
-        description: `בקשת ביטול — יום ${dayOfMonth} לחודש (בתוך תקנון)`,
-        priority: 'רגיל'
-      }
-    }
-  } else {
-    return {
-      text: policyText +
-        `📅 היום ה-${dayOfMonth} לחודש — הביטול הוא *אחרי ה-15*.\n\n` +
-        `לפי התקנון, תקבלו זיכוי לחצי חודש הבא.\n\n` +
-        `לביטולים חריגים (מעבר דירה, מקרה רפואי וכו') — ` +
-        `${isBusinessHours()
-          ? 'נציג שלנו יטפל בבקשתך בהקדם.'
-          : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00).'}`,
-      escalate: !isBusinessHours(),
-      createTask: {
-        type: 'ביטול חריג',
-        description: `בקשת ביטול — יום ${dayOfMonth} לחודש (חריג לתקנון)`,
-        priority: 'גבוה'
-      },
-      isComplete: true
-    }
-  }
+function isNo(msg: string): boolean {
+  return /^(לא|לא רוצה|לא תודה|no|אין צורך|לא עכשיו)/i.test(msg.trim())
 }
 
-// =========================================
-// מסלול 4/5: קייטנה
-// =========================================
-export function handleCampRegistrationFlow(): BotResponse {
-  const today = new Date()
-  const registrationDeadline = new Date(today.getFullYear(), 5, 1) // 1 יוני — לשנות לפי הצורך
-  const isBeforeDeadline = today < registrationDeadline
+const MENU_TEXT =
+  `*1* — רישום לצהרון\n` +
+  `*2* — רישום לקייטנה\n` +
+  `*3* — ביטול\n` +
+  `*4* — שעות ולוח זמנים\n` +
+  `*5* — תשלומים\n` +
+  `*6* — איסוף מוקדם`
 
-  if (isBeforeDeadline) {
-    return {
-      text: `🏕️ *רישום לקייטנה קיץ!*\n\n` +
-        `הרישום פתוח! 🎉\n\n` +
-        `תוכלו להירשם ולשלם ישירות דרך האתר שלנו:\n` +
-        `📲 *[קישור לרישום קייטנה]*\n\n` +
-        `יש בעיה בהרשמה? כתבו לנו ונסייע!`,
-      isComplete: true
-    }
-  } else {
-    return {
-      text: `🏕️ *קייטנה קיץ*\n\n` +
-        `מועד הרישום הרשמי נסגר 😔\n\n` +
-        `אבל לא נגיד לא לפני שבדקנו! 😊\n\n` +
-        `כדי שנבדוק אם יש מקום, אני צריכה:\n*שם מלא של הילד/ה?*`,
-      nextFlow: 'camp_late_name'
-    }
-  }
-}
 
-export function handleLateCampFlow(session: BotSession, userMessage: string): BotResponse {
-  const step = session.currentFlow
-
-  if (step === 'camp_late_name') {
-    return {
-      text: `${userMessage} — מה הכיתה?`,
-      nextFlow: 'camp_late_class'
-    }
-  }
-
-  if (step === 'camp_late_class') {
-    return {
-      text: `תודה! קיבלתי את הפרטים ✅\n\n` +
-        `אני בודקת אם יש מקום זמין ו*חוזרת אליך תוך יום עסקים*.\n\n` +
-        `${isBusinessHours()
-          ? 'ניצור קשר בהמשך היום!'
-          : 'ניצור קשר מחר בבוקר! 🌅'}`,
-      isComplete: true,
-      createTask: {
-        type: 'רישום מאוחר',
-        description: `בקשת רישום לקייטנה אחרי סגירת מועד — כיתה ${userMessage}`,
-        priority: 'גבוה'
-      }
-    }
-  }
-
-  return { text: 'בוא/י נתחיל מחדש. מה שם הילד/ה?' }
-}
-
-// =========================================
-// מסלול 6: שאלות לו"ז וחגים
-// =========================================
-export function handleScheduleFlow(message: string): BotResponse {
-  const lowerMsg = message.toLowerCase()
-
-  if (lowerMsg.includes('שעות') || lowerMsg.includes('מתי פתוח') || lowerMsg.includes('שעה')) {
-    return {
-      text: `⏰ *שעות פעילות הצהרון:*\n\n` +
-        `ראשון עד חמישי: 13:00 – 18:00\n` +
-        `שישי ושבת: סגור\n\n` +
-        `השעות עשויות להשתנות בחגים ובמיוחד בתקופת הקיץ.\n\n` +
-        `יש שאלה נוספת? 😊`,
-      isComplete: true
-    }
-  }
-
-  if (lowerMsg.includes('חג') || lowerMsg.includes('חגים')) {
-    return {
-      text: `📅 *ימי חג קרובים:*\n\n` +
-        `• שבועות — 2 ביוני (סגור)\n` +
-        `• ט' באב — 3 באוגוסט (סגור)\n` +
-        `• ראש השנה — 20-22 בספטמבר (סגור)\n` +
-        `• יום כיפור — 29 בספטמבר (סגור)\n\n` +
-        `לוח החגים המלא נשלח בתחילת כל שנה 📬\n\n` +
-        `יש שאלה נוספת?`,
-      isComplete: true
-    }
-  }
-
-  return {
-    text: `📋 *מידע על הצהרון:*\n\n` +
-      `ראשון-חמישי: 13:00 – 18:00\n\n` +
-      `לשאלות ספציפיות על לו"ז — ` +
-      `${isBusinessHours()
-        ? 'נציגה שלנו זמינה לענות!'
-        : 'נחזור אליך בשעות הפעילות 😊'}`,
-    isComplete: true
-  }
-}
-
-// =========================================
-// מסלול 5: איסוף מוקדם
-// =========================================
-export function handleEarlyPickupFlow(session: BotSession): BotResponse {
-  return {
-    text: `👋 *בקשת איסוף מוקדם*\n\n` +
-      `קיבלנו! כדי לאשר, אני צריכה:\n\n` +
-      `1️⃣ שם הילד/ה\n` +
-      `2️⃣ השעה המבוקשת\n` +
-      `3️⃣ שם האוסף/ת (אם לא הורה)\n\n` +
-      `תוכלו לשלוח הכל בהודעה אחת 😊`,
-    createTask: {
-      type: 'שאלה כללית',
-      description: 'בקשת איסוף מוקדם — לעדכון צוות',
-      priority: 'גבוה'
-    },
-    isComplete: true
-  }
-}
-
-// =========================================
-// מסלול 7א: כשל תשלום — פנייה מצד ההורה
-// =========================================
-export function handlePaymentFailureParentFlow(): BotResponse {
-  return {
-    text: `💳 *בעיית תשלום*\n\n` +
-      `היי! קיבלנו את פנייתך 💛\n\n` +
-      `${isBusinessHours()
-        ? 'נציגה שלנו תיצור איתך קשר טלפוני בהמשך היום לסיוע.'
-        : 'ניצור איתך קשר בבוקר הקרוב (8:00-17:00) לסיוע.'}\n\n` +
-      `בינתיים, האם :\n` +
-      `• *החלפת כרטיס אשראי?*\n` +
-      `• *תרצה/י לעבור לאמצעי תשלום אחר?* (צ'ק, מזומן, הוראת קבע)\n\n` +
-      `כתוב/י לנו ונסתדר יחד 😊`,
-    createTask: {
-      type: 'כשל תשלום',
-      description: 'הורה פנה על בעיית תשלום — יצירת קשר טלפוני נדרש',
-      priority: 'דחוף'
-    },
-    isComplete: true
-  }
-}
-
-// =========================================
-// מסלול 7ב: כשל תשלום — פנייה יזומה מהמערכת
-// =========================================
-export function buildProactivePaymentMessage(parentName: string): string {
-  const firstName = parentName.split(' ')[0] || parentName
-  return `היי ${firstName}, מה שלומך? הכל בסדר? 😊\n\n` +
-    `הבנק ניסה לחייב את הכרטיס שלך אבל לא הצלחנו.\n\n` +
-    `האם החלפת כרטיס אולי? 💳\n\n` +
-    `_אין דאגות — מטפלים ביחד!_`
-}
-
-// =========================================
-// בדיקת תשלום — סטטוס
-// =========================================
-export function handlePaymentStatusFlow(parentName?: string): BotResponse {
-  return {
-    text: `💰 *סטטוס תשלום*\n\n` +
-      `אני בודקת את הסטטוס שלך... 🔍\n\n` +
-      `לפרטים מדויקים על החשבון שלך, ` +
-      `${isBusinessHours()
-        ? 'נציגה שלנו יכולה לעזור.'
-        : 'נחזור אליך בשעות הפעילות.'}\n\n` +
-      `להסדרת תשלום עכשיו — שלח/י *"בעיה בתשלום"* ונעזור! 😊`,
-    isComplete: true
-  }
-}
-
-// =========================================
-// פתיחת שיחה — ברכה ותפריט
-// =========================================
+// ─── ברכה ─────────────────────────────────────────────────────────────────────
 export function buildWelcomeMessage(parentName?: string): string {
   const greeting = parentName ? `היי ${parentName.split(' ')[0]} 😊\n\n` : `שלום! 😊\n\n`
-
   return greeting +
     `כאן ${BOT_NAME}! איך אפשר לעזור?\n\n` +
-    `*1* — רישום לצהרון\n` +
-    `*2* — רישום לקייטנה\n` +
-    `*3* — ביטול\n` +
-    `*4* — שעות ולוח זמנים\n` +
-    `*5* — תשלומים\n` +
-    `*6* — איסוף מוקדם\n\n` +
-    `או פשוט כתוב/י מה צריך 💬`
+    MENU_TEXT +
+    `\n\nאו פשוט כתוב/י מה צריך 💬`
 }
 
-// =========================================
-// הסלמה לנציג
-// =========================================
+// ─── לא הבנתי ─────────────────────────────────────────────────────────────────
+export function buildDidNotUnderstand(): string {
+  return `לא הצלחתי להבין 😊\n\nאפשר לבחור מהתפריט:\n\n` + MENU_TEXT
+}
+
+// ─── הסלמה לנציג ─────────────────────────────────────────────────────────────
 export function buildEscalationMessage(): string {
   if (isBusinessHours()) {
     return `בוקר טוב! העברתי את פנייתך לנציגה שלנו — היא תחזור אליך בהקדם 💛`
@@ -304,12 +69,1254 @@ export function buildEscalationMessage(): string {
   return `קיבלתי! הפנייה שלך תועברת לנציגה בשעות הפעילות (ראשון-חמישי 8:00-17:00) 📬\n\nלילה טוב! 🌙`
 }
 
-// =========================================
-// הודעה חוץ לשעות
-// =========================================
-export function buildAfterHoursMessage(): string {
-  return `קיבלנו את פנייתך! 📬\n\n` +
-    `אנחנו פעילים ראשון-חמישי 8:00-17:00.\n` +
-    `ניחזור אליך בשעות הפעילות 💛\n\n` +
-    `שאלות שיכולות להמתין לשיחה — נשמח לעזור גם עכשיו! 😊`
+// ─── פנייה יזומה (מהמערכת) ───────────────────────────────────────────────────
+// זו ההודעה שהמערכת שולחת כשמזוהה כשל תשלום
+export function buildProactivePaymentMessage(parentName: string): string {
+  const firstName = parentName.split(' ')[0] || parentName
+  return `היי ${firstName}, מה שלומך? 😊\n\n` +
+    `הבנק ניסה לחייב אצלינו אבל הפעם לא הצלחנו לעבור.\n\n` +
+    `אין מה לדאוג — פשוט צריך לסדר את זה ביחד 💛\n\n` +
+    `האם החלפת כרטיס לאחרונה?\n` +
+    `*1* — כן, יש לי כרטיס חדש\n` +
+    `*2* — לא, תחזרו אלי קצת אחר כך\n` +
+    `*3* — יש בעיה אחרת`
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// מסלול 1: רישום לצהרון (async)
+// שלבים: אזור → שם ילד → כיתה → בדיקת מקום (Supabase) → טופס / רשימת המתנה
+// ═══════════════════════════════════════════════════════════════════════════════
+export async function handleRegistrationFlow(session: BotSession, userMessage: string): Promise<BotResponse> {
+  const step = session.currentFlow
+
+  // ─── שלב התחלה: שואלים על אזור ──────────────────────────────────────────
+  if (!step || step === 'register_start') {
+    return {
+      text:
+        `שמחים שאתם רוצים להצטרף למשפחת Kids & Fun! 🎉\n\n` +
+        `*לאיזה אזור מבקשים רישום לצהרון?*\n\n` +
+        `*1* — דרום השרון / חוף השרון\n` +
+        `*2* — חוף הכרמל\n` +
+        `*3* — גני ילדים תל אביב`,
+      nextFlow: 'register_area',
+    }
+  }
+
+  // ─── שלב אזור ────────────────────────────────────────────────────────────
+  if (step === 'register_area') {
+    const { areaFromMessage } = await import('./registration-helpers')
+    const area = areaFromMessage(userMessage)
+    if (!area) {
+      return {
+        text:
+          `לא הבנתי 😊 אנא בחרו:\n\n` +
+          `*1* — דרום השרון / חוף השרון\n` +
+          `*2* — חוף הכרמל\n` +
+          `*3* — גני ילדים תל אביב`,
+        nextFlow: 'register_area',
+      }
+    }
+    session.collectedData.area_code = area
+    return {
+      text: `מצוין! 💛\n\n*מה שם הילד/ה?* (שם פרטי + שם משפחה)`,
+      nextFlow: 'register_child_name',
+    }
+  }
+
+  // ─── שלב שם ילד ──────────────────────────────────────────────────────────
+  if (step === 'register_child_name') {
+    const trimmed = userMessage.trim()
+    const parts = trimmed.split(/\s+/)
+    if (parts.length < 2) {
+      return {
+        text: `אנא כתבו *שם פרטי ושם משפחה* ביחד (לדוגמה: נועה כהן) 😊`,
+        nextFlow: 'register_child_name',
+      }
+    }
+    session.collectedData.child_name = trimmed
+    return {
+      text: `שם יפה 😊\n\n*באיזו כיתה לומד/ת ${trimmed}?*\n_(לדוגמה: א׳, ב׳, גן חובה)_`,
+      nextFlow: 'register_class',
+    }
+  }
+
+  // ─── שלב כיתה + בדיקת קיבולת ─────────────────────────────────────────────
+  if (step === 'register_class') {
+    session.collectedData.class_name = userMessage
+    const childName = session.collectedData.child_name || 'הילד/ה'
+    const areaCode  = session.collectedData.area_code  || 'sharon'
+
+    const { checkCapacity, buildRegisterLink, AREAS } = await import('./registration-helpers')
+    const capacity = await checkCapacity(areaCode)
+    const areaLabel = AREAS[areaCode]?.label ?? areaCode
+
+    if (capacity.hasSpots) {
+      const formUrl = buildRegisterLink({
+        areaCode,
+        childName,
+        className: userMessage,
+        phone:     session.phone,
+      })
+      return {
+        text:
+          `בדקתי — *יש מקום* עבור ${childName} ב${areaLabel}! 🎉\n\n` +
+          `📋 *למילוי הטופס הרשמי:*\n${formUrl}\n\n` +
+          `לאחר מילוי הטופס יישלח אישור ופרטי תשלום 💌`,
+        isComplete: true,
+        createTask: {
+          type:        'רישום',
+          description: `בקשת רישום לצהרון — ${childName} כיתה ${userMessage} | אזור: ${areaLabel} | ממתין למילוי טופס`,
+          priority:    'רגיל',
+        },
+      }
+    } else {
+      return {
+        text:
+          `כרגע *אין מקום פנוי* לצהרון ב${areaLabel} 😔\n\n` +
+          `אבל לא הכל אבוד! אפשר להוסיף את *${childName}* לרשימת ההמתנה — ` +
+          `אתם מספר *${capacity.waitingListPosition}* ברשימה 💛\n\n` +
+          `ברגע שיתפנה מקום ניצור קשר.\n\n*להצטרף לרשימת ההמתנה?* (כן / לא)`,
+        nextFlow: 'register_waiting_confirm',
+      }
+    }
+  }
+
+  // ─── שלב אישור רשימת המתנה ────────────────────────────────────────────────
+  if (step === 'register_waiting_confirm') {
+    const childName = session.collectedData.child_name || 'הילד/ה'
+    const areaCode  = session.collectedData.area_code  || 'sharon'
+
+    if (isYes(userMessage)) {
+      // שמור ב-Supabase
+      try {
+        const { saveWaitingListEntry, AREAS } = await import('./registration-helpers')
+        const result = await saveWaitingListEntry({
+          phone:      session.phone,
+          parentName: session.parentName || '',
+          childName,
+          className:  session.collectedData.class_name || '',
+          areaCode,
+        })
+        const areaLabel = AREAS[areaCode]?.label ?? areaCode
+        return {
+          text:
+            `✅ *נוסף לרשימת ההמתנה!*\n\n` +
+            `*${childName}* ב${areaLabel} — מיקום *${result.position}* ברשימה 🌟\n\n` +
+            `ברגע שיתפנה מקום נצור קשר. תודה! 💛`,
+          isComplete: true,
+          createTask: {
+            type:        'רשימת המתנה',
+            description: `רשימת המתנה — ${childName} כיתה ${session.collectedData.class_name} | אזור: ${areaLabel} | מיקום ${result.position}`,
+            priority:    'רגיל',
+          },
+        }
+      } catch {
+        return {
+          text:
+            `✅ *נרשמת לרשימת ההמתנה!*\n\n` +
+            `ברגע שיתפנה מקום ל*${childName}* ניצור קשר 🌟`,
+          isComplete: true,
+        }
+      }
+    } else {
+      return {
+        text: `בסדר גמור 😊 אם תשנו דעתכם — כתבו לנו בכל עת!`,
+        isComplete: true,
+      }
+    }
+  }
+
+  return { text: '😊 כתבו *"רישום לצהרון"* להתחיל מחדש.' }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// מסלול 2: ביטול לפי תקנון
+// לפני 15: מאשרים אוטומטי + זיכוי מלא
+// אחרי 15: מודיעים על התקנון באופן סופי, אם ההורה מבקש חריג → הסלמה
+// ═══════════════════════════════════════════════════════════════════════════════
+export function handleCancellationFlow(session: BotSession, userMessage: string): BotResponse {
+  const step = session.currentFlow
+  const dayOfMonth = new Date().getDate()
+
+  if (!step || step === 'cancel_start') {
+    return {
+      text: `📋 *מדיניות ביטולים — Kids & Fun*\n\n` +
+        `• ביטול *עד ה-15 לחודש* — המשך עד סוף החודש + זיכוי מלא\n` +
+        `• ביטול *אחרי ה-15 לחודש* — ממשיכים חודש נוסף, ניתן להפסיק מהחודש שלאחריו\n\n` +
+        `כדי להמשיך — *מה שם הילד/ה* שתרצו לבטל?`,
+      nextFlow: 'cancel_child'
+    }
+  }
+
+  if (step === 'cancel_child') {
+    session.collectedData.child_name = userMessage
+
+    if (dayOfMonth <= 15) {
+      // לפני 15 — ביטול מאושר אוטומטית
+      return {
+        text: `📅 היום ה-${dayOfMonth} לחודש — אתם *בתוך חלון הביטול* ✅\n\n` +
+          `*${userMessage}* יכול/ה להמשיך עד סוף החודש הנוכחי.\n` +
+          `תקבלו זיכוי מלא לחודש הבא.\n\n` +
+          `*לאשר את הביטול?* (כן / לא)`,
+        nextFlow: 'cancel_confirm_before15'
+      }
+    } else {
+      // אחרי 15 — מידע ברור על התקנון, ללא שאלה פתוחה
+      return {
+        text: `📅 היום ה-${dayOfMonth} לחודש.\n\n` +
+          `לפי תקנון הצהרון, ביטול לאחר ה-15 — *ממשיכים חודש נוסף* ` +
+          `ומפסיקים מהחודש שלאחריו.\n\n` +
+          `*לאשר?* (כן / לא)\n\n` +
+          `_אם יש נסיבות מיוחדות — כתבו ואנחנו נבדוק_`,
+        nextFlow: 'cancel_confirm_after15'
+      }
+    }
+  }
+
+  // לפני 15 — אישור
+  if (step === 'cancel_confirm_before15') {
+    const childName = session.collectedData.child_name || 'הילד/ה'
+    if (isYes(userMessage)) {
+      return {
+        text: `✅ *הביטול אושר!*\n\n` +
+          `*${childName}* ממשיך/ה עד סוף החודש הנוכחי.\n` +
+          `הזיכוי יתקבל לחודש הבא 💛\n\n` +
+          `פנייה זו מתועדת. תודה!`,
+        isComplete: true,
+        createTask: {
+          type: 'ביטול',
+          description: `ביטול אושר — ${childName} (יום ${dayOfMonth}, לפני ה-15, זיכוי מלא)`,
+          priority: 'רגיל'
+        }
+      }
+    } else {
+      return {
+        text: `בסדר, הביטול *לא בוצע* 😊\nאם תרצו לחזור לנושא — כתבו לנו בכל עת!`,
+        isComplete: true
+      }
+    }
+  }
+
+  // אחרי 15 — אישור תקנון או בקשת חריג
+  if (step === 'cancel_confirm_after15') {
+    const childName = session.collectedData.child_name || 'הילד/ה'
+
+    // הורה מציין נסיבות מיוחדות → הסלמה לנציגה
+    if (/מחלה|רפואי|מעבר|חריג|נסיבות|בעיה|קשה|אי אפשר|לא יכול/i.test(userMessage)) {
+      return {
+        text: `מבינים לגמרי 💛\n\n` +
+          `מקרים כאלה מטופלים באופן אישי.\n\n` +
+          `${isBusinessHours()
+            ? 'נציגה שלנו תחזור אליך בהקדם לטיפול בבקשה.'
+            : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) 📬'}`,
+        isComplete: true,
+        createTask: {
+          type: 'ביטול חריג',
+          description: `ביטול חריג — ${childName} (יום ${dayOfMonth}, אחרי ה-15, טוען לנסיבות מיוחדות): "${userMessage.slice(0, 80)}"`,
+          priority: 'גבוה'
+        }
+      }
+    }
+
+    if (isYes(userMessage)) {
+      return {
+        text: `✅ *ביטול התקבל*\n\n` +
+          `*${childName}* ממשיך/ה חודש נוסף ומסיים/ת בסוף החודש הבא.\n\n` +
+          `תודה על ההודעה! פנייה זו מתועדת 💛`,
+        isComplete: true,
+        createTask: {
+          type: 'ביטול',
+          description: `ביטול לפי תקנון — ${childName} (יום ${dayOfMonth}, אחרי ה-15, ממשיך חודש נוסף)`,
+          priority: 'רגיל'
+        }
+      }
+    }
+
+    if (isNo(userMessage)) {
+      return {
+        text: `בסדר, הביטול *לא בוצע* 😊\n` +
+          `שמחים שאתם נשארים! אם תרצו לחזור לנושא — כתבו לנו.`,
+        isComplete: true
+      }
+    }
+
+    // תגובה לא ברורה
+    return {
+      text: `לא הבנתי 😊\n\nכדי לאשר את הביטול כתבו *"כן"*.\n` +
+        `כדי לבטל — כתבו *"לא"*.\n\n` +
+        `_אם יש נסיבות מיוחדות — פרטו ואנחנו נבדוק_`,
+      nextFlow: 'cancel_confirm_after15'
+    }
+  }
+
+  return { text: '😊 כתבו *"ביטול"* להתחיל מחדש.' }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// מסלול 3: קייטנה לפני סגירת רישום
+// 3 תרחישים: רישום חדש | בדיקת רישום קיים | בעיה בהרשמה
+// ═══════════════════════════════════════════════════════════════════════════════
+export function handleCampRegistrationFlow(): BotResponse {
+  const today = new Date()
+  const registrationDeadline = new Date(today.getFullYear(), 5, 1) // 1 יוני
+  const isBeforeDeadline = today < registrationDeadline
+
+  if (isBeforeDeadline) {
+    return {
+      text: `🏕️ *קייטנת קיץ — Kids & Fun!*\n\n` +
+        `הרישום פתוח! 🎉\n\n` +
+        `*מה תרצו?*\n` +
+        `*1* — לרשום ילד/ה לקייטנה\n` +
+        `*2* — לבדוק אם כבר נרשמתי\n` +
+        `*3* — יש לי בעיה בהרשמה`,
+      nextFlow: 'camp_menu'
+    }
+  } else {
+    // אחרי סגירת רישום — עוברים ל-handleLateCampFlow
+    return {
+      text: `🏕️ *מועד הרישום הרשמי נסגר* 😔\n\n` +
+        `אבל לא נגיד לא לפני שבדקנו! 😊\n\n` +
+        `*מה שם הילד/ה?*`,
+      nextFlow: 'camp_late_name'
+    }
+  }
+}
+
+// תת-מסלולים לקייטנה לפני סגירה
+export function handleCampMenuFlow(session: BotSession, userMessage: string): BotResponse {
+  const step = session.currentFlow
+
+  if (step === 'camp_menu') {
+    const msg = userMessage.trim()
+
+    // תרחיש 1: רישום חדש
+    if (msg === '1' || /לרשום|רישום|רוצה להירשם|רשמו/i.test(msg)) {
+      return {
+        text: `מצוין! 🎉\n\n` +
+          `הרישום מתבצע ישירות דרך האתר:\n` +
+          `📲 *[קישור לרישום קייטנה]*\n\n` +
+          `תהליך הרישום לוקח 5-10 דקות בלבד.\n\n` +
+          `יש בעיה בהרשמה? חזרו אלינו ונסייע 😊`,
+        isComplete: true
+      }
+    }
+
+    // תרחיש 2: בדיקת רישום קיים
+    if (msg === '2' || /לבדוק|כבר נרשם|האם נרשמ|רשום|נרשמתי|לא יודע|לא זוכר/i.test(msg)) {
+      return {
+        text: `בשמחה! נבדוק יחד 🔍\n\n*מה שם הילד/ה?*`,
+        nextFlow: 'camp_check_name'
+      }
+    }
+
+    // תרחיש 3: בעיה בהרשמה
+    if (msg === '3' || /בעיה|שגיאה|לא עובד|לא הצלחתי|נתקעתי|תקלה/i.test(msg)) {
+      return {
+        text: `אוי, כמה מבאס 😔\n\n*מה בדיוק קרה?* תפרטו ונעזור!`,
+        nextFlow: 'camp_problem_desc'
+      }
+    }
+
+    // לא הבין
+    return {
+      text: `לא הבנתי 😊 אנא בחרו:\n` +
+        `*1* — לרשום ילד/ה לקייטנה\n` +
+        `*2* — לבדוק אם כבר נרשמתי\n` +
+        `*3* — יש לי בעיה בהרשמה`,
+      nextFlow: 'camp_menu'
+    }
+  }
+
+  // תרחיש 2: בדיקת שם
+  if (step === 'camp_check_name') {
+    session.collectedData.child_name = userMessage
+    return {
+      text: `*${userMessage}* — *מספר תעודת זהות של הילד/ה?*\n(3-4 ספרות אחרונות מספיקות)`,
+      nextFlow: 'camp_check_id'
+    }
+  }
+
+  // תרחיש 2: בדיקת ת"ז + lookup
+  if (step === 'camp_check_id') {
+    session.collectedData.child_id = userMessage
+    const childName = session.collectedData.child_name || 'הילד/ה'
+    // TODO: בדיקה אמיתית מול Supabase (registrations table)
+    // כרגע — יוצרים task לנציגה לבדוק ולחזור
+    return {
+      text: `🔍 בודקת...\n\n` +
+        `נציגה שלנו תחזור אליך תוך שעה עם הסטטוס של *${childName}* 💛\n\n` +
+        `${!isBusinessHours() ? '_שעות פעילות: ראשון-חמישי 8:00-17:00_' : ''}`,
+      isComplete: true,
+      createTask: {
+        type: 'בדיקת רישום קייטנה',
+        description: `הורה מבקש לבדוק סטטוס רישום קייטנה — ${childName} (ת"ז: ${userMessage})`,
+        priority: 'גבוה'
+      }
+    }
+  }
+
+  // תרחיש 3: תיאור הבעיה
+  if (step === 'camp_problem_desc') {
+    const problem = userMessage
+    return {
+      text: `קיבלתי ✅\n\n` +
+        `${isBusinessHours()
+          ? 'נציגה שלנו תחזור אליך עם פתרון בהקדם!'
+          : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) לעזור!'}\n\n` +
+        `בינתיים — ניתן לנסות שוב דרך הקישור:\n📲 *[קישור לרישום קייטנה]*`,
+      isComplete: true,
+      createTask: {
+        type: 'בעיה בהרשמה לקייטנה',
+        description: `הורה מדווח על בעיה ברישום לקייטנה: "${problem.slice(0, 100)}"`,
+        priority: 'גבוה'
+      }
+    }
+  }
+
+  return { text: '😊 כתבו *"קייטנה"* להתחיל מחדש.' }
+}
+
+// ─── קייטנה אחרי סגירה ────────────────────────────────────────────────────────
+export function handleLateCampFlow(session: BotSession, userMessage: string): BotResponse {
+  const step = session.currentFlow
+
+  if (step === 'camp_late_name') {
+    session.collectedData.child_name = userMessage
+    return {
+      text: `*${userMessage}* — *כיתה/גיל?*`,
+      nextFlow: 'camp_late_class'
+    }
+  }
+
+  if (step === 'camp_late_class') {
+    session.collectedData.class_name = userMessage
+    const childName = session.collectedData.child_name || 'הילד/ה'
+    return {
+      text: `תודה! קיבלתי ✅\n\n` +
+        `אני בודקת אם יש מקום זמין עבור *${childName}* ו*חוזרת אליך תוך יום עסקים*.\n\n` +
+        `${isBusinessHours() ? 'ניצור קשר בהמשך היום!' : 'ניצור קשר מחר בבוקר! 🌅'}`,
+      isComplete: true,
+      createTask: {
+        type: 'רישום מאוחר לקייטנה',
+        description: `בקשת רישום לקייטנה אחרי סגירת מועד — ${childName} כיתה ${userMessage}`,
+        priority: 'גבוה'
+      }
+    }
+  }
+
+  return { text: '😊 כתבו *"קייטנה"* להתחיל מחדש.' }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// מסלול 4: שאלות לוח זמנים וחגים
+// TODO: לקרוא נתונים מ-Supabase calendar_events במקום hardcoded
+// ═══════════════════════════════════════════════════════════════════════════════
+export function handleScheduleFlow(message: string): BotResponse {
+  const lowerMsg = message.toLowerCase()
+
+  if (lowerMsg.includes('שעות') || lowerMsg.includes('מתי פתוח') || lowerMsg.includes('שעה') || lowerMsg.includes('פתוח')) {
+    return {
+      text: `⏰ *שעות פעילות הצהרון:*\n\n` +
+        `ראשון עד חמישי: *13:00 – 18:00*\n` +
+        `שישי ושבת: סגור\n\n` +
+        `⚠️ השעות עשויות להשתנות בחגים ובתקופת הקיץ.\n\n` +
+        `יש שאלה נוספת? 😊`,
+      isComplete: true
+    }
+  }
+
+  if (lowerMsg.includes('חג') || lowerMsg.includes('חגים') || lowerMsg.includes('סגור')) {
+    return {
+      text: `📅 *ימי חג — הצהרון סגור:*\n\n` +
+        `• שבועות — ב׳ סיון\n` +
+        `• ט׳ באב\n` +
+        `• ראש השנה — ב׳ ימים\n` +
+        `• יום כיפור\n` +
+        `• סוכות — א׳ וחול המועד\n` +
+        `• שמחת תורה\n` +
+        `• פסח — א׳ ושביעי + חול המועד\n` +
+        `• יום העצמאות\n\n` +
+        `לוח החגים המלא נשלח בתחילת כל שנת לימודים 📬\n\n` +
+        `יש שאלה ספציפית? 😊`,
+      isComplete: true
+    }
+  }
+
+  if (lowerMsg.includes('חופש') || lowerMsg.includes('קיץ')) {
+    return {
+      text: `🏖️ *חופשות:*\n\n` +
+        `• *חופש קיץ* (יולי-אוגוסט) — פעילות קייטנה בלבד\n` +
+        `• *חנוכה* — 3-4 ימי חופש (לפי לוח)\n` +
+        `• *פסח* — שבוע חופש מלא\n\n` +
+        `פרטים מלאים נשלחים בעדכון חודשי 💛`,
+      isComplete: true
+    }
+  }
+
+  return {
+    text: `📋 *מידע על הצהרון:*\n\n` +
+      `ראשון-חמישי: 13:00 – 18:00\n\n` +
+      `לשאלות ספציפיות כתבו:\n` +
+      `• *"שעות"* — שעות פעילות\n` +
+      `• *"חגים"* — לוח חגים\n` +
+      `• *"חופש"* — חופשות\n\n` +
+      `${isBusinessHours() ? 'נציגה שלנו זמינה לעזור! 😊' : 'נחזור אליך בשעות הפעילות 😊'}`,
+    isComplete: true
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// מסלול 6: איסוף מוקדם
+// שלבים: שם ילד → שעה → שם האוסף/ת → אישור
+// ═══════════════════════════════════════════════════════════════════════════════
+export function handleEarlyPickupFlow(session: BotSession, userMessage: string): BotResponse {
+  const step = session.currentFlow
+
+  if (!step || step === 'pickup_start') {
+    return {
+      text: `👋 *בקשת איסוף מוקדם*\n\n*מה שם הילד/ה* שתרצו לאסוף?`,
+      nextFlow: 'pickup_child'
+    }
+  }
+
+  if (step === 'pickup_child') {
+    session.collectedData.child_name = userMessage
+    return {
+      text: `*${userMessage}* — *באיזו שעה* תרצו לאסוף?`,
+      nextFlow: 'pickup_time'
+    }
+  }
+
+  if (step === 'pickup_time') {
+    session.collectedData.pickup_time = userMessage
+    return {
+      text: `שעה *${userMessage}* ✅\n\n*מי יאסוף?*\n(שם + קרבה, למשל: "אבא דני" / "סבתא שרה")`,
+      nextFlow: 'pickup_collector'
+    }
+  }
+
+  if (step === 'pickup_collector') {
+    session.collectedData.collector_name = userMessage
+    const childName = session.collectedData.child_name || '?'
+    const time = session.collectedData.pickup_time || '?'
+
+    return {
+      text: `✅ *בקשת האיסוף התקבלה!*\n\n` +
+        `👧 ילד/ה: *${childName}*\n` +
+        `⏰ שעה: *${time}*\n` +
+        `🚗 אוסף/ת: *${userMessage}*\n\n` +
+        `הצוות עודכן ויהיה מוכן 😊`,
+      isComplete: true,
+      createTask: {
+        type: 'איסוף מוקדם',
+        description: `איסוף מוקדם — ${childName} בשעה ${time} ע"י ${userMessage}`,
+        priority: 'גבוה'
+      }
+    }
+  }
+
+  return { text: '😊 כתבו *"איסוף מוקדם"* להתחיל מחדש.' }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// מסלול 5: בדיקת סטטוס תשלום (כניסה ראשונה)
+// מציג אפשרויות ומכניס למסלול הסדרת תשלום אם צריך
+// ═══════════════════════════════════════════════════════════════════════════════
+export function handlePaymentStatusFlow(parentName?: string): BotResponse {
+  const firstName = parentName ? parentName.split(' ')[0] : ''
+  return {
+    text:
+      `💰 *תשלומים — Kids & Fun*\n\n` +
+      `${firstName ? `היי ${firstName}! ` : ''}על מה תרצו לשאול?\n\n` +
+      `*1* — סטטוס התשלום שלי\n` +
+      `*2* — לשנות שיטת תשלום\n` +
+      `*3* — לא עבר תשלום / בעיה\n` +
+      `*4* — מה העלות החודשית?`,
+    nextFlow: 'payment_status_menu',
+  }
+}
+
+export async function handlePaymentStatusMenuFlow(
+  session: BotSession,
+  userMessage: string
+): Promise<BotResponse> {
+  const msg = userMessage.trim()
+
+  // בחירה 1 — סטטוס
+  if (msg === '1' || /סטטוס|בדוק|כמה חייב|מה שילמתי|שולם/i.test(msg)) {
+    return {
+      text:
+        `🔍 *בדיקת סטטוס תשלום*\n\n` +
+        `${isBusinessHours()
+          ? 'נציגה שלנו תבדוק את החשבון ותחזור אליך מיד 😊'
+          : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) עם הפרטים 💛'}`,
+      isComplete: true,
+      createTask: {
+        type:        'שאלה כללית',
+        description: `הורה מבקש לבדוק סטטוס תשלום — ${session.parentName ?? session.phone}`,
+        priority:    'רגיל',
+      },
+    }
+  }
+
+  // בחירה 2 — שינוי שיטת תשלום → מסלול אפשרויות תשלום
+  if (msg === '2' || /שיטה|לשנות|אמצעי|אחרת|אחר/i.test(msg)) {
+    session.collectedData.payment_setup_reason = 'method_change'
+    return {
+      text:
+        `*שינוי שיטת תשלום* — נשמח לעזור! 💛\n\n` +
+        `*באיזו שיטה הייתם רוצים להמשיך?*\n\n` +
+        `*1* — 💳 כרטיס אשראי (PayPlus)\n` +
+        `*2* — 🏦 הוראת קבע (PayPlus)\n` +
+        `*3* — 💵 מזומן\n` +
+        `*4* — 📝 צ׳קים\n` +
+        `*5* — 🏛️ העברה בנקאית`,
+      nextFlow: 'payment_setup_method',
+    }
+  }
+
+  // בחירה 3 — בעיה / כשל → מסלול כשל תשלום הקיים
+  if (msg === '3' || /בעיה|כשל|לא עבר|נכשל|נדחה/i.test(msg)) {
+    session.currentFlow = 'payment_fail_start'
+    return handlePaymentFailureParentFlow(session, userMessage)
+  }
+
+  // בחירה 4 — עלות → תפריט עלויות מפורט
+  if (msg === '4' || /עלות|מחיר|כמה עולה|כמה זה|עלה|עלות חודשית/i.test(msg)) {
+    return {
+      text:
+        `💰 *שאלות עלות — Kids & Fun*\n\n` +
+        `על מה תרצו לדעת?\n\n` +
+        `*1* — 📅 עלות חודשית צהרון\n` +
+        `*2* — ☀️ תשלום מראש לקייטנה\n` +
+        `*3* — 👨‍👩‍👧‍👦 הנחת אחים / אחיות\n` +
+        `*4* — 💬 שאלה אחרת על עלות`,
+      nextFlow: 'cost_info_start',
+    }
+  }
+
+  // לא הבין
+  return {
+    text:
+      `לא הבנתי 😊\n\n` +
+      `*1* — סטטוס התשלום שלי\n` +
+      `*2* — לשנות שיטת תשלום\n` +
+      `*3* — לא עבר תשלום / בעיה\n` +
+      `*4* — מה העלות החודשית?`,
+    nextFlow: 'payment_status_menu',
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// מסלול עלויות: תפריט שאלות על עלות (ללא העברה לנציגה)
+// ═══════════════════════════════════════════════════════════════════════════════
+export async function handleCostInfoFlow(
+  session: BotSession,
+  userMessage: string
+): Promise<BotResponse> {
+  const msg       = userMessage.trim()
+  const areaLabel = session.collectedData.area_label ?? ''
+  const amount    = session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE)
+
+  // ─── 1. עלות חודשית צהרון ──────────────────────────────────────────────────
+  if (msg === '1' || /חודשי|צהרון|ירחי|חודש|עלות/i.test(msg)) {
+    const areaInfo = areaLabel
+      ? `באזור *${areaLabel}*`
+      : 'בהתאם לאזור המגורים'
+
+    return {
+      text:
+        `📅 *עלות חודשית צהרון — Kids & Fun*\n\n` +
+        `העלות החודשית ${areaInfo} היא *${amount}₪* (כולל מע"מ).\n\n` +
+        `*כולל:*\n` +
+        `✅ ליווי מקצועי ראשון-חמישי\n` +
+        `✅ ארוחת צהריים וחטיפים\n` +
+        `✅ פעילויות חינוכיות\n\n` +
+        `התשלום מתבצע בתחילת כל חודש.\n\n` +
+        `רוצים להסדיר תשלום? כתבו *"תשלום"* 💳`,
+      isComplete: true,
+    }
+  }
+
+  // ─── 2. קייטנה — תשלום מראש ─────────────────────────────────────────────────
+  if (msg === '2' || /קייטנה|קיץ|קיטנה|גיני|קמפ/i.test(msg)) {
+    return {
+      text:
+        `☀️ *קייטנה קיץ — Kids & Fun*\n\n` +
+        `הקייטנה משולמת *מראש במלואה* בעת הרישום.\n\n` +
+        `*מחיר הקייטנה:* החל מ-*1,200₪* (תלוי בתוכנית ומשך).\n\n` +
+        `*כולל:*\n` +
+        `✅ פעילויות יומיות מגוונות\n` +
+        `✅ טיולים שבועיים\n` +
+        `✅ ארוחות כלולות\n\n` +
+        `_פרטים מלאים ועלות מדויקת — צרו קשר לרישום_ 💛`,
+      isComplete: true,
+    }
+  }
+
+  // ─── 3. הנחת אחים ──────────────────────────────────────────────────────────
+  if (msg === '3' || /אחים|אחיות|הנחה|שני ילדים|שניים|יותר מ/i.test(msg)) {
+    return {
+      text:
+        `👨‍👩‍👧‍👦 *הנחת אחים — Kids & Fun*\n\n` +
+        `מ-2 ילדים ומעלה מאותה משפחה:\n\n` +
+        `✅ *ילד ראשון* — מחיר מלא\n` +
+        `✅ *ילד שני ואילך* — *הנחה של 10%*\n\n` +
+        `ההנחה מחושבת אוטומטית בעת הרישום.\n\n` +
+        `_לרישום ילד נוסף — כתבו "רישום" ונתחיל_ 🎒`,
+      isComplete: true,
+    }
+  }
+
+  // ─── 4. שאלה אחרת — LLM (לא נציגה!) ────────────────────────────────────────
+  if (msg === '4' || /אחר|אחרת|שאלה|אחרות/i.test(msg)) {
+    return {
+      text:
+        `💬 *שאלות נוספות על עלות*\n\n` +
+        `כתבו את שאלתכם בחופשיות — אנסה לענות! 😊\n\n` +
+        `_לדוגמה: "יש הנחה לחד הורי?" / "מה אם ביטלנו באמצע חודש?"_`,
+      nextFlow: 'cost_info_freetext',
+    }
+  }
+
+  // ─── מצב free text — ענה עם LLM ──────────────────────────────────────────
+  if (session.currentFlow === 'cost_info_freetext') {
+    // ממשיך ל-LLM fallback ב-handler
+    return {
+      text: '',  // marker — handler יפעיל LLM
+      escalate: false,
+    }
+  }
+
+  // ─── לא הבין ────────────────────────────────────────────────────────────────
+  return {
+    text:
+      `לא הבנתי 😊\n\n` +
+      `*1* — 📅 עלות חודשית צהרון\n` +
+      `*2* — ☀️ תשלום מראש לקייטנה\n` +
+      `*3* — 👨‍👩‍👧‍👦 הנחת אחים / אחיות\n` +
+      `*4* — 💬 שאלה אחרת`,
+    nextFlow: 'cost_info_start',
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// מסלול 7א + 7ב: כשל תשלום
+//
+// 7א — ההורה פונה מיוזמתו ("לא עבר לי תשלום")
+// 7ב — המערכת שלחה הודעה יזומה וההורה מגיב
+//
+// ⚠️ אסור לאסוף פרטי כרטיס אשראי דרך WhatsApp!
+//     הבוט רק מתאם שיחה עם נציגה או מתזמן תזכורת CRM.
+// ═══════════════════════════════════════════════════════════════════════════════
+export function handlePaymentFailureParentFlow(session: BotSession, userMessage: string): BotResponse {
+  const step = session.currentFlow
+
+  // ─── פתיחה — טון חם ולא מלחיץ ────────────────────────────────────────────
+  if (!step || step === 'payment_fail_start') {
+    const firstName = session.parentName ? session.parentName.split(' ')[0] : ''
+    return {
+      text: `היי${firstName ? ' ' + firstName : ''}! 😊\n\n` +
+        `שם לב שהיתה בעיה בתשלום — אין מה לדאוג, מטפלים ביחד 💛\n\n` +
+        `*מה המצב?*\n\n` +
+        `*1* — החלפתי כרטיס, יש לי פרטים חדשים\n` +
+        `*2* — רוצה לעבור לאמצעי תשלום אחר\n` +
+        `*3* — רוצה לשנות את תאריך החיוב\n` +
+        `*4* — עוד לא מסודר, תחזרו אלי בעוד כמה ימים\n` +
+        `*5* — אחר`,
+      nextFlow: 'payment_fail_type'
+    }
+  }
+
+  // ─── סיווג הבחירה ─────────────────────────────────────────────────────────
+  if (step === 'payment_fail_type') {
+    const msg = userMessage.trim()
+
+    // ענף 1: כרטיס חדש — לא לקחת פרטים! רק לתאם שיחה
+    if (msg === '1' || /הוחלף|כרטיס חדש|פרטים חדשים|החלפתי|אשראי חדש/i.test(msg)) {
+      return {
+        text: `מצוין! 💳\n\n` +
+          `נציגה שלנו תתקשר לקחת את הפרטים החדשים בצורה מאובטחת.\n\n` +
+          `*מתי נוח לך לשיחה קצרה?*\n` +
+          `(לדוגמה: "היום בין 14-16", "מחר בבוקר", "עכשיו")`,
+        nextFlow: 'payment_fail_schedule_call',
+        createTask: {
+          type: 'כשל תשלום',
+          description: `הורה מדווח על החלפת כרטיס — ממתין לתיאום שיחה לעדכון פרטים`,
+          priority: 'דחוף'
+        }
+      }
+    }
+
+    // ענף 2: אמצעי תשלום אחר
+    if (msg === '2' || /אמצעי אחר|שיטה אחרת|מזומן|שיק|צ.?ק|העברה|בנק|הוראת קבע|לשנות שיטה/i.test(msg)) {
+      return {
+        text: `*אפשרויות תשלום:*\n\n` +
+          `• 🏦 *הוראת קבע* — חיוב אוטומטי בתאריך קבוע\n` +
+          `• 💳 *אשראי* — חיוב חודשי\n` +
+          `• 💵 *מזומן* — בתחילת כל חודש\n` +
+          `• 📝 *צ׳קים* — מראש\n` +
+          `• 🏛️ *העברה בנקאית*\n\n` +
+          `*מה מתאים לך?*`,
+        nextFlow: 'payment_fail_method_choice',
+        createTask: {
+          type: 'כשל תשלום',
+          description: `הורה מבקש לשנות אמצעי תשלום — ממתין לבחירה`,
+          priority: 'גבוה'
+        }
+      }
+    }
+
+    // ענף 3: שינוי תאריך חיוב
+    if (msg === '3' || /תאריך|מועד|לא מתאים|להזיז|לשנות תאריך/i.test(msg)) {
+      return {
+        text: `בטח! *איזה תאריך בחודש* יתאים לך לחיוב?\n` +
+          `(לדוגמה: ה-1, ה-5, ה-10, ה-15...)`,
+        nextFlow: 'payment_fail_new_date',
+        createTask: {
+          type: 'כשל תשלום',
+          description: `הורה מבקש לשנות תאריך חיוב חודשי`,
+          priority: 'רגיל'
+        }
+      }
+    }
+
+    // ענף 4: תחזרו בעוד X ימים
+    if (msg === '4' || /עוד|ימים|שבוע|אחר כך|אחרי|לא עכשיו|תחזרו|מאוחר יותר/i.test(msg)) {
+      return {
+        text: `בסדר גמור 😊\n\n*מתי לחזור אליך?*\n(לדוגמה: "עוד 3 ימים", "בשבוע הבא", "ב-25 לחודש")`,
+        nextFlow: 'payment_fail_remind_when',
+        createTask: {
+          type: 'כשל תשלום',
+          description: `הורה ביקש לחזור אליו מאוחר יותר — ממתין לתאריך`,
+          priority: 'רגיל'
+        }
+      }
+    }
+
+    // ענף 5: אחר / לא ברור
+    return {
+      text: `מבינים 💛\n\n` +
+        `*ספר/י לי מה קורה* ואנחנו נמצא פתרון ביחד:`,
+      nextFlow: 'payment_fail_describe'
+    }
+  }
+
+  // ─── תיאום שיחה ─────────────────────────────────────────────────────────────
+  if (step === 'payment_fail_schedule_call') {
+    return {
+      text: `✅ *קיבלתי!*\n\n` +
+        `נציגה שלנו תתקשר אליך *${userMessage}* לסיים את עדכון הפרטים.\n\n` +
+        `תודה על הסבלנות 💛`,
+      isComplete: true,
+      createTask: {
+        type: 'כשל תשלום',
+        description: `תאום שיחה לעדכון כרטיס — זמן מועדף: "${userMessage}"`,
+        priority: 'דחוף'
+      }
+    }
+  }
+
+  // ─── בחירת אמצעי תשלום ───────────────────────────────────────────────────
+  if (step === 'payment_fail_method_choice') {
+    return {
+      text: `✅ *קיבלתי — ${userMessage}*\n\n` +
+        `נציגה שלנו תחזור אליך לסיים את ההסדרה.\n\n` +
+        `${isBusinessHours() ? 'נחזור אליך היום!' : 'נחזור אליך בשעות הפעילות 😊'}`,
+      isComplete: true,
+      createTask: {
+        type: 'כשל תשלום',
+        description: `שינוי אמצעי תשלום — הורה בחר: "${userMessage}"`,
+        priority: 'גבוה'
+      }
+    }
+  }
+
+  // ─── שינוי תאריך חיוב ────────────────────────────────────────────────────
+  if (step === 'payment_fail_new_date') {
+    return {
+      text: `✅ *רשמנו — תאריך ${userMessage}*\n\n` +
+        `הבקשה הועברה לנציגה לאישור ועדכון.\n` +
+        `${isBusinessHours() ? 'נאשר בהמשך היום!' : 'נאשר בבוקר הקרוב 😊'}`,
+      isComplete: true,
+      createTask: {
+        type: 'כשל תשלום',
+        description: `שינוי תאריך חיוב חודשי — תאריך מבוקש: ${userMessage}`,
+        priority: 'רגיל'
+      }
+    }
+  }
+
+  // ─── תזכורת CRM — "תחזרו בעוד X ימים" ──────────────────────────────────
+  if (step === 'payment_fail_remind_when') {
+    return {
+      text: `👍 *קיבלתי!*\n\nניצור איתך קשר *${userMessage}*.\n\n` +
+        `אם תרצה/י לסדר לפני כן — כתוב/י לנו בכל עת 😊`,
+      isComplete: true,
+      createTask: {
+        type: 'תזכורת כשל תשלום',
+        description: `הורה ביקש לחזור אליו: "${userMessage}" — ליצור קשר ולסדר תשלום`,
+        priority: 'גבוה'
+      }
+    }
+  }
+
+  // ─── תיאור חופשי של הבעיה ────────────────────────────────────────────────
+  if (step === 'payment_fail_describe') {
+    return {
+      text: `תודה שפירטת 💛\n\n` +
+        `${isBusinessHours()
+          ? 'נציגה שלנו תחזור אליך בהקדם לטפל בבקשה.'
+          : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) 📬'}`,
+      isComplete: true,
+      createTask: {
+        type: 'כשל תשלום',
+        description: `בעיית תשלום לא מוגדרת — "${userMessage.slice(0, 120)}"`,
+        priority: 'דחוף'
+      }
+    }
+  }
+
+  return { text: '😊 כתבו *"בעיה בתשלום"* להתחיל מחדש.' }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// מסלול חדש: הסדרת תשלום — אפשרויות תשלום חלופיות
+//
+// נכנסים מ-3 נקודות:
+//   א) הורה שואל על שיטות תשלום (כוונה: אפשרויות_תשלום)
+//   ב) הורה קיבל הצעת מקום מרשימת המתנה ואישר
+//   ג) שינוי שיטת תשלום ממסלול 5
+//
+// שלבים:
+//   payment_setup_start   → תפריט שיטות תשלום
+//   payment_setup_method  → עיבוד בחירה
+//   payment_setup_checks  → כמה צ׳קים? (רק אם בחרו צ׳קים)
+//
+// 💳 אשראי / הוראת קבע: קריאה ל-PayPlus → שליחת קישור
+// 💵 מזומן / 📝 צ׳קים / 🏛️ העברה: יצירת task לנציגה + הוראות
+// 🔗 חשבונית ירוקה: קישור מ-bot_assets → שליחה
+// ═══════════════════════════════════════════════════════════════════════════════
+export async function handlePaymentSetupFlow(
+  session: BotSession,
+  userMessage: string
+): Promise<BotResponse> {
+  const step = session.currentFlow
+
+  // ─── פתיחה — תפריט שיטות תשלום ──────────────────────────────────────────
+  if (!step || step === 'payment_setup_start') {
+    // ── פרסונליזציה — טען נתוני ההורה אם עוד לא נטענו ──────────────────────
+    if (!session.collectedData.child_name && session.phone) {
+      await loadParentRegistrationContext(session.phone, session)
+    }
+
+    const childName  = session.collectedData.child_name  ?? ''
+    const areaLabel  = session.collectedData.area_label  ?? ''
+    const amount     = session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE)
+    const fromSpot   = session.collectedData.from_spot_offer === 'true'
+
+    // ── intro מותאם אישית ─────────────────────────────────────────────────
+    const personalInfo = childName
+      ? `עבור *${childName}*${areaLabel ? ` (${areaLabel})` : ''} — *${amount}₪/חודש*\n\n`
+      : ''
+
+    const intro = fromSpot
+      ? `מעולה! 🎉 נסדר עכשיו את התשלום עבור *${childName}*${areaLabel ? ` ב${areaLabel}` : ''} (${amount}₪/חודש).\n\n`
+      : `*הסדרת תשלום — Kids & Fun* 💛\n\n${personalInfo}`
+
+    return {
+      text:
+        intro +
+        `*באיזו שיטת תשלום תרצו?\n\n*` +
+        `*1* — 💳 כרטיס אשראי (PayPlus)\n` +
+        `*2* — 🏦 הוראת קבע (PayPlus) — מומלץ!\n` +
+        `*3* — 💵 מזומן\n` +
+        `*4* — 📝 צ׳קים\n` +
+        `*5* — 🏛️ העברה בנקאית\n` +
+        `*6* — 🔗 קישור תשלום מיידי`,
+      nextFlow: 'payment_setup_method',
+    }
+  }
+
+  // ─── עיבוד בחירת שיטת תשלום ──────────────────────────────────────────────
+  if (step === 'payment_setup_method') {
+    const msg       = userMessage.trim()
+    const childName = session.collectedData.child_name   ?? 'הילד/ה'
+    const areaCode  = session.collectedData.area_code    ?? 'sharon'
+    const regId     = session.collectedData.registration_id ?? `bot-${Date.now()}`
+    const amount    = parseInt(session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE), 10)
+    const firstName = session.parentName?.split(' ')[0] ?? ''
+
+    let chosenMethod: PaymentMethod | null = null
+
+    if (msg === '1' || /אשראי|כרטיס|credit/i.test(msg))        chosenMethod = 'credit'
+    if (msg === '2' || /הוראת קבע|קבע|standing/i.test(msg))    chosenMethod = 'standing_order'
+    if (msg === '3' || /מזומן|cash/i.test(msg))                 chosenMethod = 'cash'
+    if (msg === '4' || /צ.?ק|שיק|check/i.test(msg))            chosenMethod = 'checks'
+    if (msg === '5' || /העברה|בנק|transfer/i.test(msg))        chosenMethod = 'bank_transfer'
+    if (msg === '6' || /קישור|חשבונית|invoice|link/i.test(msg)) chosenMethod = 'invoice_link'
+
+    if (!chosenMethod) {
+      return {
+        text:
+          `לא הבנתי 😊 אנא בחרו:\n\n` +
+          `*1* — 💳 כרטיס אשראי\n` +
+          `*2* — 🏦 הוראת קבע\n` +
+          `*3* — 💵 מזומן\n` +
+          `*4* — 📝 צ׳קים\n` +
+          `*5* — 🏛️ העברה בנקאית\n` +
+          `*6* — 🔗 קישור תשלום מיידי`,
+        nextFlow: 'payment_setup_method',
+      }
+    }
+
+    session.collectedData.payment_method = chosenMethod
+
+    // ── אשראי / הוראת קבע → PayPlus ────────────────────────────────────────
+    if (chosenMethod === 'credit' || chosenMethod === 'standing_order') {
+      const isStanding    = chosenMethod === 'standing_order'
+      const description   = isStanding
+        ? `הוראת קבע — צהרון Kids & Fun | ${childName}`
+        : `תשלום חודשי — צהרון Kids & Fun | ${childName}`
+
+      const result = await createPayPlusPaymentLink({
+        registrationId: regId,
+        parentName:     session.parentName ?? firstName,
+        phone:          session.phone,
+        childName,
+        areaCode,
+        amount,
+        description,
+        paymentType:    isStanding ? 'standing_order' : 'credit',
+      })
+
+      if (result.success && result.paymentUrl) {
+        const demoNote = result.isDemo
+          ? `\n\n🔵 *סביבת דמו* — זה קישור לדוגמה (מזהה: ${result.orderId})`
+          : ''
+        return {
+          text:
+            `${isStanding ? '🏦 *הוראת קבע*' : '💳 *אשראי*'} — הכנתי לך קישור לתשלום:\n\n` +
+            `🔗 ${result.paymentUrl}\n\n` +
+            `לאחר השלמת התשלום — יישלח אישור ${isStanding ? 'והוראת הקבע תופעל אוטומטית' : ''}.` +
+            demoNote + `\n\nיש שאלה? כתבו לנו 💛`,
+          isComplete: true,
+          createTask: {
+            type:        'כשל תשלום',
+            description: `הגדרת תשלום ${isStanding ? 'הוראת קבע' : 'אשראי'} — ${childName} | orderId: ${result.orderId ?? '?'}`,
+            priority:    'רגיל',
+          },
+        }
+      }
+
+      // PayPlus נכשל → נציגה תטפל
+      console.error('[PayPlus] Failed to create payment link:', result.error)
+      return {
+        text:
+          `מצטערים, נתקלנו בבעיה טכנית בהפקת הקישור 😔\n\n` +
+          `${isBusinessHours()
+            ? 'נציגה שלנו תשלח לך קישור תשלום תוך דקות! 💛'
+            : 'נשלח לך קישור תשלום בשעות הפעילות (8:00-17:00) 📬'}`,
+        isComplete: true,
+        createTask: {
+          type:        'כשל תשלום',
+          description: `PayPlus error — ${chosenMethod} | ${childName} | err: ${result.error}`,
+          priority:    'דחוף',
+        },
+      }
+    }
+
+    // ── מזומן ────────────────────────────────────────────────────────────────
+    if (chosenMethod === 'cash') {
+      return {
+        text:
+          `💵 *תשלום במזומן*\n\n` +
+          `ניתן לשלם בתחילת כל חודש ישירות לצוות הצהרון.\n\n` +
+          `*סכום:* ${amount}₪ לחודש\n\n` +
+          `נציגה שלנו תיצור קשר לתיאום.\n\n` +
+          `${isBusinessHours() ? 'נחזור אליך היום! 😊' : 'נחזור אליך בשעות הפעילות 💛'}`,
+        isComplete: true,
+        createTask: {
+          type:        'כשל תשלום',
+          description: `שיטת תשלום: מזומן — ${childName} | לתיאום גביה חודשית`,
+          priority:    'רגיל',
+        },
+      }
+    }
+
+    // ── צ׳קים — שואלים כמה ─────────────────────────────────────────────────
+    if (chosenMethod === 'checks') {
+      return {
+        text:
+          `📝 *צ׳קים — מצוין!*\n\n` +
+          `*כמה צ׳קים תרצו לתת?*\n` +
+          `_(למשל: 3, 6, 10 — כל צ׳ק לחודש אחד)_`,
+        nextFlow: 'payment_setup_checks',
+      }
+    }
+
+    // ── העברה בנקאית ─────────────────────────────────────────────────────────
+    if (chosenMethod === 'bank_transfer') {
+      return {
+        text:
+          `🏛️ *העברה בנקאית*\n\n` +
+          formatBankTransferMessage() +
+          `\n\n*סכום להעברה:* ${amount}₪ לחודש\n\n` +
+          `לאחר כל העברה — שלחו אישור בצ׳אט ונתעד ✅`,
+        isComplete: true,
+        createTask: {
+          type:        'שאלה כללית',
+          description: `שיטת תשלום: העברה בנקאית — ${childName} | לוודא קבלת תשלום`,
+          priority:    'רגיל',
+        },
+      }
+    }
+
+    // ── קישור תשלום — חשבונית ירוקה ─────────────────────────────────────────
+    if (chosenMethod === 'invoice_link') {
+      const invoiceUrl = await getInvoiceLink({
+        customerName: session.parentName ?? firstName,
+        amount,
+        description: `תשלום חודשי Kids & Fun — ${childName}`,
+      })
+
+      if (invoiceUrl) {
+        return {
+          text:
+            `🔗 *קישור לתשלום מיידי:*\n\n` +
+            `${invoiceUrl}\n\n` +
+            `ניתן לשלם בכרטיס אשראי / ביט / פייבוקס.\n` +
+            `לאחר התשלום — יישלח אישור אוטומטי 💛`,
+          isComplete: true,
+          createTask: {
+            type:        'שאלה כללית',
+            description: `קישור תשלום חשבונית ירוקה נשלח — ${childName}`,
+            priority:    'רגיל',
+          },
+        }
+      }
+
+      // קישור לא מוגדר ב-bot_assets
+      return {
+        text:
+          `🔗 *קישור תשלום*\n\n` +
+          `${isBusinessHours()
+            ? 'נציגה שלנו תשלח לך קישור תשלום עכשיו! 💛'
+            : 'נשלח לך קישור תשלום בשעות הפעילות (8:00-17:00) 📬'}`,
+        isComplete: true,
+        createTask: {
+          type:        'שאלה כללית',
+          description: `הורה מבקש קישור תשלום מיידי — ${childName} | לשלוח קישור חשבונית ירוקה`,
+          priority:    'גבוה',
+        },
+      }
+    }
+  }
+
+  // ─── שלב מספר צ׳קים ──────────────────────────────────────────────────────
+  if (step === 'payment_setup_checks') {
+    const childName = session.collectedData.child_name ?? 'הילד/ה'
+    const amount    = parseInt(session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE), 10)
+    const numChecks = parseInt(userMessage.trim(), 10)
+
+    const validNum = !isNaN(numChecks) && numChecks >= 1 && numChecks <= 12
+    if (!validNum) {
+      return {
+        text: `נא לכתוב מספר בין 1 ל-12 😊`,
+        nextFlow: 'payment_setup_checks',
+      }
+    }
+
+    const totalAmount = amount * numChecks
+
+    return {
+      text:
+        `📝 *תשלום ב-${numChecks} צ׳קים*\n\n` +
+        `• ${numChecks} צ׳קים × ${amount}₪ = *${totalAmount}₪ סה"כ*\n` +
+        `• כל צ׳ק לסדר ל*Kids & Fun*\n` +
+        `• תאריכי הצ׳קים: ה-1 לכל חודש, רצוף מ-${new Date().toLocaleDateString('he-IL', { month: 'long', year: 'numeric' })}\n\n` +
+        `נציגה שלנו תתאם איתך לקבלת הצ׳קים.\n\n` +
+        `${isBusinessHours() ? 'ניצור קשר היום! 💛' : 'ניצור קשר בשעות הפעילות 💛'}`,
+      isComplete: true,
+      createTask: {
+        type:        'שאלה כללית',
+        description: `צ׳קים — ${numChecks} צ׳קים × ${amount}₪ | ${childName} | לתיאום קבלת צ׳קים`,
+        priority:    'גבוה',
+      },
+    }
+  }
+
+  return {
+    text: `😊 כתבו *"אפשרויות תשלום"* להתחיל מחדש.`,
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// מסלול יזום: הצעת מקום מרשימת המתנה
+//
+// מסלול זה מופעל כאשר:
+//   1. הנציגה (מהדשבורד) לוחצת "הצע מקום" על רישום ברשימת המתנה
+//   2. המערכת שולחת הודעת WhatsApp פרואקטיבית (ע"י uchat / API)
+//   3. ההורה עונה — הבוט קולט את התגובה כאן
+//
+// session.currentFlow = 'waiting_spot_confirm'
+// session.collectedData.child_name, area_code, area_label, registration_id,
+//                        waiting_position, monthly_fee
+// ═══════════════════════════════════════════════════════════════════════════════
+export async function handleWaitingListSpotFlow(
+  session:     BotSession,
+  userMessage: string
+): Promise<BotResponse> {
+  const step = session.currentFlow
+
+  // ─── שלב 1: תגובת ההורה להצעת המקום ─────────────────────────────────────
+  if (step === 'waiting_spot_confirm') {
+    const childName  = session.collectedData.child_name   ?? 'הילד/ה'
+    const areaLabel  = session.collectedData.area_label   ?? ''
+
+    if (isYes(userMessage)) {
+      // ← מעבר למסלול הסדרת תשלום
+      session.collectedData.from_spot_offer = 'true'
+      session.currentFlow = 'payment_setup_start'
+      return handlePaymentSetupFlow(session, userMessage)
+    }
+
+    if (isNo(userMessage)) {
+      return {
+        text:
+          `בסדר גמור 😊\n\n` +
+          `תודה על ההודעה — נמשיך לאדם הבא ברשימה.\n\n` +
+          `אם תרצו לחזור לרשימת ההמתנה בעתיד — כתבו לנו 💛`,
+        isComplete: true,
+        createTask: {
+          type:        'רשימת המתנה',
+          description: `הורה דחה הצעת מקום — ${childName}${areaLabel ? ` ב${areaLabel}` : ''} | לעבור למועמד הבא`,
+          priority:    'גבוה',
+        },
+      }
+    }
+
+    // תגובה לא ברורה
+    return {
+      text:
+        `לא הצלחתי להבין 😊\n\n` +
+        `כדי לאשר את המקום עבור *${childName}* — כתבו *"כן"*\n` +
+        `כדי לוותר — כתבו *"לא"*`,
+      nextFlow: 'waiting_spot_confirm',
+    }
+  }
+
+  return {
+    text: `😊 כתבו *"כן"* לאישור המקום, או *"לא"* לוותר.`,
+    nextFlow: 'waiting_spot_confirm',
+  }
 }

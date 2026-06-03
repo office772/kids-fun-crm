@@ -34,3 +34,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# session logs & temp files
+SESSION_*.md
+DEPLOYMENT.md
+*.xlsx
+supabase/.temp/

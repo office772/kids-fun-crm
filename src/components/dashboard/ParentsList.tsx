@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Pencil, Grid3X3, List } from 'lucide-react'
 import { Parent } from '@/lib/types'
 import { StatusBadge } from './StatusBadge'
-import { ParentCard } from './ParentCard'
+import { ParentDetail } from './ParentDetail'
 
 interface Props {
   parents: Parent[]
@@ -146,25 +146,13 @@ export function ParentsList({
       )}
 
       {selectedParent && (
-        <ParentCard
-          parent={selectedParent}
+        <ParentDetail
+          parentId={selectedParent.id}
           onClose={() => setSelectedParent(null)}
-          onEdit={
-            onEdit
-              ? () => {
-                  setSelectedParent(null)
-                  onEdit(selectedParent)
-                }
-              : undefined
-          }
-          onDelete={
-            onDelete
-              ? async () => {
-                  await onDelete(selectedParent.id)
-                  setSelectedParent(null)
-                }
-              : undefined
-          }
+          onRefresh={() => {
+            // close and re-open to refresh data; or parent can provide refresh callback
+            setSelectedParent(null)
+          }}
         />
       )}
     </>

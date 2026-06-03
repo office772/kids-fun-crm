@@ -42,8 +42,8 @@ export async function POST(req: NextRequest) {
   }
 
   // מצב אמיתי — Supabase
-  const { createClient } = await import('@/lib/supabase/server')
-  const supabase = await createClient()
+  const { createServiceClient } = await import("@/lib/supabase/server")
+  const supabase = createServiceClient()
 
   const cleanPhone = phone.replace(/\D/g, '').replace(/^0/, '972')
 
