@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { isDemoMode, DEMO_REGISTRATIONS, DEMO_TIMELINE } from '@/lib/demo-data'
 import { RegistrationTimeline } from '@/lib/types'

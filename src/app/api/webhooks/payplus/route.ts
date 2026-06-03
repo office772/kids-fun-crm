@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 // ─── PayPlus Webhook Handler ─────────────────────────────────────────────────
 // PayPlus יקרא ל-endpoint זה לאחר תשלום מוצלח / כישלון
 // Docs: https://docs.payplus.co.il/reference/validate-requests-received-from-payplus

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 // POST /api/admin/waiting-list/offer-spot
 //
 // מופעל כשהנציגה לוחצת "הצע מקום" על רישום ברשימת המתנה בדשבורד.

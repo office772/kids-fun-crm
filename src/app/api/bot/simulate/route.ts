@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { processMessage } from '@/lib/bot/handler'
 import { BotSession } from '@/lib/types'

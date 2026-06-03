@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { DEMO_TASKS, isDemoMode } from '@/lib/demo-data'
 
