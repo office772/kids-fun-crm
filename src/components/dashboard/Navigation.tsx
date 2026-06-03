@@ -1,6 +1,6 @@
 'use client'
 
-import { LayoutDashboard, Users, ClipboardList, MessageSquare, Bot, FileText, Settings, Link2 } from 'lucide-react'
+import { LayoutDashboard, Users, ClipboardList, MessageSquare, Bot, FileText, Settings, Link2, HelpCircle } from 'lucide-react'
 import Link from 'next/link'
 
 type ActiveTab = 'overview' | 'parents' | 'tasks' | 'registrations' | 'simulator' | 'bot' | 'assets'
@@ -75,6 +75,16 @@ export function Navigation({ activeTab, onTabChange }: Props) {
 
         {/* Left: Date + Admin link */}
         <div className="flex-shrink-0 flex items-center gap-4">
+          <Link
+            href="/faq"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all hover:bg-[#f5e6d8]"
+            style={{ color: 'var(--crm-text)', opacity: 0.75 }}
+          >
+            <HelpCircle size={15} />
+            <span className="hidden sm:inline">שאלות ותשובות</span>
+          </Link>
           <Link
             href="/admin"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all hover:bg-[#f5e6d8]"
