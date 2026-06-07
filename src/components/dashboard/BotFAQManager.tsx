@@ -6,6 +6,94 @@ import type { FAQ, FAQCategory } from '@/lib/types'
 
 const CATEGORIES: FAQCategory[] = ['תשלומים', 'לוז', 'קייטנה', 'ביטול', 'כללי']
 
+// ─── FormPanel מחוץ לקומפוננטה — למנוע unmount בכל render ──────────────────
+interface FormPanelProps {
+  form: Omit<FAQ, 'id' | 'created_at'>
+  saving: boolean
+  onFieldChange: (field: keyof Omit<FAQ, 'id' | 'created_at'>, value: string | boolean) => void
+  onSave: () => void
+  onCancel: () => void
+}
+
+function FormPanel({ form, saving, onFieldChange, onSave, onCancel }: FormPanelProps) {
+  return (
+    <div className="bg-[#fdf6ef] border border-[#e8d5c4] rounded-xl p-4 space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">מפתח (key)</label>
+          <input
+            value={form.key}
+            onChange={e => onFieldChange('key', e.target.value)}
+            placeholder="sibling_discount"
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#297058]/30 bg-white"
+          />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">קטגוריה</label>
+          <select
+            value={form.category}
+            onChange={e => onFieldChange('category', e.target.value)}
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#297058]/30 bg-white"
+          >
+            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-gray-600 mb-1 block">שאלה</label>
+        <input
+          value={form.question}
+          onChange={e => onFieldChange('question', e.target.value)}
+          placeholder="יש הנחה לאחים?"
+          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#297058]/30 bg-white"
+        />
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-gray-600 mb-1 block">
+          תשובה
+          <span className="text-gray-400 font-normal mr-2">— ניתן להשתמש ב-*bold* ו-&#92;n לשורות חדשות</span>
+        </label>
+        <textarea
+          value={form.answer}
+          onChange={e => onFieldChange('answer', e.target.value)}
+          rows={4}
+          placeholder="כן! ממשפחה עם 2 ילדים ומעלה — הנחה של *10%* על הילד השני ואילך."
+          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#297058]/30 bg-white resize-none"
+        />
+      </div>
+
+      <div className="flex items-center justify-between pt-1">
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.is_active}
+            onChange={e => onFieldChange('is_active', e.target.checked)}
+            className="rounded"
+          />
+          פעיל (מוצג בבוט ובדף)
+        </label>
+        <div className="flex gap-2">
+          <button
+            onClick={onCancel}
+            className="px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-100 rounded-lg flex items-center gap-1"
+          >
+            <X size={14} /> ביטול
+          </button>
+          <button
+            onClick={onSave}
+            disabled={saving || !form.key || !form.question || !form.answer}
+            className="px-3 py-1.5 text-sm bg-[#297058] text-white rounded-lg flex items-center gap-1 disabled:opacity-50 hover:bg-[#1f5543] transition-colors"
+          >
+            <Save size={14} /> {saving ? 'שומר...' : 'שמור'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const CATEGORY_COLORS: Record<FAQCategory, { bg: string; text: string }> = {
   'תשלומים': { bg: 'bg-[#E6F4EF]',   text: 'text-[#297058]' },
   'לוז':     { bg: 'bg-[#FEF9C3]',   text: 'text-[#7B6010]' },
@@ -115,82 +203,14 @@ export function BotFAQManager() {
     }
   }
 
-  const FormPanel = () => (
-    <div className="bg-[#fdf6ef] border border-[#e8d5c4] rounded-xl p-4 space-y-3">
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">מפתח (key)</label>
-          <input
-            value={form.key}
-            onChange={e => setForm(f => ({ ...f, key: e.target.value }))}
-            placeholder="sibling_discount"
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#297058]/30 bg-white"
-          />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">קטגוריה</label>
-          <select
-            value={form.category}
-            onChange={e => setForm(f => ({ ...f, category: e.target.value as FAQCategory }))}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#297058]/30 bg-white"
-          >
-            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
-      </div>
+  function handleFieldChange(field: keyof Omit<FAQ, 'id' | 'created_at'>, value: string | boolean) {
+    setForm(f => ({ ...f, [field]: value }))
+  }
 
-      <div>
-        <label className="text-xs font-medium text-gray-600 mb-1 block">שאלה</label>
-        <input
-          value={form.question}
-          onChange={e => setForm(f => ({ ...f, question: e.target.value }))}
-          placeholder="יש הנחה לאחים?"
-          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#297058]/30 bg-white"
-        />
-      </div>
-
-      <div>
-        <label className="text-xs font-medium text-gray-600 mb-1 block">
-          תשובה
-          <span className="text-gray-400 font-normal mr-2">— ניתן להשתמש ב-*bold* ו-&#92;n לשורות חדשות</span>
-        </label>
-        <textarea
-          value={form.answer}
-          onChange={e => setForm(f => ({ ...f, answer: e.target.value }))}
-          rows={4}
-          placeholder="כן! ממשפחה עם 2 ילדים ומעלה — הנחה של *10%* על הילד השני ואילך."
-          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#297058]/30 bg-white resize-none"
-        />
-      </div>
-
-      <div className="flex items-center justify-between pt-1">
-        <label className="flex items-center gap-2 text-sm cursor-pointer">
-          <input
-            type="checkbox"
-            checked={form.is_active}
-            onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))}
-            className="rounded"
-          />
-          פעיל (מוצג בבוט ובדף)
-        </label>
-        <div className="flex gap-2">
-          <button
-            onClick={() => { setEditId(null); setShowAdd(false) }}
-            className="px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-100 rounded-lg flex items-center gap-1"
-          >
-            <X size={14} /> ביטול
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || !form.key || !form.question || !form.answer}
-            className="px-3 py-1.5 text-sm bg-[#297058] text-white rounded-lg flex items-center gap-1 disabled:opacity-50 hover:bg-[#1f5543] transition-colors"
-          >
-            <Save size={14} /> {saving ? 'שומר...' : 'שמור'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
+  function handleCancel() {
+    setEditId(null)
+    setShowAdd(false)
+  }
 
   return (
     <div className="space-y-4">
@@ -239,7 +259,15 @@ export function BotFAQManager() {
       </div>
 
       {/* טופס הוספה */}
-      {showAdd && <FormPanel />}
+      {showAdd && (
+        <FormPanel
+          form={form}
+          saving={saving}
+          onFieldChange={handleFieldChange}
+          onSave={handleSave}
+          onCancel={handleCancel}
+        />
+      )}
 
       {/* רשימה */}
       {loading ? (
@@ -251,7 +279,13 @@ export function BotFAQManager() {
           {filtered.map(faq => (
             <div key={faq.id}>
               {editId === faq.id ? (
-                <FormPanel />
+                <FormPanel
+                  form={form}
+                  saving={saving}
+                  onFieldChange={handleFieldChange}
+                  onSave={handleSave}
+                  onCancel={handleCancel}
+                />
               ) : (
                 <div className={`bg-white rounded-xl border p-4 ${faq.is_active ? 'border-gray-100' : 'border-gray-200 opacity-60'}`}>
                   <div className="flex items-start justify-between gap-3">

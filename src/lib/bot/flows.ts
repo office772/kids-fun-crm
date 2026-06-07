@@ -637,7 +637,8 @@ export function handlePaymentStatusFlow(parentName?: string): BotResponse {
       `*1* — סטטוס התשלום שלי\n` +
       `*2* — לשנות שיטת תשלום\n` +
       `*3* — לא עבר תשלום / בעיה\n` +
-      `*4* — מה העלות החודשית?`,
+      `*4* — מה העלות החודשית?\n` +
+      `*5* — 💳 להסדיר תשלום חדש`,
     nextFlow: 'payment_status_menu',
   }
 }
@@ -701,6 +702,12 @@ export async function handlePaymentStatusMenuFlow(
     }
   }
 
+  // בחירה 5 — הסדרת תשלום חדש → payment_setup_start
+  if (msg === '5' || /חדש|להסדיר|הסדר|לשלם|תשלום חדש/i.test(msg)) {
+    session.currentFlow = 'payment_setup_start'
+    return { text: '', nextFlow: 'payment_setup_start' }
+  }
+
   // לא הבין
   return {
     text:
@@ -708,7 +715,8 @@ export async function handlePaymentStatusMenuFlow(
       `*1* — סטטוס התשלום שלי\n` +
       `*2* — לשנות שיטת תשלום\n` +
       `*3* — לא עבר תשלום / בעיה\n` +
-      `*4* — מה העלות החודשית?`,
+      `*4* — מה העלות החודשית?\n` +
+      `*5* — 💳 להסדיר תשלום חדש`,
     nextFlow: 'payment_status_menu',
   }
 }
