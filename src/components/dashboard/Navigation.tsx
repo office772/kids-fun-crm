@@ -76,6 +76,16 @@ export function Navigation({ activeTab, onTabChange }: Props) {
         {/* Left: Date + Admin link */}
         <div className="flex-shrink-0 flex items-center gap-4">
           <Link
+            href="/register"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all hover:bg-[#f5e6d8]"
+            style={{ color: 'var(--crm-text)', opacity: 0.75 }}
+          >
+            <ClipboardList size={15} />
+            <span className="hidden sm:inline">שאלון רישום</span>
+          </Link>
+          <Link
             href="/faq"
             target="_blank"
             rel="noopener noreferrer"
