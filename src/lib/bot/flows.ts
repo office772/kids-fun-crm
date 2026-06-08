@@ -702,10 +702,11 @@ export async function handlePaymentStatusMenuFlow(
     }
   }
 
-  // בחירה 5 — הסדרת תשלום חדש → payment_setup_start
+  // בחירה 5 — הסדרת תשלום חדש → payment_setup_start (מיידי, ללא הודעה ריקה)
   if (msg === '5' || /חדש|להסדיר|הסדר|לשלם|תשלום חדש/i.test(msg)) {
     session.currentFlow = 'payment_setup_start'
-    return { text: '', nextFlow: 'payment_setup_start' }
+    // קורא ישירות ל-handlePaymentSetupFlow דרך ה-handler — מחזיר תפריט מיידית
+    return { text: '__redirect_payment_setup__', nextFlow: 'payment_setup_start' }
   }
 
   // לא הבין

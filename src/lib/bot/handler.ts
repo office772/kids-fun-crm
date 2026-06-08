@@ -76,7 +76,12 @@ async function handleActiveFlow(
     return { ...await handlePaymentSetupFlow(session, userMessage), intent }
   }
   if (flow === 'payment_status_menu') {
-    return { ...await handlePaymentStatusMenuFlow(session, userMessage), intent }
+    const result = await handlePaymentStatusMenuFlow(session, userMessage)
+    // אם הבחירה הייתה "5 — להסדיר תשלום חדש", מפנה ישירות ל-payment_setup
+    if (result.text === '__redirect_payment_setup__') {
+      return { ...await handlePaymentSetupFlow(session, userMessage), intent }
+    }
+    return { ...result, intent }
   }
   if (flow === 'cost_info_start' || flow === 'cost_info_freetext') {
     const result = await handleCostInfoFlow(session, userMessage)

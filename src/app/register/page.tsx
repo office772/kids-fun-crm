@@ -233,7 +233,11 @@ function RegisterForm() {
 
             {/* בית חינוכי — דינמי לפי אזור */}
             <Field label="בית חינוכי" required>
-              {schools.length > 0 ? (
+              {!area ? (
+                <div className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl bg-gray-50 text-gray-400 text-right">
+                  ← בחרו אזור בתחילת הטופס כדי לראות את הרשימה
+                </div>
+              ) : schools.length > 0 ? (
                 <select value={childSchool} onChange={e => setChildSchool(e.target.value)} required>
                   <option value="">בחרו בית חינוכי</option>
                   {schools.map(s => (
@@ -244,7 +248,7 @@ function RegisterForm() {
                 </select>
               ) : (
                 <input type="text" value={childSchool} onChange={e => setChildSchool(e.target.value)}
-                  placeholder={area ? 'שם בית הספר / גן' : 'בחרו אזור תחילה'} disabled={!area} required />
+                  placeholder="שם בית הספר / גן" required />
               )}
             </Field>
 
