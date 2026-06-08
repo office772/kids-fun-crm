@@ -1,11 +1,62 @@
 'use client'
 
 import { useState } from 'react'
-import { Users, Settings, ChevronLeft } from 'lucide-react'
+import { Users, Settings, ChevronLeft, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react'
 import { CapacitySettings } from '@/components/admin/CapacitySettings'
 import Link from 'next/link'
 
-type AdminSection = 'capacity'
+// ─── כפתור סנכרון ────────────────────────────────────────────────────────────
+function SyncButton({ label, endpoint, color }: { label: string; endpoint: string; color: string }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  const [result, setResult] = useState<string>('')
+
+  async function handleSync() {
+    setState('loading')
+    setResult('')
+    try {
+      const res  = await fetch(endpoint, { method: 'POST' })
+      const data = await res.json()
+      if (data.success || data.message) {
+        const s = data.stats
+        setResult(s
+          ? `✅ הורים חדשים: ${s.parents_created} | עדכונים: ${s.parents_updated} | תשלומים: ${s.payments_created} | דולגו: ${s.payments_skipped}`
+          : String(data.message ?? 'הושלם'))
+        setState('done')
+      } else {
+        setResult(data.error ?? 'שגיאה')
+        setState('error')
+      }
+    } catch (e) {
+      setResult(String(e))
+      setState('error')
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="font-medium text-[#3d2b1f] text-sm">{label}</span>
+        <button
+          onClick={handleSync}
+          disabled={state === 'loading'}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-sm font-medium disabled:opacity-50 transition-colors"
+          style={{ background: color }}
+        >
+          <RefreshCw size={14} className={state === 'loading' ? 'animate-spin' : ''} />
+          {state === 'loading' ? 'מסנכרן...' : 'סנכרן עכשיו'}
+        </button>
+      </div>
+      {result && (
+        <div className={`text-xs px-3 py-2 rounded-lg flex items-start gap-1.5 ${state === 'done' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+          {state === 'done' ? <CheckCircle size={12} className="mt-0.5 shrink-0" /> : <AlertCircle size={12} className="mt-0.5 shrink-0" />}
+          {result}
+        </div>
+      )}
+    </div>
+  )
+}
+
+type AdminSection = 'capacity' | 'sync'
 // עתידי: | 'bot-texts' | 'hours' | 'general' | 'payments' ...
 
 interface SectionDef {
@@ -27,6 +78,35 @@ export default function AdminPage() {
       icon: <Users size={18} />,
       description: 'כמה ילדים ניתן לרשום לכל אזור',
       component: <CapacitySettings />,
+    },
+    {
+      id: 'sync',
+      label: 'סנכרון נתונים',
+      icon: <RefreshCw size={18} />,
+      description: 'ייבוא הורים ותשלומים מPayPlus וחשבונית ירוקה',
+      component: (
+        <div className="space-y-4">
+          <div>
+            <h3 className="font-semibold text-[#3d2b1f] mb-1">סנכרון נתונים חיצוניים</h3>
+            <p className="text-xs text-gray-500 mb-4">
+              מייבא הורים ותשלומים ממערכות חיצוניות לתוך ה-CRM. קריאה בלבד — לא משנה כלום אצל הספקים.
+            </p>
+          </div>
+          <SyncButton
+            label="📥 ייבוא מ-PayPlus (הוראות קבע + כרטיסי אשראי)"
+            endpoint="/api/sync/payplus"
+            color="#297058"
+          />
+          <SyncButton
+            label="📥 ייבוא מחשבונית ירוקה (קישורי תשלום)"
+            endpoint="/api/sync/greeninvoice"
+            color="#5c3d2e"
+          />
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
+            💡 לאחר הסנכרון הראשון, נתונים חדשים מגיעים אוטומטית דרך webhook בזמן אמת.
+          </div>
+        </div>
+      ),
     },
     // עתידי — פשוט להוסיף כאן
     // { id: 'bot-texts', label: 'טקסטים לבוט', icon: <Bot size={18} />, description: 'עריכת כל הודעות הבוט', component: <BotTexts /> },
