@@ -91,6 +91,7 @@ export async function POST(req: NextRequest) {
       parent_id:        parentId,
       amount:           amount || null,
       status:           'שולם',
+      payment_type:     'כרטיס אשראי',
       paid_at:          paidAt,
       greeninvoice_ref: docId || null,
       source:           'greeninvoice_webhook',

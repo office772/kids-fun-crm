@@ -1,36 +1,72 @@
 'use client'
 
-import { useState } from 'react'
-import { Users, Settings, ChevronLeft, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Users, Settings, ChevronLeft, RefreshCw, CheckCircle, AlertCircle, Info } from 'lucide-react'
 import { CapacitySettings } from '@/components/admin/CapacitySettings'
 import Link from 'next/link'
 
+const SYNC_TIMEOUT_MS = 90_000 // לא להשאיר את הכפתור תקוע על "מסנכרן..." לנצח
+
 // ─── כפתור סנכרון ────────────────────────────────────────────────────────────
 function SyncButton({ label, endpoint, color }: { label: string; endpoint: string; color: string }) {
-  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error' | 'info'>('idle')
   const [result, setResult] = useState<string>('')
+  const [elapsed, setElapsed] = useState(0)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // מונה שניות בזמן סנכרון — נותן feedback שמשהו קורה
+  useEffect(() => {
+    if (state === 'loading') {
+      setElapsed(0)
+      timerRef.current = setInterval(() => setElapsed(e => e + 1), 1000)
+    } else if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current) }
+  }, [state])
 
   async function handleSync() {
     setState('loading')
     setResult('')
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS)
+
     try {
-      const res  = await fetch(endpoint, { method: 'POST' })
+      const res  = await fetch(endpoint, { method: 'POST', signal: controller.signal })
       const data = await res.json()
       if (data.success || data.message) {
         const s = data.stats
-        setResult(s
-          ? `✅ הורים חדשים: ${s.parents_created} | עדכונים: ${s.parents_updated} | תשלומים: ${s.payments_created} | דולגו: ${s.payments_skipped}`
-          : String(data.message ?? 'הושלם'))
-        setState('done')
+        const hasStats = s && (s.parents_created || s.parents_updated || s.payments_created || s.payments_skipped)
+        if (data.blocked) {
+          setResult(String(data.message))
+          setState('info')
+        } else {
+          setResult(hasStats
+            ? `הורים חדשים: ${s.parents_created} | עדכונים: ${s.parents_updated} | תשלומים: ${s.payments_created} | דולגו: ${s.payments_skipped}`
+            : String(data.message ?? 'הושלם'))
+          setState('done')
+        }
       } else {
-        setResult(data.error ?? 'שגיאה')
+        setResult(data.error ?? 'שגיאה לא ידועה')
         setState('error')
       }
     } catch (e) {
-      setResult(String(e))
+      const aborted = e instanceof DOMException && e.name === 'AbortError'
+      setResult(aborted
+        ? `הסנכרון לקח יותר מ-${SYNC_TIMEOUT_MS / 1000} שניות והופסק. ייתכן שהוא עדיין רץ ברקע — רענן את הרשימה בעוד דקה.`
+        : String(e))
       setState('error')
+    } finally {
+      clearTimeout(timeout)
     }
   }
+
+  const boxStyle =
+    state === 'done' ? 'bg-green-50 text-green-700'
+    : state === 'info' ? 'bg-blue-50 text-blue-700'
+    : 'bg-red-50 text-red-700'
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-2">
@@ -43,12 +79,16 @@ function SyncButton({ label, endpoint, color }: { label: string; endpoint: strin
           style={{ background: color }}
         >
           <RefreshCw size={14} className={state === 'loading' ? 'animate-spin' : ''} />
-          {state === 'loading' ? 'מסנכרן...' : 'סנכרן עכשיו'}
+          {state === 'loading' ? `מסנכרן... ${elapsed}s` : 'סנכרן עכשיו'}
         </button>
       </div>
       {result && (
-        <div className={`text-xs px-3 py-2 rounded-lg flex items-start gap-1.5 ${state === 'done' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-          {state === 'done' ? <CheckCircle size={12} className="mt-0.5 shrink-0" /> : <AlertCircle size={12} className="mt-0.5 shrink-0" />}
+        <div className={`text-xs px-3 py-2 rounded-lg flex items-start gap-1.5 ${boxStyle}`}>
+          {state === 'done'
+            ? <CheckCircle size={12} className="mt-0.5 shrink-0" />
+            : state === 'info'
+              ? <Info size={12} className="mt-0.5 shrink-0" />
+              : <AlertCircle size={12} className="mt-0.5 shrink-0" />}
           {result}
         </div>
       )}
@@ -93,17 +133,28 @@ export default function AdminPage() {
             </p>
           </div>
           <SyncButton
-            label="📥 ייבוא מ-PayPlus (הוראות קבע + כרטיסי אשראי)"
-            endpoint="/api/sync/payplus"
-            color="#297058"
-          />
-          <SyncButton
             label="📥 ייבוא מחשבונית ירוקה (קישורי תשלום)"
             endpoint="/api/sync/greeninvoice"
             color="#5c3d2e"
           />
+
+          {/* PayPlus — אין סנכרון ידני: PayPlus חוסם קריאות שרת. הכל אוטומטי דרך webhook */}
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-[#3d2b1f] text-sm">💳 PayPlus (הוראות קבע + כרטיסי אשראי)</span>
+              <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-green-50 text-green-700">
+                ✓ אוטומטי
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+              אין צורך בסנכרון ידני. PayPlus חוסם קריאות מהשרת, אבל כל תשלום חדש —
+              כולל כשלי חיוב והוראות קבע — נכנס אוטומטית בזמן אמת דרך webhook.
+            </p>
+          </div>
+
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
-            💡 לאחר הסנכרון הראשון, נתונים חדשים מגיעים אוטומטית דרך webhook בזמן אמת.
+            💡 נתונים חדשים מ-PayPlus ומחשבונית ירוקה מגיעים אוטומטית דרך webhook בזמן אמת.
+            הכפתור למעלה הוא רק לייבוא היסטורי חד-פעמי מחשבונית ירוקה.
           </div>
         </div>
       ),

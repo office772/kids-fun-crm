@@ -179,6 +179,7 @@ async function processGIDocuments(
           parent_id:        parentId,
           amount:           amount || null,
           status:           'שולם',
+          payment_type:     'כרטיס אשראי',    // קישורי תשלום בחשבונית ירוקה = כרטיס אשראי
           paid_at:          new Date(paidAt).toISOString(),
           greeninvoice_ref: docId || null,
           source:           'greeninvoice',

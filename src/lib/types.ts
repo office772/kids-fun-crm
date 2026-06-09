@@ -7,6 +7,14 @@ export interface Branch {
   created_at: string
 }
 
+export type SyncSource =
+  | 'payplus'
+  | 'payplus_recurring'
+  | 'payplus_webhook'
+  | 'greeninvoice'
+  | 'greeninvoice_webhook'
+  | 'manual'
+
 export interface Parent {
   id: string
   phone: string
@@ -14,6 +22,8 @@ export interface Parent {
   email?: string
   notes?: string
   branch_id?: string
+  sync_source?: SyncSource
+  external_ref?: string
   created_at: string
   updated_at: string
   // joined
@@ -30,8 +40,12 @@ export interface Child {
   birth_date?: string
   class_name?: string
   framework?: 'צהרון' | 'קייטנה' | 'שניהם'
+  school?: string                 // בית ספר
+  grade?: string                  // כיתה / שכבה
+  program?: string                // קייטנה / צהרון / אחר
   allergies?: string
   medical_notes?: string
+  area_code?: string
   branch_id?: string
   created_at: string
 }
@@ -61,6 +75,10 @@ export interface Registration {
 }
 
 export type PaymentStatus = 'שולם' | 'ממתין' | 'נכשל' | 'חלקי' | 'זיכוי'
+export type PaymentType = 'הוראת קבע' | 'כרטיס אשראי' | 'צ׳ק' | 'מזומן' | 'אחר'
+
+// סטטוס בריאות התשלום לתצוגה: 🟢 תקין / 🟡 כרטיס פג תוקף / 🔴 כשל
+export type PaymentHealth = 'ok' | 'expiring' | 'failed'
 
 export interface Payment {
   id: string
@@ -69,9 +87,14 @@ export interface Payment {
   amount?: number
   currency: string
   status: PaymentStatus
+  payment_type?: PaymentType
+  number_of_failures?: number      // מספר כשלונות חיוב מצטבר (PayPlus)
+  card_expired?: boolean           // כרטיס אשראי פג תוקף
   due_date?: string
   paid_at?: string
   payplus_ref?: string
+  greeninvoice_ref?: string
+  source?: SyncSource
   failure_reason?: string
   proactive_sent: boolean
   last_checked: string

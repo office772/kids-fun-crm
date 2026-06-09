@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { X, Phone, Mail, User, Clock, MessageCircle, CreditCard, FileText, Edit3, Check, ChevronDown } from 'lucide-react'
 import { Parent, Task, Conversation, RegistrationTimeline, Registration } from '@/lib/types'
 import { StatusBadge } from './StatusBadge'
+import { getPaymentHealthInfo, getParentPaymentHealthInfo, getSourceLabel } from '@/lib/payment-status'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface ParentDetailProps {
@@ -221,9 +222,12 @@ export function ParentDetail({ parentId, onClose, onRefresh }: ParentDetailProps
   }
 
   const latestPayment = parent.payments?.[0]
-  const hasFailedPayment = parent.payments?.some(p => p.status === 'נכשל')
+  const paymentHealth = getParentPaymentHealthInfo(parent.payments)
+  const hasFailedPayment = paymentHealth.health === 'failed'
+  const hasExpiringCard = paymentHealth.health === 'expiring'
   const openTasksCount = parent.tasks?.filter(t => t.status !== 'טופל').length || 0
   const child = parent.children?.[0]
+  const source = getSourceLabel(parent.sync_source)
 
   const TABS: { id: typeof activeTab; label: string; count?: number }[] = [
     { id: 'overview', label: 'סקירה' },
@@ -257,10 +261,22 @@ export function ParentDetail({ parentId, onClose, onRefresh }: ParentDetailProps
               <X size={20} />
             </button>
             <div className="flex items-center gap-2">
+              {/* תווית מקור: PayPlus / חשבונית ירוקה / ידני */}
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-full"
+                style={{ background: source.bg, color: source.color }}
+                title="מקור הנתונים">
+                {source.icon} {source.label}
+              </span>
               {hasFailedPayment && (
                 <span className="text-xs font-bold px-3 py-1.5 rounded-full animate-pulse"
                   style={{ background: '#fee2e2', color: '#991b1b' }}>
-                  ⚠️ כשל תשלום
+                  🔴 כשל תשלום
+                </span>
+              )}
+              {hasExpiringCard && (
+                <span className="text-xs font-bold px-3 py-1.5 rounded-full"
+                  style={{ background: '#FEF9C3', color: '#7B6010' }}>
+                  🟡 כרטיס פג תוקף
                 </span>
               )}
               <button
@@ -340,7 +356,10 @@ export function ParentDetail({ parentId, onClose, onRefresh }: ParentDetailProps
                 </h2>
                 {child && (
                   <p className="text-sm font-medium mt-0.5" style={{ color: '#6D436D' }}>
-                    👧 {child.name} · כיתה {child.class_name} · {child.framework}
+                    👧 {child.name}
+                    {(child.grade || child.class_name) && ` · כיתה ${child.grade || child.class_name}`}
+                    {child.school && ` · ${child.school}`}
+                    {(child.program || child.framework) && ` · ${child.program || child.framework}`}
                   </p>
                 )}
                 <div className="flex flex-wrap items-center gap-3 mt-2">
@@ -499,21 +518,36 @@ export function ParentDetail({ parentId, onClose, onRefresh }: ParentDetailProps
                 <div>
                   <p className="text-sm font-bold mb-2" style={{ color: '#5E4B35' }}>💳 תשלומים</p>
                   <div className="space-y-2">
-                    {parent.payments.map(pay => (
-                      <div key={pay.id} className="rounded-xl p-3 flex items-center justify-between border"
-                        style={{ borderColor: '#e5e7eb', background: '#fff' }}>
-                        <div>
-                          <p className="text-sm font-semibold" style={{ color: '#5E4B35' }}>
-                            ₪{pay.amount}
-                          </p>
-                          <p className="text-xs mt-0.5" style={{ color: '#a8a29e' }}>
-                            {pay.due_date && `תאריך חיוב: ${new Date(pay.due_date).toLocaleDateString('he-IL')}`}
-                            {pay.failure_reason && ` · ${pay.failure_reason}`}
-                          </p>
+                    {parent.payments.map(pay => {
+                      const h = getPaymentHealthInfo(pay)
+                      return (
+                        <div key={pay.id} className="rounded-xl p-3 flex items-center justify-between border"
+                          style={{ borderColor: '#e5e7eb', background: '#fff' }}>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold flex items-center gap-1.5" style={{ color: '#5E4B35' }}>
+                              <span title={h.label}>{h.icon}</span>
+                              ₪{pay.amount}
+                              {pay.payment_type && (
+                                <span className="text-xs font-normal px-1.5 py-0.5 rounded"
+                                  style={{ background: '#f5f5f4', color: '#78716c' }}>
+                                  {pay.payment_type}
+                                </span>
+                              )}
+                            </p>
+                            <p className="text-xs mt-0.5" style={{ color: '#a8a29e' }}>
+                              {pay.due_date && `תאריך חיוב: ${new Date(pay.due_date).toLocaleDateString('he-IL')}`}
+                              {!!pay.number_of_failures && ` · ${pay.number_of_failures} כשלונות חיוב`}
+                              {pay.card_expired && ` · כרטיס פג תוקף`}
+                              {pay.failure_reason && ` · ${pay.failure_reason}`}
+                            </p>
+                          </div>
+                          <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full shrink-0"
+                            style={{ background: h.bg, color: h.color }}>
+                            {pay.status}
+                          </span>
                         </div>
-                        <StatusBadge status={pay.status} size="sm" />
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               )}

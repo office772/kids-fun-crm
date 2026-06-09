@@ -1,17 +1,24 @@
 export const dynamic = 'force-dynamic'
 
 // ─── PayPlus Webhook Handler ──────────────────────────────────────────────────
-// PayPlus קורא ל-endpoint זה לאחר כל תשלום
-// לוגיקה כמו Summit: חפש הורה → אם לא קיים → צור חדש
+// PayPlus קורא ל-endpoint זה לאחר כל תשלום — הצלחה או כשל.
+// לוגיקה: חפש הורה → אם לא קיים → צור חדש → רשום תשלום עם סטטוס מתאים.
+// כשל חיוב (הוראת קבע / כרטיס פג תוקף) נרשם כ-🔴 ויוצר משימה לטיפול.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from 'next/server'
 
 function normalizePhone(raw: string): string {
-  let p = raw.replace(/[\s\-\.\(\)\+]/g, '')
+  let p = raw.replace(/[\s\-.()+]/g, '')
   if (p.startsWith('972')) p = '0' + p.slice(3)
   if (!p.startsWith('0') && p.length === 9) p = '0' + p
   return p
+}
+
+// מזהה אם מדובר בכשל בגלל כרטיס פג תוקף (מתוך קוד/הודעת השגיאה של PayPlus)
+function isCardExpired(statusCode: string, reason: string): boolean {
+  const s = `${statusCode} ${reason}`.toLowerCase()
+  return /expir|פג תוקף|פג-תוקף|054|033/.test(s)
 }
 
 export async function POST(req: NextRequest) {
@@ -21,9 +28,11 @@ export async function POST(req: NextRequest) {
 
     // ── חילוץ נתונים ────────────────────────────────────────────────────────
     const tx        = body?.transaction ?? body?.Transaction ?? body
-    const status    = tx?.status_code   ?? tx?.StatusCode   ?? tx?.status ?? body?.status
-    const txId      = tx?.uid           ?? tx?.UID          ?? tx?.page_request_uid ?? body?.page_request_uid
+    const status    = String(tx?.status_code ?? tx?.StatusCode ?? tx?.status ?? body?.status ?? '')
+    const txId      = tx?.uid ?? tx?.UID ?? tx?.page_request_uid ?? body?.page_request_uid
     const amount    = Number(tx?.amount ?? tx?.Amount ?? body?.amount ?? 0)
+    const reason    = String(tx?.status_error_description ?? tx?.status_description ?? tx?.error ?? body?.error ?? '')
+    const failures  = Number(tx?.number_of_failures ?? tx?.failures ?? body?.number_of_failures ?? 0)
     const paidAt    = new Date().toISOString()
 
     // פרטי לקוח
@@ -35,94 +44,65 @@ export async function POST(req: NextRequest) {
     // external_uid = registration_id שהכנסנו בבקשה
     const externalUid = tx?.order?.external_uid ?? body?.order?.external_uid ?? body?.external_uid
 
-    console.log(`[PayPlus Webhook] status=${status}, txId=${txId}, name=${name}, phone=${rawPhone}`)
+    // האם הוראת קבע (חיוב חוזר) או כרטיס רגיל
+    const isRecurring = !!(tx?.recurring_uid ?? tx?.recurring ?? body?.recurring_uid)
+    const paymentType = isRecurring ? 'הוראת קבע' : 'כרטיס אשראי'
 
-    // ── תשלום מוצלח ────────────────────────────────────────────────────────
     const isSuccess = status === '000' || status === 'COMPLETED' || Number(status) === 0 || status === '1'
+    const cardExpired = !isSuccess && isCardExpired(status, reason)
 
-    if (!isSuccess) {
-      console.log(`[PayPlus Webhook] Not a success status: ${status}`)
-      return NextResponse.json({ ok: true })
-    }
+    console.log(`[PayPlus Webhook] status=${status}, success=${isSuccess}, txId=${txId}, name=${name}, phone=${rawPhone}`)
 
     const { createServiceClient } = await import('@/lib/supabase/server')
     const supabase = createServiceClient()
 
-    // ── מניעת כפילויות ─────────────────────────────────────────────────────
-    if (txId) {
+    // ── מניעת כפילויות (רק עבור הצלחות עם txId יציב) ──────────────────────────
+    if (txId && isSuccess) {
       const { data: existingPay } = await supabase
-        .from('payments')
-        .select('id')
-        .eq('payplus_ref', txId)
-        .maybeSingle()
-
+        .from('payments').select('id').eq('payplus_ref', txId).maybeSingle()
       if (existingPay) {
         console.log(`[PayPlus Webhook] Duplicate txId ${txId} — skipping`)
         return NextResponse.json({ ok: true, duplicate: true })
       }
     }
 
-    // ── חיפוש רב-שלבי (כמו Summit) ─────────────────────────────────────────
+    // ── חיפוש רב-שלבי של ההורה ─────────────────────────────────────────────
     let parentId: string | null = null
 
-    // 1. חפש לפי external_uid (registration_id)
     if (externalUid) {
       const { data: reg } = await supabase
-        .from('registrations')
-        .select('parent_id')
-        .eq('id', externalUid)
-        .maybeSingle()
+        .from('registrations').select('parent_id').eq('id', externalUid).maybeSingle()
       if (reg?.parent_id) parentId = reg.parent_id
     }
 
-    // 2. חפש לפי טלפון
     const phone = rawPhone ? normalizePhone(rawPhone) : null
     if (!parentId && phone) {
-      const { data: byPhone } = await supabase
-        .from('parents')
-        .select('id')
-        .eq('phone', phone)
-        .maybeSingle()
+      const { data: byPhone } = await supabase.from('parents').select('id').eq('phone', phone).maybeSingle()
       if (byPhone) parentId = byPhone.id
     }
-
-    // 3. חפש לפי אימייל
     if (!parentId && email) {
-      const { data: byEmail } = await supabase
-        .from('parents')
-        .select('id')
-        .eq('email', email)
-        .maybeSingle()
+      const { data: byEmail } = await supabase.from('parents').select('id').eq('email', email).maybeSingle()
       if (byEmail) parentId = byEmail.id
     }
-
-    // 4. חפש לפי שם
     if (!parentId && name) {
-      const { data: byName } = await supabase
-        .from('parents')
-        .select('id')
-        .eq('name', name)
-        .maybeSingle()
+      const { data: byName } = await supabase.from('parents').select('id').eq('name', name).maybeSingle()
       if (byName) parentId = byName.id
     }
 
-    // 5. אם לא נמצא — צור הורה חדש (כמו Summit!)
+    // צור הורה חדש אם לא נמצא
     if (!parentId) {
       console.log(`[PayPlus Webhook] Parent not found — creating: ${name} / ${phone}`)
-      // phone הוא NOT NULL — placeholder אם אין טלפון אמיתי
       const phoneToUse = phone || `pp_${txId || Date.now()}`
       const { data: newParent } = await supabase
         .from('parents')
         .insert({
-          name:        name || 'לא ידוע',
-          phone:       phoneToUse,
-          email:       email || null,
-          sync_source: 'payplus_webhook',
+          name:         name || 'לא ידוע',
+          phone:        phoneToUse,
+          email:        email || null,
+          sync_source:  'payplus_webhook',
           external_ref: txId || null,
         })
-        .select('id')
-        .single()
-
+        .select('id').single()
       if (newParent) parentId = newParent.id
     }
 
@@ -131,36 +111,61 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, warning: 'parent not resolved' })
     }
 
-    // ── צור רשומת תשלום ────────────────────────────────────────────────────
+    // ── רשומת תשלום ────────────────────────────────────────────────────────
     await supabase.from('payments').insert({
-      parent_id:   parentId,
-      amount:      amount || null,
-      status:      'שולם',
-      paid_at:     paidAt,
-      payplus_ref: txId || null,
-      source:      'payplus_webhook',
+      parent_id:          parentId,
+      amount:             amount || null,
+      status:             isSuccess ? 'שולם' : 'נכשל',
+      payment_type:       paymentType,
+      number_of_failures: isSuccess ? 0 : (failures || 1),
+      card_expired:       cardExpired,
+      paid_at:            isSuccess ? paidAt : null,
+      payplus_ref:        txId || null,
+      source:             'payplus_webhook',
+      failure_reason:     isSuccess ? null : (reason || 'חיוב נכשל'),
     })
 
-    // ── עדכן רישום אם קיים ─────────────────────────────────────────────────
-    if (externalUid) {
-      await supabase
-        .from('registrations')
-        .update({ status: 'מאושר', payment_method: 'credit', payment_setup_at: paidAt })
-        .eq('id', externalUid)
-        .eq('status', 'ממתין לאישור')
+    if (isSuccess) {
+      // עדכן רישום אם קיים
+      if (externalUid) {
+        await supabase
+          .from('registrations')
+          .update({ status: 'מאושר', payment_method: 'credit', payment_setup_at: paidAt })
+          .eq('id', externalUid)
+          .eq('status', 'ממתין לאישור')
+      }
+
+      await supabase.from('registration_timeline').insert({
+        parent_id:   parentId,
+        event_type:  'payment',
+        new_value:   'שולם',
+        description: `תשלום PayPlus התקבל — ${amount}₪ (${paymentType})`,
+        performed_by: 'מערכת',
+        metadata:    { amount, payplus_ref: txId },
+      })
+      console.log(`[PayPlus Webhook] ✅ Success — parent ${parentId}, amount ${amount}₪`)
+    } else {
+      // ── כשל חיוב — צור משימה לטיפול + רשומת timeline ─────────────────────
+      const failLabel = cardExpired ? 'כרטיס אשראי פג תוקף' : (reason || 'חיוב נכשל')
+      await supabase.from('tasks').insert({
+        parent_id:   parentId,
+        type:        'כשל תשלום',
+        description: `כשל חיוב ב-PayPlus (${paymentType}): ${failLabel} — ₪${amount}`,
+        priority:    'דחוף',
+        status:      'פתוח',
+      })
+      await supabase.from('registration_timeline').insert({
+        parent_id:   parentId,
+        event_type:  'payment',
+        new_value:   'נכשל',
+        description: `🔴 כשל חיוב PayPlus — ${failLabel} (₪${amount})`,
+        performed_by: 'מערכת',
+        metadata:    { amount, payplus_ref: txId, card_expired: cardExpired },
+      })
+      console.log(`[PayPlus Webhook] 🔴 Failure recorded — parent ${parentId}, reason: ${failLabel}`)
     }
 
-    // ── רשומה ב-timeline ────────────────────────────────────────────────────
-    await supabase.from('registration_timeline').insert({
-      parent_id:   parentId,
-      event_type:  'payment',
-      new_value:   'שולם',
-      description: `תשלום PayPlus התקבל — ${amount}₪ (ref: ${txId})`,
-      performed_by: 'מערכת',
-    })
-
-    console.log(`[PayPlus Webhook] ✅ Success — parent ${parentId}, amount ${amount}₪`)
-    return NextResponse.json({ ok: true, parent_id: parentId })
+    return NextResponse.json({ ok: true, parent_id: parentId, success: isSuccess })
 
   } catch (err) {
     console.error('[PayPlus Webhook] Error:', err)

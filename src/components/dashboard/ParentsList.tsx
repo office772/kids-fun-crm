@@ -3,8 +3,8 @@
 import { useState } from 'react'
 import { Pencil, Grid3X3, List } from 'lucide-react'
 import { Parent } from '@/lib/types'
-import { StatusBadge } from './StatusBadge'
 import { ParentDetail } from './ParentDetail'
+import { getParentPaymentHealthInfo, getSourceLabel } from '@/lib/payment-status'
 
 interface Props {
   parents: Parent[]
@@ -94,9 +94,11 @@ export function ParentsList({
       {viewMode === 'list' && filtered.length > 0 && (
         <div className="space-y-2">
           {filtered.map(parent => {
-            const latestPayment = parent.payments?.[0]
-            const hasFailedPayment = parent.payments?.some(p => p.status === 'נכשל')
+            const health = getParentPaymentHealthInfo(parent.payments)
+            const hasFailedPayment = health.health === 'failed'
+            const hasExpiringCard = health.health === 'expiring'
             const openTasksCount = parent.tasks?.filter(t => t.status !== 'טופל').length || 0
+            const src = getSourceLabel(parent.sync_source)
 
             return (
               <button
@@ -110,13 +112,22 @@ export function ParentsList({
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-base" style={{ color: 'var(--crm-text)' }}>
                         {parent.name || 'הורה לא מזוהה'}
                       </span>
+                      <span className="text-xs rounded-full px-2 py-0.5 font-medium"
+                        style={{ background: src.bg, color: src.color }}>
+                        {src.icon} {src.label}
+                      </span>
                       {hasFailedPayment && (
                         <span className="text-xs rounded-full px-2 py-0.5 font-semibold" style={{ background: '#f5dde5', color: '#7d2d4a' }}>
-                          ⚠️ תשלום
+                          🔴 כשל תשלום
+                        </span>
+                      )}
+                      {hasExpiringCard && (
+                        <span className="text-xs rounded-full px-2 py-0.5 font-semibold" style={{ background: '#FEF9C3', color: '#7B6010' }}>
+                          🟡 כרטיס פג תוקף
                         </span>
                       )}
                       {openTasksCount > 0 && (
@@ -128,12 +139,15 @@ export function ParentsList({
                     <p className="text-stone-400 text-sm mt-0.5">📱 {parent.phone}</p>
                     {parent.children?.length ? (
                       <p className="text-stone-500 text-sm mt-1">
-                        {parent.children.map(c => `${c.name} (${c.class_name || '?'})`).join(', ')}
+                        {parent.children.map(c => `${c.name} (${c.grade || c.class_name || '?'})`).join(', ')}
                       </p>
                     ) : null}
                   </div>
                   <div className="flex flex-col items-end gap-1">
-                    {latestPayment && <StatusBadge status={latestPayment.status} size="sm" />}
+                    <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
+                      style={{ background: health.bg, color: health.color }}>
+                      {health.icon} {health.label}
+                    </span>
                     <span className="text-xs text-stone-400">
                       {new Date(parent.created_at).toLocaleDateString('he-IL')}
                     </span>
@@ -169,8 +183,10 @@ interface CardProps {
 
 function ParentGridCard({ parent, onOpen, onEdit }: CardProps) {
   const latestPayment = parent.payments?.[0]
-  const hasFailedPayment = parent.payments?.some(p => p.status === 'נכשל')
+  const health = getParentPaymentHealthInfo(parent.payments)
+  const hasFailedPayment = health.health === 'failed'
   const firstChild = parent.children?.[0]
+  const src = getSourceLabel(parent.sync_source)
 
   const formattedDate = (() => {
     try {
@@ -208,7 +224,7 @@ function ParentGridCard({ parent, onOpen, onEdit }: CardProps) {
 
       {/* Name + status badge */}
       <div
-        className="flex items-center gap-2 mb-3 cursor-pointer"
+        className="flex items-center gap-2 mb-2 cursor-pointer flex-wrap"
         onClick={() => onOpen(parent)}
       >
         <span
@@ -217,7 +233,18 @@ function ParentGridCard({ parent, onOpen, onEdit }: CardProps) {
         >
           {parent.name || 'הורה לא מזוהה'}
         </span>
-        {latestPayment && <StatusBadge status={latestPayment.status} size="sm" />}
+        <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+          style={{ background: health.bg, color: health.color }} title={health.label}>
+          {health.icon} {health.label}
+        </span>
+      </div>
+
+      {/* Source label */}
+      <div className="mb-2">
+        <span className="text-xs font-medium px-2 py-0.5 rounded-full"
+          style={{ background: src.bg, color: src.color }}>
+          {src.icon} {src.label}
+        </span>
       </div>
 
       {/* Details — clicking anywhere here opens the card */}
