@@ -6,7 +6,13 @@ import { Parent } from '@/lib/types'
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  const { name, phone, email, childName, childClass, framework, paymentStatus, paymentAmount, notes } = body
+  const {
+    name, phone, email, notes,
+    city, parent2Name, parent2Phone, parentIdNumber,
+    childName, childClass, framework, area, school, grade,
+    gender, dietary, childIdNumber,
+    paymentStatus, paymentAmount,
+  } = body
 
   if (isDemoMode()) {
     // במצב demo — מוסיפים לזיכרון בלבד
@@ -51,7 +57,16 @@ export async function POST(req: NextRequest) {
 
   const { data: parent, error: parentError } = await supabase
     .from('parents')
-    .insert({ name, phone: cleanPhone, email: email || null, notes: notes || null })
+    .insert({
+      name,
+      phone: cleanPhone,
+      email: email || null,
+      notes: notes || null,
+      city: city || null,
+      parent2_name: parent2Name || null,
+      parent2_phone: parent2Phone || null,
+      id_number: parentIdNumber || null,
+    })
     .select()
     .single()
 
@@ -63,6 +78,12 @@ export async function POST(req: NextRequest) {
       name: childName,
       class_name: childClass || null,
       framework: framework || null,
+      area_code: area || null,
+      school: school || null,
+      grade: grade || null,
+      gender: gender || null,
+      dietary: dietary || null,
+      id_number: childIdNumber || null,
     })
   }
 

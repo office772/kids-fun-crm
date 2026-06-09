@@ -36,6 +36,23 @@ function detectType(name: string): 'צהרון' | 'קייטנה' {
   return 'צהרון'
 }
 
+// ─── זיהוי ספק/חברה לפי שם ────────────────────────────────────────────────
+function isSupplier(name: string): boolean {
+  if (!name) return false
+  return (
+    /בע.?מ|ע.?מ\b|עמותה/i.test(name) ||
+    /חברה|עירוני|עירונית|תרבות|פנאי|ספורט|נופש|פיתוח|שירות|מוסד|אגודה|קואופ|מכון|מרכז קהילתי|מחלקת|עיריית|מועצה/i.test(name) ||
+    /^ה[א-ת]/.test(name) ||
+    /[a-zA-Z]{3,}/.test(name) ||
+    array4words(name)
+  )
+}
+function array4words(name: string): boolean {
+  const words = name.trim().split(/\s+/)
+  // 4+ מילים שאינן מכילות מילת ארגון = שם ארוך, ייתכן ספק
+  return words.length >= 4
+}
+
 export async function POST() {
   if (!process.env.GREENINVOICE_API_KEY_ID || !process.env.GREENINVOICE_SECRET) {
     return NextResponse.json({ error: 'Green Invoice keys missing' }, { status: 500 })
@@ -152,7 +169,7 @@ async function processGIDocuments(
         const phoneToUse = phone || `gi_${docId || Date.now()}`
         const { data: created, error: cErr } = await supabase
           .from('parents')
-          .insert({ name, email: email || null, phone: phoneToUse, sync_source: 'greeninvoice', external_ref: docId })
+          .insert({ name, email: email || null, phone: phoneToUse, sync_source: 'greeninvoice', external_ref: docId, contact_type: isSupplier(name) ? 'supplier' : 'parent' })
           .select('id')
           .single()
 

@@ -14,6 +14,7 @@ export type SyncSource =
   | 'greeninvoice'
   | 'greeninvoice_webhook'
   | 'manual'
+  | 'excel_import'
 
 export interface Parent {
   id: string
@@ -96,6 +97,8 @@ export interface Payment {
   greeninvoice_ref?: string
   source?: SyncSource
   failure_reason?: string
+  payment_number?: number            // מספר תשלום נוכחי (לדוגמה: 3)
+  total_payments?: number            // סה"כ תשלומים בסדרה (לדוגמה: 10)
   proactive_sent: boolean
   last_checked: string
   created_at: string

@@ -48,6 +48,10 @@ export async function POST(req: NextRequest) {
     const isRecurring = !!(tx?.recurring_uid ?? tx?.recurring ?? body?.recurring_uid)
     const paymentType = isRecurring ? 'הוראת קבע' : 'כרטיס אשראי'
 
+    // מספר תשלום + סה"כ תשלומים (PayPlus שולח בהוראות קבע)
+    const paymentNumber = Number(tx?.payment_number ?? tx?.payment_num ?? body?.payment_number ?? 0) || null
+    const totalPayments = Number(tx?.number_of_payments ?? tx?.num_of_payments ?? body?.number_of_payments ?? 0) || null
+
     const isSuccess = status === '000' || status === 'COMPLETED' || Number(status) === 0 || status === '1'
     const cardExpired = !isSuccess && isCardExpired(status, reason)
 
@@ -123,6 +127,8 @@ export async function POST(req: NextRequest) {
       payplus_ref:        txId || null,
       source:             'payplus_webhook',
       failure_reason:     isSuccess ? null : (reason || 'חיוב נכשל'),
+      payment_number:     paymentNumber,
+      total_payments:     totalPayments,
     })
 
     if (isSuccess) {
@@ -139,7 +145,7 @@ export async function POST(req: NextRequest) {
         parent_id:   parentId,
         event_type:  'payment',
         new_value:   'שולם',
-        description: `תשלום PayPlus התקבל — ${amount}₪ (${paymentType})`,
+        description: `תשלום PayPlus התקבל — ${amount}₪ (${paymentType})${paymentNumber && totalPayments ? ` — תשלום ${paymentNumber} מתוך ${totalPayments}` : paymentNumber ? ` — תשלום מס׳ ${paymentNumber}` : ''}`,
         performed_by: 'מערכת',
         metadata:    { amount, payplus_ref: txId },
       })

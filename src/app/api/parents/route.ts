@@ -23,11 +23,13 @@ export async function GET(req: NextRequest) {
   const { createServiceClient } = await import("@/lib/supabase/server")
   const supabase = createServiceClient()
 
+  const contactType = searchParams.get('contact_type') ?? 'parent'
+
   let query = supabase
     .from('parents')
-    .select(`*, children(*), payments(id, status, amount, due_date), tasks(id, status, priority, type), conversations(id, direction, message_text, intent, created_at)`)
+    .select(`*, children(*), payments(id, status, amount, due_date, payment_type, number_of_failures, card_expired, source), tasks(id, status, priority, type), conversations(id, direction, message_text, intent, created_at)`)
+    .eq('contact_type', contactType)
     .order('created_at', { ascending: false })
-    .limit(100)
 
   if (search) {
     query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%`)
@@ -36,4 +38,17 @@ export async function GET(req: NextRequest) {
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)
+}
+
+// Bulk delete
+export async function DELETE(req: NextRequest) {
+  const { ids } = await req.json()
+  if (!Array.isArray(ids) || ids.length === 0)
+    return NextResponse.json({ error: 'ids required' }, { status: 400 })
+  if (isDemoMode()) return NextResponse.json({ deleted: ids.length })
+  const { createServiceClient } = await import("@/lib/supabase/server")
+  const supabase = createServiceClient()
+  const { error } = await supabase.from('parents').delete().in('id', ids)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ deleted: ids.length })
 }

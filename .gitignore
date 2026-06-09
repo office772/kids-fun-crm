@@ -40,3 +40,7 @@ SESSION_*.md
 DEPLOYMENT.md
 *.xlsx
 supabase/.temp/
+
+# נתוני לקוחות — לא להעלות
+RecurringPaymentsList.csv
+*.pdf

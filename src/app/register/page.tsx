@@ -15,6 +15,47 @@ function validateIsraeliId(raw: string): boolean {
   return sum % 10 === 0
 }
 
+// מיפוי כיתה → טווח שנות לידה הגיוניות (שנת לימודים תשפ"ו = 2025/2026)
+const SCHOOL_YEAR = 2026  // שנת הלימודים הנוכחית
+const GRADE_BIRTH_RANGE: Record<string, [number, number]> = {
+  'גן':    [SCHOOL_YEAR - 7,  SCHOOL_YEAR - 4],
+  'גן חובה': [SCHOOL_YEAR - 7, SCHOOL_YEAR - 4],
+  'א':     [SCHOOL_YEAR - 8,  SCHOOL_YEAR - 6],
+  'ב':     [SCHOOL_YEAR - 9,  SCHOOL_YEAR - 7],
+  'ג':     [SCHOOL_YEAR - 10, SCHOOL_YEAR - 8],
+  'ד':     [SCHOOL_YEAR - 11, SCHOOL_YEAR - 9],
+  'ה':     [SCHOOL_YEAR - 12, SCHOOL_YEAR - 10],
+  'ו':     [SCHOOL_YEAR - 13, SCHOOL_YEAR - 11],
+}
+
+function gradeFromClass(cls: string): string | null {
+  if (!cls) return null
+  // תופס "א", "א1", "א'", "כיתה א" וכו'
+  const m = cls.match(/^(גן חובה|גן|[אבגדהוא-ת])/)
+  return m ? m[1] : null
+}
+
+function validateBirthDateVsGrade(birthDate: string, cls: string): string | null {
+  if (!birthDate || !cls) return null
+  const year = new Date(birthDate).getFullYear()
+  const today = new Date()
+
+  // לידה בעתיד
+  if (new Date(birthDate) > today) return 'תאריך לידה לא יכול להיות בעתיד'
+
+  // ילד מבוגר מדי (מעל 16)
+  if (today.getFullYear() - year > 16) return 'תאריך לידה נראה מוקדם מדי — אנא בדקי'
+
+  const grade = gradeFromClass(cls)
+  if (!grade || !GRADE_BIRTH_RANGE[grade]) return null
+
+  const [minYear, maxYear] = GRADE_BIRTH_RANGE[grade]
+  if (year < minYear || year > maxYear) {
+    return `לכיתה ${grade} מצופה שנת לידה ${minYear}–${maxYear} (הוזן: ${year}) — אנא בדקי`
+  }
+  return null
+}
+
 const AREAS: Record<string, string> = {
   sharon:  'דרום השרון / חוף השרון',
   carmel:  'חוף הכרמל',
@@ -95,6 +136,8 @@ function RegisterForm() {
     if (!healthConfirmed) { setError('יש לאשר את הצהרת הבריאות'); return }
     if (parentIdNum && !validateIsraeliId(parentIdNum)) { setError('ת.ז. הורה אינה תקינה'); return }
     if (childIdNum && !validateIsraeliId(childIdNum))   { setError('ת.ז. ילד/ה אינה תקינה'); return }
+    const birthDateErr = validateBirthDateVsGrade(childBirthDate, childClass)
+    if (birthDateErr) { setError(birthDateErr); return }
     const childName = `${childFirstName.trim()} ${childLastName.trim()}`.trim()
     setLoading(true); setError('')
 
@@ -217,7 +260,20 @@ function RegisterForm() {
                 placeholder="9 ספרות" required />
             </Field>
             <Field label="תאריך לידה" required>
-              <input type="date" value={childBirthDate} onChange={e => setChildBirthDate(e.target.value)} required />
+              <input
+                type="date"
+                value={childBirthDate}
+                onChange={e => setChildBirthDate(e.target.value)}
+                max={new Date().toISOString().split('T')[0]}
+                min="2005-01-01"
+                required
+              />
+              {(() => {
+                const warn = validateBirthDateVsGrade(childBirthDate, childClass)
+                return warn ? (
+                  <p className="text-amber-600 text-xs mt-1 font-medium">⚠️ {warn}</p>
+                ) : null
+              })()}
             </Field>
             <Field label="מין" required>
               <select value={childGender} onChange={e => setChildGender(e.target.value)} required>

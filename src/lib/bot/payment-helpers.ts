@@ -52,6 +52,16 @@ function getPayPlusBase(): string {
   return process.env.PAYPLUS_SANDBOX === 'true' ? PAYPLUS_SANDBOX_BASE : PAYPLUS_PROD_BASE
 }
 
+// ─── לינקי תשלום PayPlus סטטיים ──────────────────────────────────────────────
+// generateLink API חסום בחשבון זה — משתמשים בלינקים קיימים מהדשבורד.
+// עדכן כתובות לפי אזור אם תקבלי לינקים מתאימים יותר.
+const PAYPLUS_STATIC_LINKS: Record<string, string> = {
+  carmel:  'https://payments.payplus.co.il/l/743bc04a-0e38-4968-afce-24ddcc2d3a4f', // עתלית ₪935
+  telaviv: 'https://payments.payplus.co.il/l/249fdfe7-dd8d-4e31-9509-08d5d7a4b82c', // גני תל אביב ₪946
+  sharon:  'https://payments.payplus.co.il/l/0cbaab71-413b-4d45-b7e4-eef549c09bdf', // גני רשפון ₪1470
+  default: 'https://payments.payplus.co.il/l/743bc04a-0e38-4968-afce-24ddcc2d3a4f',
+}
+
 // ─── סימולציית דמו לפיתוח ────────────────────────────────────────────────────
 function simulatePayPlusResponse(params: PayPlusOrderParams): PayPlusOrderResult {
   const demoOrderId = `DEMO-${Math.random().toString(36).substr(2, 8).toUpperCase()}`
@@ -71,9 +81,16 @@ export async function createPayPlusPaymentLink(
 ): Promise<PayPlusOrderResult> {
   const { isDemoMode } = await import('@/lib/demo-data')
 
-  // ─── דמו מוד — סימולציה מציאותית ─────────────────────────────────────────
-  if (isDemoMode()) {
+  // ─── דמו מוד / sandbox — סימולציה מציאותית ──────────────────────────────
+  if (isDemoMode() || process.env.PAYPLUS_SANDBOX === 'true') {
     return simulatePayPlusResponse(params)
+  }
+
+  // ─── generateLink API חסום — החזר לינק סטטי לפי אזור ──────────────────
+  const staticUrl = PAYPLUS_STATIC_LINKS[params.areaCode] ?? PAYPLUS_STATIC_LINKS.default
+  if (staticUrl) {
+    console.log(`[PayPlus] Static link for area=${params.areaCode}: ${staticUrl}`)
+    return { success: true, paymentUrl: staticUrl }
   }
 
   const apiKey  = process.env.PAYPLUS_API_KEY

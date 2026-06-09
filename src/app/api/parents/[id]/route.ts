@@ -24,7 +24,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const body = await req.json()
-  const { name, phone, email, notes, childName, childClass, framework } = body
+  const {
+    name, phone, email, notes,
+    city, parent2Name, parent2Phone, parentIdNumber,
+    childName, childClass, framework, area, school, grade,
+    gender, dietary, childIdNumber,
+  } = body
 
   if (isDemoMode()) {
     const idx = DEMO_PARENTS.findIndex(p => p.id === params.id)
@@ -55,25 +60,46 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   const cleanPhone = phone?.replace(/\D/g, '').replace(/^0/, '972')
 
+  // Build parent patch — only include defined, non-empty values
+  const parentPatch: Record<string, string | null> = {
+    name,
+    email: email || null,
+    notes: notes || null,
+    city: city || null,
+    parent2_name: parent2Name || null,
+    parent2_phone: parent2Phone || null,
+    id_number: parentIdNumber || null,
+    updated_at: new Date().toISOString(),
+  }
+  if (phone) parentPatch.phone = cleanPhone
+
   const { data, error } = await supabase
     .from('parents')
-    .update({
-      name, email: email || null, notes: notes || null,
-      ...(phone && { phone: cleanPhone }),
-      updated_at: new Date().toISOString()
-    })
+    .update(parentPatch)
     .eq('id', params.id)
     .select()
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // עדכון ילד ראשון אם יש
-  if (childName) {
+  // עדכון / יצירת ילד ראשון
+  if (childName || area || school || grade || gender || dietary || childIdNumber) {
     const { data: children } = await supabase.from('children').select('id').eq('parent_id', params.id).limit(1)
+    const childPatch: Record<string, string | null> = {}
+    if (childName)      childPatch.name       = childName
+    if (childClass)     childPatch.class_name = childClass
+    if (framework)      childPatch.framework  = framework
+    if (area)           childPatch.area_code  = area
+    if (school)         childPatch.school     = school
+    if (grade)          childPatch.grade      = grade
+    if (gender)         childPatch.gender     = gender
+    if (dietary)        childPatch.dietary    = dietary
+    if (childIdNumber)  childPatch.id_number  = childIdNumber
+
     if (children?.[0]) {
-      await supabase.from('children').update({ name: childName, class_name: childClass || null, framework: framework || null })
-        .eq('id', children[0].id)
+      await supabase.from('children').update(childPatch).eq('id', children[0].id)
+    } else if (childName) {
+      await supabase.from('children').insert({ parent_id: params.id, ...childPatch })
     }
   }
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Users, ClipboardList, AlertCircle, MessageSquare } from 'lucide-react'
-import { Parent, Task } from '@/lib/types'
+import { Parent, Task, SyncSource } from '@/lib/types'
 import { Navigation } from '@/components/dashboard/Navigation'
 import { ParentsList } from '@/components/dashboard/ParentsList'
 import { TaskList } from '@/components/dashboard/TaskList'
@@ -14,11 +14,14 @@ import { BotAssets } from '@/components/dashboard/BotAssets'
 import { SystemSettings } from '@/components/dashboard/SystemSettings'
 import { RegistrationsList } from '@/components/dashboard/RegistrationsList'
 import { ParentDetail } from '@/components/dashboard/ParentDetail'
+import { GlobalSearch } from '@/components/dashboard/GlobalSearch'
+import { SuppliersList } from '@/components/dashboard/SuppliersList'
 
-type ActiveTab = 'overview' | 'parents' | 'tasks' | 'registrations' | 'simulator' | 'bot' | 'assets'
+type ActiveTab = 'overview' | 'parents' | 'tasks' | 'registrations' | 'simulator' | 'bot' | 'assets' | 'suppliers'
 
 export default function DashboardPage() {
   const [parents, setParents] = useState<Parent[]>([])
+  const [suppliers, setSuppliers] = useState<Parent[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview')
@@ -27,20 +30,27 @@ export default function DashboardPage() {
   const [editingParent, setEditingParent] = useState<Parent | null>(null)
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [statusFilter, setStatusFilter] = useState<string>('הכל')
+  const [frameworkFilter, setFrameworkFilter] = useState<string>('הכל')
+  const [areaFilter, setAreaFilter] = useState<string>('הכל')
+  const [sourceFilter, setSourceFilter] = useState<string>('הכל')
   const [detailParentId, setDetailParentId] = useState<string | null>(null)
+  const [showGlobalSearch, setShowGlobalSearch] = useState(false)
 
   const fetchData = useCallback(async () => {
     try {
-      const [parentsRes, tasksRes] = await Promise.all([
-        fetch('/api/parents'),
+      const [parentsRes, suppliersRes, tasksRes] = await Promise.all([
+        fetch('/api/parents?contact_type=parent'),
+        fetch('/api/parents?contact_type=supplier'),
         fetch('/api/tasks'),
       ])
-      const [parentsData, tasksData] = await Promise.all([
+      const [parentsData, suppliersData, tasksData] = await Promise.all([
         parentsRes.json(),
+        suppliersRes.json(),
         tasksRes.json(),
       ])
-      if (Array.isArray(parentsData)) setParents(parentsData)
-      if (Array.isArray(tasksData)) setTasks(tasksData)
+      if (Array.isArray(parentsData))   setParents(parentsData)
+      if (Array.isArray(suppliersData)) setSuppliers(suppliersData)
+      if (Array.isArray(tasksData))     setTasks(tasksData)
     } catch (e) {
       console.error('Failed to fetch data:', e)
     } finally {
@@ -51,6 +61,18 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  // Ctrl+K → global search
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault()
+        setShowGlobalSearch(true)
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
 
   const handleAddParent = async (data: Parameters<typeof fetch>[1] & object) => {
     await fetch('/api/parents/create', {
@@ -77,6 +99,21 @@ export default function DashboardPage() {
     await fetchData()
   }
 
+  const handleBulkDeleteParents = async (ids: string[]) => {
+    await fetch('/api/parents', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
+    await fetchData()
+  }
+
+  const handleDeleteTask = async (id: string) => {
+    await fetch('/api/tasks', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [id] }) })
+    setTasks(prev => prev.filter(t => t.id !== id))
+  }
+
+  const handleBulkDeleteTasks = async (ids: string[]) => {
+    await fetch('/api/tasks', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
+    setTasks(prev => prev.filter(t => !ids.includes(t.id)))
+  }
+
   const handleTaskStatusChange = async (id: string, status: string) => {
     await fetch('/api/tasks', {
       method: 'PATCH',
@@ -101,10 +138,42 @@ export default function DashboardPage() {
 
   // Filtered parents for the parents tab
   const statusFilters = ['הכל', 'שולם', 'ממתין', 'נכשל']
+  const frameworkFilters = ['הכל', 'צהרון', 'קייטנה']
+  const areaLabels: Record<string, string> = { carmel: 'כרמל', sharon: 'שרון', telaviv: 'תל אביב' }
+  const sourceLabels: Record<string, string> = {
+    manual:             'ידני',
+    payplus_recurring:  'PayPlus',
+    greeninvoice:       'חשבונית ירוקה',
+    excel_import:       'ייבוא אקסל',
+  }
+  // Derive dynamic area options from loaded parents
+  const areaOptions: string[] = ['הכל', ...Array.from(
+    new Set(parents.flatMap(p => (p.children ?? []).map(c => c.area_code).filter((a): a is string => !!a)))
+  ).sort()]
+  // Derive source options from loaded parents (only values that actually exist)
+  const sourceOptions: string[] = ['הכל', ...Array.from(
+    new Set(parents.map(p => p.sync_source).filter((s): s is SyncSource => !!s))
+  ).sort()]
+
   const filteredParents = parents.filter(p => {
+    // Payment status filter
     if (statusFilter !== 'הכל') {
       const hasStatus = p.payments?.some(pay => pay.status === statusFilter)
       if (!hasStatus) return false
+    }
+    // Framework filter (צהרון / קייטנה)
+    if (frameworkFilter !== 'הכל') {
+      const hasFramework = p.children?.some(c => c.framework === frameworkFilter)
+      if (!hasFramework) return false
+    }
+    // Area filter
+    if (areaFilter !== 'הכל') {
+      const hasArea = p.children?.some(c => c.area_code === areaFilter)
+      if (!hasArea) return false
+    }
+    // Source filter
+    if (sourceFilter !== 'הכל') {
+      if (p.sync_source !== sourceFilter) return false
     }
     return true
   })
@@ -132,7 +201,7 @@ export default function DashboardPage() {
       dir="rtl"
     >
       {/* Top navigation */}
-      <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
+      <Navigation activeTab={activeTab} onTabChange={setActiveTab} onSearchOpen={() => setShowGlobalSearch(true)} />
 
       {/* Page content */}
       <main className="max-w-7xl mx-auto px-4 md:px-8 py-8">
@@ -263,7 +332,9 @@ export default function DashboardPage() {
                   הורים
                 </h1>
                 <p className="text-sm" style={{ color: 'var(--crm-text)', opacity: 0.6 }}>
-                  {parents.length} הורים רשומים במערכת
+                  {filteredParents.length === parents.length
+                    ? `${parents.length} הורים רשומים במערכת`
+                    : `מציג ${filteredParents.length} מתוך ${parents.length} הורים`}
                 </p>
               </div>
               <button
@@ -275,87 +346,117 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            {/* Status filter pills */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {statusFilters.map(filter => (
+            {/* Filters row */}
+            <div className="flex flex-wrap gap-4">
+              {/* Payment status */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold opacity-50 ml-1">תשלום:</span>
+                {statusFilters.map(filter => (
+                  <button
+                    key={filter}
+                    onClick={() => setStatusFilter(filter)}
+                    className="px-3 py-1.5 rounded-full text-xs font-medium transition-all"
+                    style={
+                      statusFilter === filter
+                        ? { background: 'var(--crm-primary)', color: '#fff' }
+                        : { background: '#fff', color: 'var(--crm-text)', opacity: 0.65, border: '1px solid #e5e7eb' }
+                    }
+                  >
+                    {filter}
+                  </button>
+                ))}
+              </div>
+
+              {/* Framework filter */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold opacity-50 ml-1">מסגרת:</span>
+                {frameworkFilters.map(f => (
+                  <button
+                    key={f}
+                    onClick={() => setFrameworkFilter(f)}
+                    className="px-3 py-1.5 rounded-full text-xs font-medium transition-all"
+                    style={
+                      frameworkFilter === f
+                        ? { background: 'var(--crm-action)', color: 'var(--crm-text)' }
+                        : { background: '#fff', color: 'var(--crm-text)', opacity: 0.65, border: '1px solid #e5e7eb' }
+                    }
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+
+              {/* Area filter (dynamic) */}
+              {areaOptions.length > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold opacity-50 ml-1">אזור:</span>
+                  {areaOptions.map(a => (
+                    <button
+                      key={a}
+                      onClick={() => setAreaFilter(a)}
+                      className="px-3 py-1.5 rounded-full text-xs font-medium transition-all"
+                      style={
+                        areaFilter === a
+                          ? { background: 'var(--crm-action)', color: 'var(--crm-text)' }
+                          : { background: '#fff', color: 'var(--crm-text)', opacity: 0.65, border: '1px solid #e5e7eb' }
+                      }
+                    >
+                      {a === 'הכל' ? 'הכל' : (areaLabels[a] ?? a)}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Source filter */}
+              {sourceOptions.length > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold opacity-50 ml-1">מקור:</span>
+                  {sourceOptions.map(s => (
+                    <button
+                      key={s}
+                      onClick={() => setSourceFilter(s)}
+                      className="px-3 py-1.5 rounded-full text-xs font-medium transition-all"
+                      style={
+                        sourceFilter === s
+                          ? { background: 'var(--crm-primary)', color: '#fff' }
+                          : { background: '#fff', color: 'var(--crm-text)', opacity: 0.65, border: '1px solid #e5e7eb' }
+                      }
+                    >
+                      {s === 'הכל' ? 'הכל' : (sourceLabels[s] ?? s)}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Active filter count + clear */}
+              {(statusFilter !== 'הכל' || frameworkFilter !== 'הכל' || areaFilter !== 'הכל' || sourceFilter !== 'הכל') && (
                 <button
-                  key={filter}
-                  onClick={() => setStatusFilter(filter)}
-                  className="px-4 py-1.5 rounded-full text-sm font-medium transition-all"
-                  style={
-                    statusFilter === filter
-                      ? { background: 'var(--crm-action)', color: 'var(--crm-text)' }
-                      : {
-                          background: '#fff',
-                          color: 'var(--crm-text)',
-                          opacity: 0.65,
-                          border: '1px solid #e5e7eb',
-                        }
-                  }
+                  onClick={() => { setStatusFilter('הכל'); setFrameworkFilter('הכל'); setAreaFilter('הכל'); setSourceFilter('הכל') }}
+                  className="px-3 py-1.5 rounded-full text-xs font-medium transition-all"
+                  style={{ background: '#fee2e2', color: '#9d3d5e' }}
                 >
-                  {filter}
+                  ✕ נקה סינון
                 </button>
-              ))}
+              )}
             </div>
 
-            {/* Search + view toggle */}
-            <div className="flex items-center gap-3">
-              <div className="flex-1 relative">
-                <input
-                  type="text"
-                  placeholder="🔍  חיפוש לפי שם הורה, שם ילד, או טלפון..."
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  className="w-full border-2 border-gray-200 rounded-full px-5 py-3 text-base focus:outline-none bg-white text-right placeholder:text-gray-400 transition-colors"
-                  onFocus={e => (e.target.style.borderColor = 'var(--crm-primary)')}
-                  onBlur={e => (e.target.style.borderColor = '#e5e7eb')}
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-
-              {/* Grid / List toggle */}
-              <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-full px-1 py-1">
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className="p-1.5 rounded-full transition-colors"
-                  style={
-                    viewMode === 'grid'
-                      ? { background: 'var(--crm-primary)', color: '#fff' }
-                      : { color: 'var(--crm-text)', opacity: 0.5 }
-                  }
-                  title="תצוגת כרטיסים"
-                >
-                  {/* Grid icon */}
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-                    <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-                  </svg>
+            {/* Search */}
+            <div className="flex-1 relative max-w-lg">
+              <input
+                type="text"
+                placeholder="🔍  חיפוש לפי שם הורה, שם ילד, או טלפון..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full border-2 border-gray-200 rounded-full px-5 py-3 text-base focus:outline-none bg-white text-right placeholder:text-gray-400 transition-colors"
+                onFocus={e => (e.target.style.borderColor = 'var(--crm-primary)')}
+                onBlur={e => (e.target.style.borderColor = '#e5e7eb')}
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg">
+                  ✕
                 </button>
-                <button
-                  onClick={() => setViewMode('list')}
-                  className="p-1.5 rounded-full transition-colors"
-                  style={
-                    viewMode === 'list'
-                      ? { background: 'var(--crm-primary)', color: '#fff' }
-                      : { color: 'var(--crm-text)', opacity: 0.5 }
-                  }
-                  title="תצוגת רשימה"
-                >
-                  {/* List icon */}
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
-                    <line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/>
-                    <line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-                  </svg>
-                </button>
-              </div>
+              )}
             </div>
 
             {/* Parents grid/list */}
@@ -364,7 +465,9 @@ export default function DashboardPage() {
               searchQuery={searchQuery}
               onEdit={setEditingParent}
               onDelete={handleDeleteParent}
+              onBulkDelete={handleBulkDeleteParents}
               viewMode={viewMode}
+              onViewModeChange={setViewMode}
             />
           </div>
         )}
@@ -386,8 +489,31 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-              <TaskList tasks={tasks} onStatusChange={handleTaskStatusChange} />
+              <TaskList
+                tasks={tasks}
+                onStatusChange={handleTaskStatusChange}
+                onDelete={handleDeleteTask}
+                onBulkDelete={handleBulkDeleteTasks}
+              />
             </div>
+          </div>
+        )}
+
+        {/* ── ספקים ─────────────────────────────────────────────── */}
+        {activeTab === 'suppliers' && (
+          <div className="space-y-6">
+            <div className="flex items-end justify-between">
+              <div>
+                <h1 className="text-5xl font-bold leading-none mb-1"
+                  style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}>
+                  ספקים ושותפים
+                </h1>
+                <p className="text-sm" style={{ color: 'var(--crm-text)', opacity: 0.6 }}>
+                  {suppliers.length} גופים — ייבוא מחשבונית ירוקה
+                </p>
+              </div>
+            </div>
+            <SuppliersList suppliers={suppliers} onRefresh={fetchData} />
           </div>
         )}
 
@@ -479,6 +605,20 @@ export default function DashboardPage() {
           parentId={detailParentId}
           onClose={() => setDetailParentId(null)}
           onRefresh={fetchData}
+        />
+      )}
+
+      {/* Global search overlay */}
+      {showGlobalSearch && (
+        <GlobalSearch
+          parents={parents}
+          suppliers={suppliers}
+          tasks={tasks}
+          onClose={() => setShowGlobalSearch(false)}
+          onNavigate={(tab, itemId) => {
+            setActiveTab(tab)
+            if (itemId) setDetailParentId(itemId)
+          }}
         />
       )}
     </div>
@@ -663,22 +803,49 @@ interface SimMessage {
   createdTask?: boolean
 }
 
+const WELCOME_MSG: SimMessage = {
+  role: 'bot',
+  text: 'שלום! 😊 כאן Kids & Fun!\n\n*1* — רישום לצהרון\n*2* — רישום לקייטנה\n*3* — ביטול\n*4* — שעות ולוח זמנים\n*5* — תשלומים\n*6* — איסוף מוקדם\n\nאו פשוט כתוב/י מה צריך 💬',
+}
+const SIM_STORAGE_KEY = 'kf_sim_state'
+
+function loadSimState() {
+  try {
+    const raw = localStorage.getItem(SIM_STORAGE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw) as {
+      messages: SimMessage[]
+      currentFlow: string | null
+      collectedData: Record<string, string>
+      lastIntent: string | null
+      msgCount: number
+      sessionId: string
+    }
+  } catch { return null }
+}
+
 function BotSimulator() {
-  const [messages, setMessages] = useState<SimMessage[]>([
-    {
-      role: 'bot',
-      text: 'שלום! 😊 כאן Kids & Fun!\n\n*1* — רישום לצהרון\n*2* — רישום לקייטנה\n*3* — ביטול\n*4* — שעות ולוח זמנים\n*5* — תשלומים\n*6* — איסוף מוקדם\n\nאו פשוט כתוב/י מה צריך 💬',
-    },
-  ])
+  const saved = typeof window !== 'undefined' ? loadSimState() : null
+
+  const [messages, setMessages] = useState<SimMessage[]>(saved?.messages ?? [WELCOME_MSG])
   const [input, setInput] = useState('')
   const [botLoading, setBotLoading] = useState(false)
-  const [currentFlow, setCurrentFlow] = useState<string | null>(null)
-  const [collectedData, setCollectedData] = useState<Record<string, string>>({})
-  const [lastIntent, setLastIntent] = useState<string | null>(null)
-  const [msgCount, setMsgCount] = useState(0)
+  const [currentFlow, setCurrentFlow] = useState<string | null>(saved?.currentFlow ?? null)
+  const [collectedData, setCollectedData] = useState<Record<string, string>>(saved?.collectedData ?? {})
+  const [lastIntent, setLastIntent] = useState<string | null>(saved?.lastIntent ?? null)
+  const [msgCount, setMsgCount] = useState(saved?.msgCount ?? 0)
   const chatRef = useRef<HTMLDivElement>(null)
-  // stable session id per mount
-  const sessionIdRef = useRef('sim_' + Date.now())
+  const sessionIdRef = useRef(saved?.sessionId ?? ('sim_' + Date.now()))
+
+  // persist state to localStorage on every change
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIM_STORAGE_KEY, JSON.stringify({
+        messages, currentFlow, collectedData, lastIntent, msgCount,
+        sessionId: sessionIdRef.current,
+      }))
+    } catch { /* storage full or private mode */ }
+  }, [messages, currentFlow, collectedData, lastIntent, msgCount])
 
   // auto-scroll chat
   useEffect(() => {
@@ -688,14 +855,13 @@ function BotSimulator() {
   }, [messages, botLoading])
 
   const reset = () => {
-    setMessages([{
-      role: 'bot',
-      text: 'שלום! 😊 כאן Kids & Fun!\n\n*1* — רישום לצהרון\n*2* — רישום לקייטנה\n*3* — ביטול\n*4* — שעות ולוח זמנים\n*5* — תשלומים\n*6* — איסוף מוקדם\n\nאו פשוט כתוב/י מה צריך 💬',
-    }])
+    setMessages([WELCOME_MSG])
     setCurrentFlow(null)
     setCollectedData({})
     setLastIntent(null)
     setMsgCount(0)
+    sessionIdRef.current = 'sim_' + Date.now()
+    try { localStorage.removeItem(SIM_STORAGE_KEY) } catch { /* ignore */ }
     fetch('/api/bot/simulate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

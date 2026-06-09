@@ -524,7 +524,7 @@ export function ParentDetail({ parentId, onClose, onRefresh }: ParentDetailProps
                         <div key={pay.id} className="rounded-xl p-3 flex items-center justify-between border"
                           style={{ borderColor: '#e5e7eb', background: '#fff' }}>
                           <div className="min-w-0">
-                            <p className="text-sm font-semibold flex items-center gap-1.5" style={{ color: '#5E4B35' }}>
+                            <p className="text-sm font-semibold flex items-center gap-1.5 flex-wrap" style={{ color: '#5E4B35' }}>
                               <span title={h.label}>{h.icon}</span>
                               ₪{pay.amount}
                               {pay.payment_type && (
@@ -533,8 +533,21 @@ export function ParentDetail({ parentId, onClose, onRefresh }: ParentDetailProps
                                   {pay.payment_type}
                                 </span>
                               )}
+                              {pay.payment_number && pay.total_payments && (
+                                <span className="text-xs font-semibold px-1.5 py-0.5 rounded"
+                                  style={{ background: '#eff6ff', color: '#1d4ed8' }}>
+                                  תשלום {pay.payment_number}/{pay.total_payments}
+                                </span>
+                              )}
+                              {pay.payment_number && !pay.total_payments && (
+                                <span className="text-xs font-normal px-1.5 py-0.5 rounded"
+                                  style={{ background: '#eff6ff', color: '#1d4ed8' }}>
+                                  תשלום מס׳ {pay.payment_number}
+                                </span>
+                              )}
                             </p>
                             <p className="text-xs mt-0.5" style={{ color: '#a8a29e' }}>
+                              {pay.paid_at && `שולם: ${new Date(pay.paid_at).toLocaleDateString('he-IL')}`}
                               {pay.due_date && `תאריך חיוב: ${new Date(pay.due_date).toLocaleDateString('he-IL')}`}
                               {!!pay.number_of_failures && ` · ${pay.number_of_failures} כשלונות חיוב`}
                               {pay.card_expired && ` · כרטיס פג תוקף`}

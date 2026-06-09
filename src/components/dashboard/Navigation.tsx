@@ -1,9 +1,9 @@
 'use client'
 
-import { LayoutDashboard, Users, ClipboardList, MessageSquare, Bot, FileText, Settings, Link2, HelpCircle } from 'lucide-react'
+import { LayoutDashboard, Users, ClipboardList, MessageSquare, Bot, FileText, Link2, Building2, HelpCircle, Settings, Search } from 'lucide-react'
 import Link from 'next/link'
 
-type ActiveTab = 'overview' | 'parents' | 'tasks' | 'registrations' | 'simulator' | 'bot' | 'assets'
+type ActiveTab = 'overview' | 'parents' | 'tasks' | 'registrations' | 'simulator' | 'bot' | 'assets' | 'suppliers'
 
 interface NavLink {
   id: ActiveTab
@@ -14,19 +14,21 @@ interface NavLink {
 interface Props {
   activeTab: ActiveTab
   onTabChange: (tab: ActiveTab) => void
+  onSearchOpen?: () => void
 }
 
 const navLinks: NavLink[] = [
-  { id: 'overview', label: 'סקירה', icon: <LayoutDashboard size={18} /> },
-  { id: 'parents', label: 'הורים', icon: <Users size={18} /> },
-  { id: 'registrations', label: 'רישומים', icon: <FileText size={18} /> },
-  { id: 'tasks', label: 'פניות', icon: <ClipboardList size={18} /> },
-  { id: 'simulator', label: 'סימולטור',        icon: <MessageSquare size={18} /> },
-  { id: 'bot',       label: 'תוכן הבוט',       icon: <Bot size={18} /> },
-  { id: 'assets',    label: 'קבצים וקישורים',  icon: <Link2 size={18} /> },
+  { id: 'overview',     label: 'סקירה',           icon: <LayoutDashboard size={18} /> },
+  { id: 'parents',      label: 'הורים',            icon: <Users size={18} /> },
+  { id: 'registrations',label: 'רישומים',          icon: <FileText size={18} /> },
+  { id: 'tasks',        label: 'פניות',            icon: <ClipboardList size={18} /> },
+  { id: 'suppliers',    label: 'ספקים',            icon: <Building2 size={18} /> },
+  { id: 'simulator',    label: 'סימולטור',          icon: <MessageSquare size={18} /> },
+  { id: 'bot',          label: 'תוכן הבוט',        icon: <Bot size={18} /> },
+  { id: 'assets',       label: 'קבצים וקישורים',   icon: <Link2 size={18} /> },
 ]
 
-export function Navigation({ activeTab, onTabChange }: Props) {
+export function Navigation({ activeTab, onTabChange, onSearchOpen }: Props) {
   const today = new Date().toLocaleDateString('he-IL', {
     weekday: 'long',
     day: 'numeric',
@@ -73,8 +75,19 @@ export function Navigation({ activeTab, onTabChange }: Props) {
           })}
         </nav>
 
-        {/* Left: Date + Admin link */}
+        {/* Left: Search + Date + Admin link */}
         <div className="flex-shrink-0 flex items-center gap-4">
+          {onSearchOpen && (
+            <button
+              onClick={onSearchOpen}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all hover:bg-[#f5e6d8]"
+              style={{ color: 'var(--crm-text)', opacity: 0.75 }}
+              title="חיפוש גלובאלי (Ctrl+K)"
+            >
+              <Search size={15} />
+              <span className="hidden sm:inline">חיפוש</span>
+            </button>
+          )}
           <Link
             href="/register"
             target="_blank"

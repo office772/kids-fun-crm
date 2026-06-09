@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { ChevronDown, Check, RefreshCw, Send, Copy, CheckCheck } from 'lucide-react'
+import { ChevronDown, Check, RefreshCw, Send, Copy, CheckCheck, Trash2, Search } from 'lucide-react'
 import { Registration } from '@/lib/types'
 
 // ─── מיפוי area_code → label ──────────────────────────────────────────────────
@@ -267,9 +267,11 @@ export function RegistrationsList({ onOpenParent }: { onOpenParent?: (parentId: 
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<string>('הכל')
   const [typeFilter, setTypeFilter] = useState<string>('הכל')
+  const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   // ─── offer spot state ────────────────────────────────────────────────────────
-  const [offerPanelId, setOfferPanelId]   = useState<string | null>(null)   // id של רישום פתוח
-  const [offeredIds,   setOfferedIds]     = useState<Set<string>>(new Set()) // הצעות שנשלחו
+  const [offerPanelId, setOfferPanelId]   = useState<string | null>(null)
+  const [offeredIds,   setOfferedIds]     = useState<Set<string>>(new Set())
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -294,18 +296,44 @@ export function RegistrationsList({ onOpenParent }: { onOpenParent?: (parentId: 
   }
 
   const handleOfferSuccess = (regId: string) => {
-    // מעדכן סטטוס optimistically → ממתין לאישור
     setRegistrations(prev =>
       prev.map(r => r.id === regId ? { ...r, status: 'ממתין לאישור' } : r)
     )
     setOfferedIds(prev => { const s = new Set(prev); s.add(regId); return s })
-    // לא סוגרים את הפאנל — מציגים מצב "הצלחה" בתוכו
   }
 
-  // Filter
+  const handleDelete = async (id: string) => {
+    if (!confirm('למחוק רישום זה?')) return
+    setRegistrations(prev => prev.filter(r => r.id !== id))
+    setSelected(prev => { const s = new Set(prev); s.delete(id); return s })
+    await fetch('/api/registrations', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [id] }) })
+  }
+
+  const handleBulkDelete = async () => {
+    if (selected.size === 0) return
+    if (!confirm(`למחוק ${selected.size} רישומים?`)) return
+    const ids = Array.from(selected)
+    setRegistrations(prev => prev.filter(r => !ids.includes(r.id)))
+    setSelected(new Set())
+    await fetch('/api/registrations', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
+  }
+
+  const toggleSelect = (id: string) => {
+    setSelected(prev => { const s = new Set(prev); if (s.has(id)) { s.delete(id) } else { s.add(id) } return s })
+  }
+
+  // Filter + search
   const filtered = registrations.filter(r => {
     if (statusFilter !== 'הכל' && r.status !== statusFilter) return false
     if (typeFilter !== 'הכל' && r.type !== typeFilter) return false
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      const match =
+        r.parent?.name?.toLowerCase().includes(q) ||
+        r.child?.name?.toLowerCase().includes(q) ||
+        r.area_code?.toLowerCase().includes(q)
+      if (!match) return false
+    }
     return true
   })
 
@@ -336,25 +364,18 @@ export function RegistrationsList({ onOpenParent }: { onOpenParent?: (parentId: 
         ))}
       </div>
 
-      {/* Filters */}
+      {/* Filters + search */}
       <div className="flex flex-wrap items-center gap-2">
         {/* Status filters */}
         <div className="flex gap-1.5 flex-wrap">
           {['הכל', ...STATUS_ORDER].map(s => (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
+            <button key={s} onClick={() => setStatusFilter(s)}
               className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
-              style={
-                statusFilter === s
-                  ? { background: '#6D436D', color: '#fff' }
-                  : { background: '#f5f5f4', color: '#78716c', border: '1px solid #e5e7eb' }
-              }
-            >
+              style={statusFilter === s
+                ? { background: '#6D436D', color: '#fff' }
+                : { background: '#f5f5f4', color: '#78716c', border: '1px solid #e5e7eb' }}>
               {s}
-              {counts[s] !== undefined && counts[s] > 0 && (
-                <span className="mr-1 opacity-70">({counts[s]})</span>
-              )}
+              {counts[s] !== undefined && counts[s] > 0 && <span className="mr-1 opacity-70">({counts[s]})</span>}
             </button>
           ))}
         </div>
@@ -363,29 +384,43 @@ export function RegistrationsList({ onOpenParent }: { onOpenParent?: (parentId: 
 
         {/* Type filters */}
         {['הכל', 'צהרון', 'קייטנה'].map(t => (
-          <button
-            key={t}
-            onClick={() => setTypeFilter(t)}
+          <button key={t} onClick={() => setTypeFilter(t)}
             className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
-            style={
-              typeFilter === t
-                ? { background: '#2A6B6B', color: '#fff' }
-                : { background: '#f5f5f4', color: '#78716c', border: '1px solid #e5e7eb' }
-            }
-          >
+            style={typeFilter === t
+              ? { background: '#2A6B6B', color: '#fff' }
+              : { background: '#f5f5f4', color: '#78716c', border: '1px solid #e5e7eb' }}>
             {t === 'צהרון' ? '🎒 ' : t === 'קייטנה' ? '🏕️ ' : ''}{t}
           </button>
         ))}
 
-        <button
-          onClick={load}
-          className="p-1.5 rounded-full hover:bg-gray-100 transition-colors mr-auto"
-          style={{ color: '#a8a29e' }}
-          title="רענן"
-        >
+        {/* Search */}
+        <div className="relative">
+          <Search size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2" style={{ color: '#a8a29e' }} />
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="חיפוש הורה / ילד..."
+            className="pr-8 pl-3 py-1.5 text-xs border border-gray-200 rounded-full focus:outline-none bg-white text-right w-44"
+          />
+        </div>
+
+        <button onClick={load} className="p-1.5 rounded-full hover:bg-gray-100 transition-colors mr-auto"
+          style={{ color: '#a8a29e' }} title="רענן">
           <RefreshCw size={14} />
         </button>
       </div>
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2 rounded-xl text-sm"
+          style={{ background: '#fce9e6', border: '1px solid #f5c6b8' }}>
+          <span style={{ color: '#a05a4f' }}>{selected.size} נבחרו</span>
+          <button onClick={handleBulkDelete}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold mr-auto"
+            style={{ background: '#c0392b', color: '#fff' }}>
+            <Trash2 size={12} /> מחק נבחרים
+          </button>
+          <button onClick={() => setSelected(new Set())} className="text-xs underline" style={{ color: '#a8a29e' }}>בטל</button>
+        </div>
+      )}
 
       {/* Table / Cards */}
       {loading ? (
@@ -419,21 +454,32 @@ export function RegistrationsList({ onOpenParent }: { onOpenParent?: (parentId: 
             const isWaiting    = reg.status === 'רשימת המתנה'
             const isOfferOpen  = offerPanelId === reg.id
             const wasOffered   = offeredIds.has(reg.id)
+            const isSelected   = selected.has(reg.id)
 
             return (
               <div
                 key={reg.id}
                 className="bg-white rounded-2xl border p-4 hover:shadow-sm transition-all"
                 style={{
-                  borderColor: isPending ? '#e8d0b8' : isWaiting ? '#e8c8bb' : '#e5e7eb',
-                  background:  isPending ? '#fdf3e8' : '#fff',
+                  borderColor: isSelected ? 'var(--crm-primary)' : isPending ? '#e8d0b8' : isWaiting ? '#e8c8bb' : '#e5e7eb',
+                  background:  isSelected ? '#fdf6ef' : isPending ? '#fdf3e8' : '#fff',
+                  boxShadow:   isSelected ? '0 0 0 1.5px var(--crm-primary)' : undefined,
                   cursor: onOpenParent ? 'pointer' : 'default',
                 }}
                 onClick={() => onOpenParent?.(reg.parent_id)}
               >
                 <div className="flex items-center justify-between gap-3 flex-wrap">
+                  {/* Checkbox */}
+                  <div
+                    className="w-4 h-4 rounded border-2 flex-shrink-0 cursor-pointer flex items-center justify-center"
+                    style={isSelected ? { background: 'var(--crm-primary)', borderColor: 'var(--crm-primary)' } : { borderColor: '#d1d5db' }}
+                    onClick={e => { e.stopPropagation(); toggleSelect(reg.id) }}
+                  >
+                    {isSelected && <span className="text-white text-xs font-bold leading-none">✓</span>}
+                  </div>
+
                   {/* Parent + child info */}
-                  <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div
                       className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base flex-shrink-0"
                       style={{ background: '#e8d5e8', color: '#6D436D' }}
@@ -493,6 +539,16 @@ export function RegistrationsList({ onOpenParent }: { onOpenParent?: (parentId: 
                         onChange={newStatus => handleStatusChange(reg, newStatus)}
                       />
                     </div>
+
+                    {/* Delete */}
+                    <button
+                      onClick={e => { e.stopPropagation(); handleDelete(reg.id) }}
+                      className="p-1.5 rounded-full hover:bg-red-50 transition-colors flex-shrink-0"
+                      style={{ color: '#e57373' }}
+                      title="מחיקה"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
                 </div>
 
