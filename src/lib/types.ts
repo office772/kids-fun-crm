@@ -15,6 +15,7 @@ export type SyncSource =
   | 'greeninvoice_webhook'
   | 'manual'
   | 'excel_import'
+  | 'woocommerce'
 
 export interface Parent {
   id: string
@@ -25,6 +26,9 @@ export interface Parent {
   branch_id?: string
   sync_source?: SyncSource
   external_ref?: string
+  is_archived?: boolean
+  archive_reason?: string        // 'קייטנה' | 'אחר'
+  archived_at?: string
   created_at: string
   updated_at: string
   // joined

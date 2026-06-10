@@ -30,9 +30,14 @@ create table if not exists parents (
   email text,
   notes text,
   branch_id uuid references branches(id),
+  is_archived boolean not null default false,  -- ארכיון: לקוחות קייטנה/חד-פעמי (לא נמחקים!)
+  archive_reason text,                          -- 'קייטנה' | 'אחר'
+  archived_at timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+create index if not exists idx_parents_archived on parents(is_archived) where is_archived;
 
 -- =========================================
 -- ילדים (כל הורה יכול להיות עם מספר ילדים)

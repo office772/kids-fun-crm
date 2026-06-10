@@ -1,9 +1,9 @@
 'use client'
 
-import { LayoutDashboard, Users, ClipboardList, MessageSquare, Bot, FileText, Link2, Building2, HelpCircle, Settings, Search } from 'lucide-react'
+import { LayoutDashboard, Users, ClipboardList, MessageSquare, Bot, FileText, Link2, Building2, HelpCircle, Settings, Search, Archive } from 'lucide-react'
 import Link from 'next/link'
 
-type ActiveTab = 'overview' | 'parents' | 'tasks' | 'registrations' | 'simulator' | 'bot' | 'assets' | 'suppliers'
+type ActiveTab = 'overview' | 'parents' | 'tasks' | 'registrations' | 'simulator' | 'bot' | 'assets' | 'suppliers' | 'archive'
 
 interface NavLink {
   id: ActiveTab
@@ -23,6 +23,7 @@ const navLinks: NavLink[] = [
   { id: 'registrations',label: 'רישומים',          icon: <FileText size={18} /> },
   { id: 'tasks',        label: 'פניות',            icon: <ClipboardList size={18} /> },
   { id: 'suppliers',    label: 'ספקים',            icon: <Building2 size={18} /> },
+  { id: 'archive',      label: 'ארכיון',           icon: <Archive size={18} /> },
   { id: 'simulator',    label: 'סימולטור',          icon: <MessageSquare size={18} /> },
   { id: 'bot',          label: 'תוכן הבוט',        icon: <Bot size={18} /> },
   { id: 'assets',       label: 'קבצים וקישורים',   icon: <Link2 size={18} /> },
@@ -65,7 +66,8 @@ export function Navigation({ activeTab, onTabChange, onSearchOpen }: Props) {
                 style={
                   isActive
                     ? { background: 'var(--crm-action)', color: 'var(--crm-text)' }
-                    : { color: 'var(--crm-text)', opacity: 0.65 }
+                    // טאב הארכיון מוצג מעומעם יותר — מודול "לא פעיל" של נתוני עבר
+                    : { color: 'var(--crm-text)', opacity: link.id === 'archive' ? 0.4 : 0.65 }
                 }
               >
                 {link.icon}

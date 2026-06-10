@@ -24,11 +24,13 @@ export async function GET(req: NextRequest) {
   const supabase = createServiceClient()
 
   const contactType = searchParams.get('contact_type') ?? 'parent'
+  const archived = searchParams.get('archived') === 'true'
 
   let query = supabase
     .from('parents')
     .select(`*, children(*), payments(id, status, amount, due_date, payment_type, number_of_failures, card_expired, source), tasks(id, status, priority, type), conversations(id, direction, message_text, intent, created_at)`)
     .eq('contact_type', contactType)
+    .eq('is_archived', archived)
     .order('created_at', { ascending: false })
 
   if (search) {

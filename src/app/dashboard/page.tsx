@@ -16,12 +16,14 @@ import { RegistrationsList } from '@/components/dashboard/RegistrationsList'
 import { ParentDetail } from '@/components/dashboard/ParentDetail'
 import { GlobalSearch } from '@/components/dashboard/GlobalSearch'
 import { SuppliersList } from '@/components/dashboard/SuppliersList'
+import { ArchiveList } from '@/components/dashboard/ArchiveList'
 
-type ActiveTab = 'overview' | 'parents' | 'tasks' | 'registrations' | 'simulator' | 'bot' | 'assets' | 'suppliers'
+type ActiveTab = 'overview' | 'parents' | 'tasks' | 'registrations' | 'simulator' | 'bot' | 'assets' | 'suppliers' | 'archive'
 
 export default function DashboardPage() {
   const [parents, setParents] = useState<Parent[]>([])
   const [suppliers, setSuppliers] = useState<Parent[]>([])
+  const [archivedParents, setArchivedParents] = useState<Parent[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview')
@@ -38,18 +40,21 @@ export default function DashboardPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [parentsRes, suppliersRes, tasksRes] = await Promise.all([
+      const [parentsRes, suppliersRes, archivedRes, tasksRes] = await Promise.all([
         fetch('/api/parents?contact_type=parent'),
         fetch('/api/parents?contact_type=supplier'),
+        fetch('/api/parents?contact_type=parent&archived=true'),
         fetch('/api/tasks'),
       ])
-      const [parentsData, suppliersData, tasksData] = await Promise.all([
+      const [parentsData, suppliersData, archivedData, tasksData] = await Promise.all([
         parentsRes.json(),
         suppliersRes.json(),
+        archivedRes.json(),
         tasksRes.json(),
       ])
       if (Array.isArray(parentsData))   setParents(parentsData)
       if (Array.isArray(suppliersData)) setSuppliers(suppliersData)
+      if (Array.isArray(archivedData))  setArchivedParents(archivedData)
       if (Array.isArray(tasksData))     setTasks(tasksData)
     } catch (e) {
       console.error('Failed to fetch data:', e)
@@ -145,6 +150,7 @@ export default function DashboardPage() {
     payplus_recurring:  'PayPlus',
     greeninvoice:       'חשבונית ירוקה',
     excel_import:       'ייבוא אקסל',
+    woocommerce:        'אתר (קייטנות)',
   }
   // Derive dynamic area options from loaded parents
   const areaOptions: string[] = ['הכל', ...Array.from(
@@ -514,6 +520,13 @@ export default function DashboardPage() {
               </div>
             </div>
             <SuppliersList suppliers={suppliers} onRefresh={fetchData} />
+          </div>
+        )}
+
+        {/* ── ארכיון (קייטנות ואירועים חד-פעמיים) ───────────────── */}
+        {activeTab === 'archive' && (
+          <div className="space-y-6">
+            <ArchiveList archived={archivedParents} onRefresh={fetchData} />
           </div>
         )}
 
