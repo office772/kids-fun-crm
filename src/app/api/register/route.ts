@@ -138,6 +138,23 @@ export async function POST(req: NextRequest) {
       priority:    'רגיל',
     })
 
+    // ─── מייל אישור להורה (לא-חוסם — כשל במייל לא מפיל את הרישום) ──────────
+    if (parentEmail) {
+      try {
+        const { sendRegistrationConfirmation } = await import('@/lib/email')
+        await sendRegistrationConfirmation({
+          to:         parentEmail,
+          parentName,
+          childName,
+          areaCode,
+          className:  childClass || undefined,
+          school:     body.childSchool || undefined,
+        })
+      } catch (emailErr) {
+        console.error('[Register] Email send failed (non-blocking):', emailErr)
+      }
+    }
+
     return NextResponse.json({
       success:        true,
       registrationId: registration.id,
