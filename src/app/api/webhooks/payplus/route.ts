@@ -21,10 +21,32 @@ function isCardExpired(statusCode: string, reason: string): boolean {
   return /expir|פג תוקף|פג-תוקף|054|033/.test(s)
 }
 
+// PayPlus עשוי לשלוח callback גם כ-GET עם query params (תלוי בהגדרת "שיטת החזרת מידע" בדף הסליקה)
+export async function GET(req: NextRequest) {
+  const params = Object.fromEntries(new URL(req.url).searchParams.entries())
+  console.log('[PayPlus Webhook GET]', JSON.stringify(params))
+  return handlePayPlusEvent(params)
+}
+
 export async function POST(req: NextRequest) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let body: Record<string, any> = {}
   try {
-    const body = await req.json()
-    console.log('[PayPlus Webhook]', JSON.stringify(body, null, 2))
+    const raw = await req.text()
+    if (raw.trim().startsWith('{')) {
+      body = JSON.parse(raw)
+    } else if (raw.includes('=')) {
+      // form-encoded
+      body = Object.fromEntries(new URLSearchParams(raw).entries())
+    }
+  } catch { /* גוף לא קריא — ימשיך עם אובייקט ריק וייעצר בבדיקת התקינות */ }
+  console.log('[PayPlus Webhook]', JSON.stringify(body, null, 2))
+  return handlePayPlusEvent(body)
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function handlePayPlusEvent(body: Record<string, any>) {
+  try {
 
     // ── חילוץ נתונים ────────────────────────────────────────────────────────
     const tx        = body?.transaction ?? body?.Transaction ?? body
@@ -56,6 +78,13 @@ export async function POST(req: NextRequest) {
     const cardExpired = !isSuccess && isCardExpired(status, reason)
 
     console.log(`[PayPlus Webhook] status=${status}, success=${isSuccess}, txId=${txId}, name=${name}, phone=${rawPhone}`)
+
+    // ── בדיקת תקינות: בלי שום פרט מזהה (לקוח/עסקה/סכום) — זה ping או קריאה ריקה.
+    // לא יוצרים "הורה לא ידוע" ולא רושמים תשלום.
+    if (!txId && !rawPhone && !name && !email && !amount) {
+      console.log('[PayPlus Webhook] Empty/ping payload — ignoring')
+      return NextResponse.json({ ok: true, ignored: true })
+    }
 
     const { createServiceClient } = await import('@/lib/supabase/server')
     const supabase = createServiceClient()
