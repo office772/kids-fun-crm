@@ -894,7 +894,17 @@ function BotSimulator() {
       const res = await fetch('/api/bot/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMsg, sessionId: sessionIdRef.current }),
+        body: JSON.stringify({
+          message: userMsg,
+          sessionId: sessionIdRef.current,
+          // מצב מהדפדפן — מאפשר לשרת לשחזר את ה-session אחרי רענון
+          // (ב-Vercel הזיכרון של השרת מתאפס בין קריאות)
+          clientState: {
+            currentFlow,
+            collectedData,
+            messages: messages.slice(-10).map(m => ({ role: m.role, text: m.text })),
+          },
+        }),
       })
       const data = await res.json() as {
         reply?: string

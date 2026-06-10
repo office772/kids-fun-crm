@@ -9,7 +9,7 @@ const simulatorSessions = new Map<string, BotSession>()
 
 export async function POST(req: NextRequest) {
   try {
-    const { message, sessionId, parentName, reset } = await req.json()
+    const { message, sessionId, parentName, reset, clientState } = await req.json()
 
     if (!message || !sessionId) {
       return NextResponse.json({ error: 'Missing message or sessionId' }, { status: 400 })
@@ -19,12 +19,23 @@ export async function POST(req: NextRequest) {
       simulatorSessions.delete(sessionId)
     }
 
+    // ב-Vercel (serverless) הזיכרון מתאפס בין קריאות — אם ה-session לא בזיכרון,
+    // משחזרים אותו ממצב הלקוח (localStorage בדפדפן) כדי שהמסלול לא "יישכח" אחרי רענון.
     const session: BotSession = simulatorSessions.get(sessionId) || {
       sessionId,
       phone: 'simulator',
       parentName: parentName || 'הורה לדוגמה',
-      messages: [],
-      collectedData: {},
+      currentFlow: clientState?.currentFlow || undefined,
+      messages: Array.isArray(clientState?.messages)
+        ? clientState.messages.slice(-10).map((m: { role: string; text: string }) => ({
+            role: m.role === 'user' ? 'user' : 'bot',
+            text: String(m.text ?? ''),
+            timestamp: new Date(),
+          }))
+        : [],
+      collectedData: (clientState?.collectedData && typeof clientState.collectedData === 'object')
+        ? { ...clientState.collectedData }
+        : {},
     }
 
     // processMessage הוא עכשיו async (LLM fallback)
