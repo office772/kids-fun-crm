@@ -51,6 +51,8 @@ const SOURCE_LABELS: Record<string, { label: string; icon: string; color: string
   greeninvoice:         { label: 'חשבונית ירוקה', icon: '🧾', color: '#5c3d2e', bg: '#f5e6d8' },
   greeninvoice_webhook: { label: 'חשבונית ירוקה', icon: '🧾', color: '#5c3d2e', bg: '#f5e6d8' },
   manual:               { label: 'ידני',          icon: '✍️', color: '#6D436D', bg: '#F0EBF3' },
+  excel_import:         { label: 'ייבוא אקסל',    icon: '📊', color: '#1d4ed8', bg: '#e0eaff' },
+  woocommerce:          { label: 'אתר (קייטנות)', icon: '🏕️', color: '#9a3412', bg: '#ffedd5' },
 }
 
 const SOURCE_FALLBACK = { label: 'ידני', icon: '✍️', color: '#6D436D', bg: '#F0EBF3' }
