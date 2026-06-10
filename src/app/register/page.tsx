@@ -123,12 +123,21 @@ function RegisterForm() {
     fetch(`/api/schools?area=${area}`)
       .then(r => r.json())
       .then(d => {
+        const allClasses: { name: string }[] = d.classes ?? []
+        // אם הבוט כבר מסר שכבה (למשל "א") — מצמצמים את הרשימה לשכבה הזו,
+        // כך שההורה רק בוחר מספר כיתה ולא עונה שוב על אותה שאלה
+        const gradeHint = classFromUrl.trim().replace(/[׳'"]/g, '')
+        const filtered = gradeHint
+          ? allClasses.filter(c => c.name.replace(/[׳'"]/g, '').startsWith(gradeHint))
+          : []
+        const list = filtered.length > 0 ? filtered : allClasses
         setSchools(d.schools ?? [])
-        setClasses(d.classes ?? [])
+        setClasses(list)
         setChildSchool('')
-        setChildClass('')
+        // התאמה יחידה → בחירה אוטומטית
+        setChildClass(filtered.length === 1 ? filtered[0].name : '')
       })
-  }, [area])
+  }, [area, classFromUrl])
 
   // ─── שליחה ───────────────────────────────────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
