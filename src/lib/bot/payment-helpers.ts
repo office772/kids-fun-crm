@@ -55,7 +55,7 @@ function getPayPlusBase(): string {
 // ─── לינקי תשלום PayPlus סטטיים ──────────────────────────────────────────────
 // generateLink API חסום בחשבון זה — משתמשים בלינקים קיימים מהדשבורד.
 // עדכן כתובות לפי אזור אם תקבלי לינקים מתאימים יותר.
-const PAYPLUS_STATIC_LINKS: Record<string, string> = {
+export const PAYPLUS_STATIC_LINKS: Record<string, string> = {
   carmel:  'https://payments.payplus.co.il/l/743bc04a-0e38-4968-afce-24ddcc2d3a4f', // עתלית ₪935
   telaviv: 'https://payments.payplus.co.il/l/249fdfe7-dd8d-4e31-9509-08d5d7a4b82c', // גני תל אביב ₪946
   sharon:  'https://payments.payplus.co.il/l/0cbaab71-413b-4d45-b7e4-eef549c09bdf', // גני רשפון ₪1470

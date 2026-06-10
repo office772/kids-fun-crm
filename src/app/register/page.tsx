@@ -163,7 +163,7 @@ function RegisterForm() {
         setError(data.waitingList ? 'לא נותר מקום פנוי. צרו קשר בוואטסאפ להצטרף לרשימת המתנה.' : data.error || 'שגיאה בשמירת הטופס')
         return
       }
-      router.push('/register/success')
+      router.push(`/register/success?area=${encodeURIComponent(area)}`)
     } catch {
       setError('שגיאת תקשורת — נסו שוב')
     } finally {

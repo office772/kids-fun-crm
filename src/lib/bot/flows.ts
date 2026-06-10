@@ -164,7 +164,8 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
         text:
           `בדקתי — *יש מקום* עבור ${childName} ב${areaLabel}! 🎉\n\n` +
           `📋 *למילוי הטופס הרשמי:*\n${formUrl}\n\n` +
-          `לאחר מילוי הטופס יישלח אישור ופרטי תשלום 💌`,
+          `בסיום מילוי הטופס יופיע קישור להסדרת התשלום 💳\n` +
+          `(אפשר גם לשלם אחרת — פשוט כתבו לנו אחרי הרישום)`,
         isComplete: true,
         createTask: {
           type:        'רישום',
