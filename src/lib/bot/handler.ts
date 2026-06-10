@@ -75,7 +75,7 @@ async function handleActiveFlow(
   if (flow.startsWith('payment_setup_')) {
     return { ...await handlePaymentSetupFlow(session, userMessage), intent }
   }
-  if (flow === 'payment_status_menu') {
+  if (flow.startsWith('payment_status_')) {
     const result = await handlePaymentStatusMenuFlow(session, userMessage)
     // אם הבחירה הייתה "5 — להסדיר תשלום חדש", מפנה ישירות ל-payment_setup
     if (result.text === '__redirect_payment_setup__') {

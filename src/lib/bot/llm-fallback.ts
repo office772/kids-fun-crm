@@ -65,7 +65,7 @@ const SYSTEM_PROMPT_BASE = `אתה בוט שירות לקוחות של "Kids & F
 וצרף createTask=true בתשובתך.
 
 == פורמט התשובה ==
-ענה ב-JSON בלבד:
+ענה ב-JSON תקני בלבד (גרשיים כפולים, true/false באותיות קטנות — לא פורמט Python!):
 {
   "text": "הטקסט שישלח להורה בוואטסאפ (עברית, עם אמוג'ים ו*bold* לפי הצורך)",
   "createTask": false,
@@ -128,9 +128,9 @@ export async function callLLMFallback(
     const rawText = response.content[0].type === 'text' ? response.content[0].text : ''
 
     // נסה לפענח JSON
-    try {
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/)
-      if (jsonMatch) {
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      try {
         const parsed = JSON.parse(jsonMatch[0]) as LLMFallbackResult
         return {
           text:             parsed.text || buildLLMErrorFallback(),
@@ -138,11 +138,21 @@ export async function callLLMFallback(
           taskDescription:  parsed.taskDescription,
           suggestFlow:      parsed.suggestFlow || undefined,
         }
+      } catch {
+        // JSON לא תקין (למשל גרשיים בודדים בסגנון Python) —
+        // מחלצים את שדה text ידנית כדי שלא ידלוף dict גולמי להורה
+        const textField = jsonMatch[0].match(/['"]text['"]\s*:\s*(['"])([\s\S]*?)\1\s*[,}]/)
+        if (textField?.[2] && textField[2].trim().length > 2) {
+          return { text: textField[2].trim() }
+        }
+        console.error('[LLM fallback] Unparseable JSON-like response:', rawText.slice(0, 200))
+        return { text: buildLLMErrorFallback() }
       }
-    } catch {
-      if (rawText.length > 10) {
-        return { text: rawText }
-      }
+    }
+
+    // אין JSON בכלל — אם זה טקסט נקי (לא נראה כמו dict), שלח אותו כמו שהוא
+    if (rawText.length > 10 && !rawText.trimStart().startsWith('{')) {
+      return { text: rawText }
     }
 
     return { text: buildLLMErrorFallback() }

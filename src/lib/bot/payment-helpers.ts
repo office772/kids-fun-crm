@@ -309,6 +309,133 @@ export async function loadParentRegistrationContext(
   }
 }
 
+// ─── בדיקת סטטוס תשלום אמיתי מ-Supabase ─────────────────────────────────────
+// חיפוש לפי טלפון הפונה, או לפי שם ילד (כשהטלפון לא מזוהה).
+// מחזיר טקסט מוכן לשליחה, או null אם לא נמצא כלום.
+
+const PAYMENT_STATUS_EMOJI: Record<string, string> = {
+  'שולם':  '🟢',
+  'ממתין': '🟡',
+  'נכשל':  '🔴',
+  'חלקי':  '🟠',
+  'זיכוי': '⚪',
+}
+
+interface PaymentRow {
+  amount:         number | null
+  status:         string
+  payment_type:   string | null
+  paid_at:        string | null
+  payment_number: number | null
+  total_payments: number | null
+  created_at:     string
+}
+
+function formatPaymentStatusText(parentName: string | null, payments: PaymentRow[]): string {
+  const latest = payments[0]
+  const emoji  = PAYMENT_STATUS_EMOJI[latest.status] ?? '💳'
+  const date   = latest.paid_at ?? latest.created_at
+  const dateStr = date ? new Date(date).toLocaleDateString('he-IL') : ''
+  const progress = latest.payment_number && latest.total_payments
+    ? `\nתשלום *${latest.payment_number}* מתוך *${latest.total_payments}*`
+    : latest.payment_number
+      ? `\nתשלום מס׳ *${latest.payment_number}*`
+      : ''
+
+  let text =
+    `🔍 *סטטוס תשלום${parentName ? ` — ${parentName}` : ''}*\n\n` +
+    `${emoji} *${latest.status}*` +
+    `${latest.amount ? ` — ₪${Number(latest.amount).toLocaleString()}` : ''}` +
+    `${latest.payment_type ? ` (${latest.payment_type})` : ''}` +
+    progress +
+    `${dateStr ? `\nעדכון אחרון: ${dateStr}` : ''}`
+
+  if (latest.status === 'נכשל') {
+    text += `\n\n⚠️ נראה שיש חיוב שלא עבר — כתבו *"כשל תשלום"* ונסדר את זה ביחד 💛`
+  } else if (latest.status === 'ממתין') {
+    text += `\n\nכדי להסדיר את התשלום — כתבו *"אפשרויות תשלום"* 💛`
+  } else {
+    text += `\n\nהכל מסודר! יש שאלה? כתבו לנו 💛`
+  }
+  return text
+}
+
+export async function getPaymentStatusByPhone(phone: string): Promise<string | null> {
+  try {
+    const { isDemoMode } = await import('@/lib/demo-data')
+    if (isDemoMode() || !phone || phone === 'simulator') return null
+
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const supabase = createServiceClient()
+
+    const normalized = phone.replace(/\D/g, '').replace(/^972/, '0')
+    const intl       = '972' + normalized.replace(/^0/, '')
+
+    const { data: parent } = await supabase
+      .from('parents')
+      .select('id, name')
+      .or(`phone.eq.${normalized},phone.eq.${intl},phone.eq.${phone}`)
+      .maybeSingle()
+
+    if (!parent) return null
+
+    const { data: payments } = await supabase
+      .from('payments')
+      .select('amount, status, payment_type, paid_at, payment_number, total_payments, created_at')
+      .eq('parent_id', parent.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+
+    if (!payments?.length) return null
+    return formatPaymentStatusText(parent.name, payments as PaymentRow[])
+  } catch (err) {
+    console.error('[getPaymentStatusByPhone] Error:', err)
+    return null
+  }
+}
+
+export async function getPaymentStatusByChildName(childName: string): Promise<string | null> {
+  try {
+    const { isDemoMode } = await import('@/lib/demo-data')
+    if (isDemoMode()) return null
+
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const supabase = createServiceClient()
+
+    // התאמה מדויקת לשם הילד; אם אין — חיפוש מכיל
+    let { data: children } = await supabase
+      .from('children').select('id, name, parent_id')
+      .ilike('name', childName.trim()).limit(2)
+
+    if (!children?.length) {
+      const res = await supabase
+        .from('children').select('id, name, parent_id')
+        .ilike('name', `%${childName.trim()}%`).limit(2)
+      children = res.data
+    }
+
+    // דורשים התאמה חד-משמעית — אם יש כמה ילדים עם אותו שם, לא מנחשים
+    if (!children || children.length !== 1) return null
+
+    const { data: parent } = await supabase
+      .from('parents').select('id, name')
+      .eq('id', children[0].parent_id).maybeSingle()
+
+    const { data: payments } = await supabase
+      .from('payments')
+      .select('amount, status, payment_type, paid_at, payment_number, total_payments, created_at')
+      .eq('parent_id', children[0].parent_id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+
+    if (!payments?.length) return null
+    return formatPaymentStatusText(parent?.name ?? children[0].name, payments as PaymentRow[])
+  } catch (err) {
+    console.error('[getPaymentStatusByChildName] Error:', err)
+    return null
+  }
+}
+
 // ─── פרטי חשבון בנק להעברה ─────────────────────────────────────────────────
 export const BANK_TRANSFER_DETAILS = {
   bankName:      'בנק לאומי',

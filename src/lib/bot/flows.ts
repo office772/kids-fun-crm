@@ -4,6 +4,8 @@ import {
   getInvoiceLink,
   formatBankTransferMessage,
   loadParentRegistrationContext,
+  getPaymentStatusByPhone,
+  getPaymentStatusByChildName,
   DEFAULT_MONTHLY_FEE,
   type PaymentMethod,
 } from './payment-helpers'
@@ -647,20 +649,26 @@ export async function handlePaymentStatusMenuFlow(
 ): Promise<BotResponse> {
   const msg = userMessage.trim()
 
-  // בחירה 1 — סטטוס
+  // ⚠️ שלב זיהוי לפי שם ילד — חייב להיבדק לפני תפריט הבחירות,
+  // אחרת שם כמו "רון אחרוני" ייתפס בטעות ע"י ה-regex של האפשרויות
+  if (session.currentFlow === 'payment_status_child_name') {
+    return handlePaymentStatusChildName(session, userMessage)
+  }
+
+  // בחירה 1 — סטטוס: שליפה אמיתית מה-CRM לפי טלפון הפונה
   if (msg === '1' || /סטטוס|בדוק|כמה חייב|מה שילמתי|שולם/i.test(msg)) {
+    const statusText = await getPaymentStatusByPhone(session.phone)
+    if (statusText) {
+      return { text: statusText, isComplete: true }
+    }
+
+    // הטלפון לא מזוהה → מבקשים שם ילד לזיהוי
     return {
       text:
         `🔍 *בדיקת סטטוס תשלום*\n\n` +
-        `${isBusinessHours()
-          ? 'נציגה שלנו תבדוק את החשבון ותחזור אליך מיד 😊'
-          : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) עם הפרטים 💛'}`,
-      isComplete: true,
-      createTask: {
-        type:        'שאלה כללית',
-        description: `הורה מבקש לבדוק סטטוס תשלום — ${session.parentName ?? session.phone}`,
-        priority:    'רגיל',
-      },
+        `לא מצאתי את המספר שלך במערכת — בוא/י נזהה אותך:\n\n` +
+        `*מה שם הילד/ה? (שם פרטי + שם משפחה)*`,
+      nextFlow: 'payment_status_child_name',
     }
   }
 
@@ -717,6 +725,45 @@ export async function handlePaymentStatusMenuFlow(
       `*4* — מה העלות החודשית?\n` +
       `*5* — 💳 להסדיר תשלום חדש`,
     nextFlow: 'payment_status_menu',
+  }
+}
+
+// שלב זיהוי לפי שם ילד לבדיקת סטטוס (כשהטלפון לא נמצא במערכת)
+async function handlePaymentStatusChildName(
+  session: BotSession,
+  userMessage: string
+): Promise<BotResponse> {
+  const nameInput = userMessage.trim().replace(/\s+/g, ' ')
+  const words = nameInput.split(' ').filter(w => w.length >= 2)
+
+  if (words.length < 2 || /\d/.test(nameInput)) {
+    return {
+      text:
+        `צריך שם מלא לצורך זיהוי 😊\n\n` +
+        `*אנא כתבו שם פרטי + שם משפחה של הילד/ה*\n` +
+        `_(למשל: נועה כהן)_`,
+      nextFlow: 'payment_status_child_name',
+    }
+  }
+
+  const statusText = await getPaymentStatusByChildName(nameInput)
+  if (statusText) {
+    return { text: statusText, isComplete: true }
+  }
+
+  // לא נמצא / לא חד-משמעי → נציגה תבדוק
+  return {
+    text:
+      `🔍 לא הצלחתי לאתר את *${nameInput}* באופן חד-משמעי.\n\n` +
+      `${isBusinessHours()
+        ? 'נציגה שלנו תבדוק את החשבון ותחזור אליך מיד 😊'
+        : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) עם הפרטים 💛'}`,
+    isComplete: true,
+    createTask: {
+      type:        'שאלה כללית',
+      description: `בדיקת סטטוס תשלום — ילד/ה: ${nameInput} | טלפון פונה: ${session.phone} | לא אותר אוטומטית`,
+      priority:    'רגיל',
+    },
   }
 }
 
