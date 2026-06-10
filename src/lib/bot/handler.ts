@@ -98,7 +98,7 @@ async function handleActiveFlow(
     return { ...handleLateCampFlow(session, userMessage), intent }
   }
   if (flow.startsWith('camp_')) {
-    return { ...handleCampMenuFlow(session, userMessage), intent }
+    return { ...await handleCampMenuFlow(session, userMessage), intent }
   }
 
   // כוונה חדשה מפורשת תוך כדי מסלול → יוצאים ומתחילים חדש

@@ -360,44 +360,42 @@ export function handleCancellationFlow(session: BotSession, userMessage: string)
 // 3 תרחישים: רישום חדש | בדיקת רישום קיים | בעיה בהרשמה
 // ═══════════════════════════════════════════════════════════════════════════════
 export function handleCampRegistrationFlow(): BotResponse {
-  const today = new Date()
-  const registrationDeadline = new Date(today.getFullYear(), 5, 1) // 1 יוני
-  const isBeforeDeadline = today < registrationDeadline
-
-  if (isBeforeDeadline) {
-    return {
-      text: `🏕️ *קייטנת קיץ — Kids & Fun!*\n\n` +
-        `הרישום פתוח! 🎉\n\n` +
-        `*מה תרצו?*\n` +
-        `*1* — לרשום ילד/ה לקייטנה\n` +
-        `*2* — לבדוק אם כבר נרשמתי\n` +
-        `*3* — יש לי בעיה בהרשמה`,
-      nextFlow: 'camp_menu'
-    }
-  } else {
-    // אחרי סגירת רישום — עוברים ל-handleLateCampFlow
-    return {
-      text: `🏕️ *מועד הרישום הרשמי נסגר* 😔\n\n` +
-        `אבל לא נגיד לא לפני שבדקנו! 😊\n\n` +
-        `*מה שם הילד/ה?*`,
-      nextFlow: 'camp_late_name'
-    }
+  // הרישום לקייטנה מתבצע באתר (חנות ווקומרס) — האתר עצמו קובע אילו קייטנות
+  // פתוחות לרישום. הבוט תמיד מציג את התפריט ושולח את הקישור לחנות.
+  return {
+    text: `🏕️ *קייטנות Kids & Fun!*\n\n` +
+      `*מה תרצו?*\n` +
+      `*1* — לרשום ילד/ה לקייטנה\n` +
+      `*2* — לבדוק אם כבר נרשמתי\n` +
+      `*3* — יש לי בעיה בהרשמה`,
+    nextFlow: 'camp_menu'
   }
 }
 
 // תת-מסלולים לקייטנה לפני סגירה
-export function handleCampMenuFlow(session: BotSession, userMessage: string): BotResponse {
+export async function handleCampMenuFlow(session: BotSession, userMessage: string): Promise<BotResponse> {
   const step = session.currentFlow
 
   if (step === 'camp_menu') {
     const msg = userMessage.trim()
 
-    // תרחיש 1: רישום חדש
+    // תרחיש 1: רישום חדש → קישור לחנות הקייטנות באתר
     if (msg === '1' || /לרשום|רישום|רוצה להירשם|רשמו/i.test(msg)) {
+      let campUrl = 'https://kidsandfun.co.il/shop/'
+      try {
+        const { createServiceClient } = await import('@/lib/supabase/server')
+        const supabase = createServiceClient()
+        const { data } = await supabase
+          .from('bot_assets').select('url')
+          .eq('key', 'camp_register').eq('is_active', true).maybeSingle()
+        if (data?.url) campUrl = data.url
+      } catch { /* fallback לקישור הקבוע */ }
+
       return {
         text: `מצוין! 🎉\n\n` +
-          `הרישום מתבצע ישירות דרך האתר:\n` +
-          `📲 *[קישור לרישום קייטנה]*\n\n` +
+          `הרישום לקייטנה מתבצע ישירות דרך האתר — בוחרים את הקייטנה לפי האזור, ` +
+          `ממלאים את פרטי הילד/ה ומשלמים אונליין:\n\n` +
+          `📲 ${campUrl}\n\n` +
           `תהליך הרישום לוקח 5-10 דקות בלבד.\n\n` +
           `יש בעיה בהרשמה? חזרו אלינו ונסייע 😊`,
         isComplete: true
@@ -1059,8 +1057,6 @@ export async function handlePaymentSetupFlow(
   if (step === 'payment_setup_method') {
     const msg       = userMessage.trim()
     const childName = session.collectedData.child_name   ?? 'הילד/ה'
-    const areaCode  = session.collectedData.area_code    ?? 'sharon'
-    const regId     = session.collectedData.registration_id ?? `bot-${Date.now()}`
     const amount    = parseInt(session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE), 10)
     const firstName = session.parentName?.split(' ')[0] ?? ''
 
@@ -1089,57 +1085,16 @@ export async function handlePaymentSetupFlow(
 
     session.collectedData.payment_method = chosenMethod
 
-    // ── אשראי / הוראת קבע → PayPlus ────────────────────────────────────────
+    // ── אשראי / הוראת קבע → שאלות זיהוי לפני שליחת קישור ───────────────────
+    // ⚠️ לא מסתמכים על מספר הטלפון של הפונה! הורה יכול לכתוב מטלפון לא מזוהה.
+    // שואלים: שם הילד/ה המלא + אזור — ולפי האזור נשלח הלינק הנכון.
     if (chosenMethod === 'credit' || chosenMethod === 'standing_order') {
-      const isStanding    = chosenMethod === 'standing_order'
-      const description   = isStanding
-        ? `הוראת קבע — צהרון Kids & Fun | ${childName}`
-        : `תשלום חודשי — צהרון Kids & Fun | ${childName}`
-
-      const result = await createPayPlusPaymentLink({
-        registrationId: regId,
-        parentName:     session.parentName ?? firstName,
-        phone:          session.phone,
-        childName,
-        areaCode,
-        amount,
-        description,
-        paymentType:    isStanding ? 'standing_order' : 'credit',
-      })
-
-      if (result.success && result.paymentUrl) {
-        const demoNote = result.isDemo
-          ? `\n\n🔵 *סביבת דמו* — זה קישור לדוגמה (מזהה: ${result.orderId})`
-          : ''
-        return {
-          text:
-            `${isStanding ? '🏦 *הוראת קבע*' : '💳 *אשראי*'} — הכנתי לך קישור לתשלום:\n\n` +
-            `🔗 ${result.paymentUrl}\n\n` +
-            `לאחר השלמת התשלום — יישלח אישור ${isStanding ? 'והוראת הקבע תופעל אוטומטית' : ''}.` +
-            demoNote + `\n\nיש שאלה? כתבו לנו 💛`,
-          isComplete: true,
-          createTask: {
-            type:        'כשל תשלום',
-            description: `הגדרת תשלום ${isStanding ? 'הוראת קבע' : 'אשראי'} — ${childName} | orderId: ${result.orderId ?? '?'}`,
-            priority:    'רגיל',
-          },
-        }
-      }
-
-      // PayPlus נכשל → נציגה תטפל
-      console.error('[PayPlus] Failed to create payment link:', result.error)
       return {
         text:
-          `מצטערים, נתקלנו בבעיה טכנית בהפקת הקישור 😔\n\n` +
-          `${isBusinessHours()
-            ? 'נציגה שלנו תשלח לך קישור תשלום תוך דקות! 💛'
-            : 'נשלח לך קישור תשלום בשעות הפעילות (8:00-17:00) 📬'}`,
-        isComplete: true,
-        createTask: {
-          type:        'כשל תשלום',
-          description: `PayPlus error — ${chosenMethod} | ${childName} | err: ${result.error}`,
-          priority:    'דחוף',
-        },
+          `${chosenMethod === 'standing_order' ? '🏦 *הוראת קבע*' : '💳 *כרטיס אשראי*'} — בחירה מצוינת!\n\n` +
+          `לפני שאשלח את הקישור, לצורך זיהוי:\n\n` +
+          `*מה שם הילד/ה? (שם פרטי + שם משפחה)*`,
+        nextFlow: 'payment_setup_child_name',
       }
     }
 
@@ -1227,6 +1182,117 @@ export async function handlePaymentSetupFlow(
           priority:    'גבוה',
         },
       }
+    }
+  }
+
+  // ─── שלב זיהוי 1: שם הילד/ה המלא ─────────────────────────────────────────
+  if (step === 'payment_setup_child_name') {
+    const nameInput = userMessage.trim().replace(/\s+/g, ' ')
+    const words = nameInput.split(' ').filter(w => w.length >= 2)
+
+    // דרושים לפחות שם פרטי + שם משפחה (2 מילים), ללא ספרות
+    if (words.length < 2 || /\d/.test(nameInput) || nameInput.length > 60) {
+      return {
+        text:
+          `צריך שם מלא לצורך זיהוי 😊\n\n` +
+          `*אנא כתבו שם פרטי + שם משפחה של הילד/ה*\n` +
+          `_(למשל: נועה כהן)_`,
+        nextFlow: 'payment_setup_child_name',
+      }
+    }
+
+    session.collectedData.child_name = nameInput
+    session.collectedData.identity_confirmed = 'true'
+
+    return {
+      text:
+        `תודה! ועכשיו —\n\n` +
+        `*באיזה אזור ${nameInput} בצהרון?*\n\n` +
+        `*1* — כרמל (עתלית והסביבה)\n` +
+        `*2* — שרון (רשפון, מתן והסביבה)\n` +
+        `*3* — תל אביב`,
+      nextFlow: 'payment_setup_area',
+    }
+  }
+
+  // ─── שלב זיהוי 2: אזור → שליחת הלינק הנכון ───────────────────────────────
+  if (step === 'payment_setup_area') {
+    const msg = userMessage.trim()
+    let areaCode:  string | null = null
+    let areaLabel = ''
+
+    if (msg === '1' || /כרמל|עתלית|גלי/.test(msg))                    { areaCode = 'carmel';  areaLabel = 'כרמל' }
+    if (msg === '2' || /שרון|רשפון|מתן|צור יצחק/.test(msg))           { areaCode = 'sharon';  areaLabel = 'שרון' }
+    if (msg === '3' || /תל אביב|ת"א|תל-אביב|ת״א|תלאביב/.test(msg))    { areaCode = 'telaviv'; areaLabel = 'תל אביב' }
+
+    if (!areaCode) {
+      return {
+        text:
+          `לא הבנתי 😊 באיזה אזור?\n\n` +
+          `*1* — כרמל\n` +
+          `*2* — שרון\n` +
+          `*3* — תל אביב`,
+        nextFlow: 'payment_setup_area',
+      }
+    }
+
+    session.collectedData.area_code  = areaCode
+    session.collectedData.area_label = areaLabel
+
+    const childName  = session.collectedData.child_name ?? 'הילד/ה'
+    const regId      = session.collectedData.registration_id ?? `bot-${Date.now()}`
+    const amount     = parseInt(session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE), 10)
+    const firstName  = session.parentName?.split(' ')[0] ?? ''
+    const isStanding = session.collectedData.payment_method === 'standing_order'
+    const description = isStanding
+      ? `הוראת קבע — צהרון Kids & Fun | ${childName}`
+      : `תשלום חודשי — צהרון Kids & Fun | ${childName}`
+
+    const result = await createPayPlusPaymentLink({
+      registrationId: regId,
+      parentName:     session.parentName ?? firstName,
+      phone:          session.phone,
+      childName,
+      areaCode,
+      areaLabel,
+      amount,
+      description,
+      paymentType:    isStanding ? 'standing_order' : 'credit',
+    })
+
+    if (result.success && result.paymentUrl) {
+      const demoNote = result.isDemo
+        ? `\n\n🔵 *סביבת דמו* — זה קישור לדוגמה (מזהה: ${result.orderId})`
+        : ''
+      return {
+        text:
+          `מעולה! ${isStanding ? '🏦 *הוראת קבע*' : '💳 *אשראי*'} עבור *${childName}* (${areaLabel}):\n\n` +
+          `🔗 ${result.paymentUrl}\n\n` +
+          `לאחר השלמת התשלום — יישלח אישור ${isStanding ? 'והוראת הקבע תופעל אוטומטית' : ''}.` +
+          demoNote + `\n\nיש שאלה? כתבו לנו 💛`,
+        isComplete: true,
+        createTask: {
+          type:        'כשל תשלום',
+          description: `קישור תשלום ${isStanding ? 'הוראת קבע' : 'אשראי'} נשלח — ילד/ה: ${childName} | אזור: ${areaLabel} | טלפון פונה: ${session.phone} | לוודא שהתשלום נקלט`,
+          priority:    'רגיל',
+        },
+      }
+    }
+
+    // PayPlus נכשל → נציגה תטפל
+    console.error('[PayPlus] Failed to create payment link:', result.error)
+    return {
+      text:
+        `מצטערים, נתקלנו בבעיה טכנית בהפקת הקישור 😔\n\n` +
+        `${isBusinessHours()
+          ? 'נציגה שלנו תשלח לך קישור תשלום תוך דקות! 💛'
+          : 'נשלח לך קישור תשלום בשעות הפעילות (8:00-17:00) 📬'}`,
+      isComplete: true,
+      createTask: {
+        type:        'כשל תשלום',
+        description: `PayPlus error — ${isStanding ? 'הוראת קבע' : 'אשראי'} | ${childName} (${areaLabel}) | err: ${result.error}`,
+        priority:    'דחוף',
+      },
     }
   }
 
