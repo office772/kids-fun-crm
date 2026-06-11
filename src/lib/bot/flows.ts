@@ -360,14 +360,15 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
 
       if (result) {
         return {
-          text: `✅ *הביטול בוצע ונרשם במערכת!*\n\n` +
-            `*${result.childName}* ממשיך/ה עד סוף החודש הנוכחי.\n` +
-            `הזיכוי יתקבל לחודש הבא 💛\n\n` +
-            `נציגה תוודא את הפסקת החיובים. תודה שהייתם איתנו!`,
+          text: `✅ *קיבלנו את הוראת הביטול!*\n\n` +
+            `הרישום של *${result.childName}* עודכן במערכת — ` +
+            `ממשיך/ה עד סוף החודש הנוכחי, והזיכוי יתקבל לחודש הבא.\n\n` +
+            `📨 נשלחה הודעה לנציגה להפסקת החיובים, ` +
+            `ואישור סופי על הביטול יישלח אליך *תוך 1-2 ימי עסקים* 💛`,
           isComplete: true,
           createTask: {
             type: 'ביטול',
-            description: `✅ ביטול בוצע בבוט — ${result.childName} (יום ${dayOfMonth}, לפני ה-15, זיכוי מלא) | להפסיק הוראת קבע ב-PayPlus + לוודא זיכוי`,
+            description: `✅ ביטול בוצע בבוט — ${result.childName} (יום ${dayOfMonth}, לפני ה-15, זיכוי מלא) | להפסיק הוראת קבע ב-PayPlus + לשלוח להורה אישור סופי`,
             priority: 'גבוה'
           }
         }
@@ -422,13 +423,15 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
 
       if (result) {
         return {
-          text: `✅ *הביטול בוצע ונרשם במערכת!*\n\n` +
-            `*${result.childName}* ממשיך/ה חודש נוסף ומסיים/ת בסוף החודש הבא.\n\n` +
-            `נציגה תוודא את הפסקת החיובים בהתאם. תודה שהייתם איתנו 💛`,
+          text: `✅ *קיבלנו את הוראת הביטול!*\n\n` +
+            `הרישום של *${result.childName}* עודכן במערכת — ` +
+            `ממשיך/ה חודש נוסף ומסיים/ת בסוף החודש הבא.\n\n` +
+            `📨 נשלחה הודעה לנציגה להפסקת החיובים בהתאם, ` +
+            `ואישור סופי על הביטול יישלח אליך *תוך 1-2 ימי עסקים* 💛`,
           isComplete: true,
           createTask: {
             type: 'ביטול',
-            description: `✅ ביטול בוצע בבוט — ${result.childName} (יום ${dayOfMonth}, אחרי ה-15, ממשיך חודש נוסף) | להפסיק הוראת קבע ב-PayPlus מהחודש הבא`,
+            description: `✅ ביטול בוצע בבוט — ${result.childName} (יום ${dayOfMonth}, אחרי ה-15, ממשיך חודש נוסף) | להפסיק הוראת קבע ב-PayPlus מהחודש הבא + לשלוח להורה אישור סופי`,
             priority: 'גבוה'
           }
         }
