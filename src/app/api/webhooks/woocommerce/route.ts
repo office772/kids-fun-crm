@@ -212,7 +212,7 @@ export async function POST(req: NextRequest) {
         metadata:     { amount: total, woo_order_id: orderId, wc_status: wcStatus },
       })
 
-      // כשל תשלום → משימה
+      // כשל תשלום → משימה + התראה לנציגה
       if (payStatus === 'נכשל') {
         await supabase.from('tasks').insert({
           parent_id:   parentId,
@@ -220,6 +220,11 @@ export async function POST(req: NextRequest) {
           description: `כשל תשלום בהזמנת קייטנה מהאתר — ${productNames} — ₪${total} (#${orderId})`,
           priority:    'דחוף',
           status:      'פתוח',
+        })
+        const { notifyStaff } = await import('@/lib/notify')
+        await notifyStaff({
+          text: `כשל תשלום בהזמנת קייטנה מהאתר: ${parentName} — ${productNames} (₪${total})`,
+          priority: 'דחוף',
         })
       }
     }

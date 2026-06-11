@@ -138,6 +138,15 @@ export async function POST(req: NextRequest) {
       priority:    'רגיל',
     })
 
+    // התראה לנייד הנציגה (פעיל אוטומטית ברגע ש-uChat מחובר)
+    try {
+      const { notifyStaff } = await import('@/lib/notify')
+      await notifyStaff({
+        text: `רישום חדש לצהרון 🎉\n${childName} (כיתה ${childClass || '?'}) — ${areaCode}\nהורה: ${parentName} ${cleanPhone}`,
+        priority: 'רגיל',
+      })
+    } catch { /* לא חוסם רישום */ }
+
     // ─── מייל אישור להורה (לא-חוסם — כשל במייל לא מפיל את הרישום) ──────────
     if (parentEmail) {
       try {

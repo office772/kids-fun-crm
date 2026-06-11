@@ -165,6 +165,10 @@ async function createTask(
     priority: opts.priority,
     status: 'פתוח',
   })
+
+  // התראה לנייד הנציגה (פעיל אוטומטית ברגע ש-uChat מחובר)
+  const { notifyStaff } = await import('@/lib/notify')
+  await notifyStaff({ text: `משימה חדשה (${opts.type}):\n${opts.description}`, priority: opts.priority })
 }
 
 // ─── POST ──────────────────────────────────────────────────────────────────────

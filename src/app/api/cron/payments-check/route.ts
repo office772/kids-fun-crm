@@ -59,6 +59,13 @@ export async function GET() {
       status:      'פתוח',
     })
 
+    // התראה לנייד הנציגה (פעיל אוטומטית ברגע ש-uChat מחובר)
+    const { notifyStaff } = await import('@/lib/notify')
+    await notifyStaff({
+      text: `בדיקת בוקר: לא נקלטו חיובי PayPlus מהלילה. ייתכן שלא היו חיובים מתוכננים.`,
+      priority: 'רגיל',
+    })
+
     return NextResponse.json({ ok: true, received: 0, task: 'created' })
   } catch (err) {
     console.error('[Cron payments-check] Error:', err)

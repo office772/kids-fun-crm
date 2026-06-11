@@ -189,6 +189,11 @@ async function handlePayPlusEvent(body: Record<string, any>) {
         priority:    'דחוף',
         status:      'פתוח',
       })
+      const { notifyStaff } = await import('@/lib/notify')
+      await notifyStaff({
+        text: `כשל חיוב PayPlus: ${name || 'לקוח'} — ${failLabel} (₪${amount})`,
+        priority: 'דחוף',
+      })
       await supabase.from('registration_timeline').insert({
         parent_id:   parentId,
         event_type:  'payment',
