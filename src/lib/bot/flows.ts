@@ -440,20 +440,116 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
     }
   }
 
-  // תרחיש 2: בדיקת ת"ז + lookup
+  // תרחיש 2: בדיקת ת"ז + בדיקה אמיתית מול ה-CRM
+  // רישומי הקייטנה מגיעים מהאתר דרך ה-webhook כולל ת"ז — אפשר לענות מיידית.
   if (step === 'camp_check_id') {
     session.collectedData.child_id = userMessage
-    const childName = session.collectedData.child_name || 'הילד/ה'
-    // TODO: בדיקה אמיתית מול Supabase (registrations table)
-    // כרגע — יוצרים task לנציגה לבדוק ולחזור
+    const childName = (session.collectedData.child_name || '').trim()
+    const idDigits  = userMessage.replace(/\D/g, '')
+
+    if (childName && idDigits.length >= 3) {
+      try {
+        const { createServiceClient } = await import('@/lib/supabase/server')
+        const supabase = createServiceClient()
+
+        // חיפוש הילד לפי שם (מדויק, ואם אין — מכיל)
+        let { data: kids } = await supabase
+          .from('children').select('id, name, id_number, parent_id')
+          .ilike('name', childName).limit(3)
+        if (!kids?.length) {
+          const res = await supabase
+            .from('children').select('id, name, id_number, parent_id')
+            .ilike('name', `%${childName}%`).limit(3)
+          kids = res.data
+        }
+        // fallback: אולי נכתב שם ההורה — מחפשים את הילדים שלו (הת"ז עדיין חייבת להתאים)
+        if (!kids?.length) {
+          const { data: parentMatch } = await supabase
+            .from('parents').select('id')
+            .ilike('name', `%${childName}%`).limit(2)
+          if (parentMatch?.length === 1) {
+            const res = await supabase
+              .from('children').select('id, name, id_number, parent_id')
+              .eq('parent_id', parentMatch[0].id).limit(5)
+            kids = res.data
+          }
+        }
+
+        // אימות זהות: סיומת ת"ז חייבת להתאים (לא חושפים מידע בלי אימות!)
+        const verified = (kids ?? []).filter((k: { id: string; name: string; id_number: string | null; parent_id: string }) => {
+          const stored = String(k.id_number ?? '').replace(/\D/g, '')
+          return stored && (stored.endsWith(idDigits) || idDigits.endsWith(stored))
+        })
+
+        if (verified.length === 1) {
+          const child = verified[0]
+          const { data: reg } = await supabase
+            .from('registrations')
+            .select('status, notes, created_at')
+            .eq('child_id', child.id)
+            .eq('type', 'קייטנה')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+          if (reg) {
+            // שם הקייטנה מתוך הערות הרישום (אם קיים)
+            const campMatch = reg.notes?.match(/—\s*(.+?)\s*\(הזמנה/)
+            const campName  = campMatch?.[1] ?? ''
+            if (reg.status === 'מאושר') {
+              return {
+                text:
+                  `✅ *${child.name} רשום/ה לקייטנה!*\n\n` +
+                  `${campName ? `🏕️ ${campName}\n` : ''}` +
+                  `הרישום והתשלום התקבלו במלואם.\n\n` +
+                  `מחכים לראותכם! 💛`,
+                isComplete: true,
+              }
+            }
+            return {
+              text:
+                `🔶 מצאתי רישום של *${child.name}* לקייטנה` +
+                `${campName ? ` (${campName})` : ''} — אבל הוא עדיין *ממתין להשלמה*.\n\n` +
+                `ייתכן שהתשלום לא הושלם. נציגה שלנו תבדוק ותחזור אליך 💛`,
+              isComplete: true,
+              createTask: {
+                type: 'בדיקת רישום קייטנה',
+                description: `רישום קייטנה ממתין — ${child.name} | ההורה שאל על הסטטוס, לבדוק תשלום ולחזור`,
+                priority: 'גבוה',
+              },
+            }
+          }
+
+          // ילד מזוהה אבל בלי רישום קייטנה
+          return {
+            text:
+              `🔍 בדקתי — לא מצאתי רישום לקייטנה עבור *${child.name}*.\n\n` +
+              `אפשר להירשם עכשיו דרך האתר:\n` +
+              `📲 https://kidsandfun.co.il/shop/\n\n` +
+              `ואם נרשמתם ממש לאחרונה — ייתכן שהרישום עוד בדרך, נציגה תוודא ותחזור 💛`,
+            isComplete: true,
+            createTask: {
+              type: 'בדיקת רישום קייטנה',
+              description: `הורה שאל על רישום קייטנה שלא נמצא — ${child.name} (ת"ז: ${idDigits}) | לוודא`,
+              priority: 'רגיל',
+            },
+          }
+        }
+      } catch (err) {
+        console.error('[camp_check] lookup error:', err)
+      }
+    }
+
+    // לא אותר / לא אומת חד-משמעית → נציגה תבדוק (כמו קודם)
     return {
       text: `🔍 בודקת...\n\n` +
-        `נציגה שלנו תחזור אליך תוך שעה עם הסטטוס של *${childName}* 💛\n\n` +
+        `לא הצלחתי לאמת את הפרטים באופן אוטומטי — ` +
+        `נציגה שלנו תחזור אליך בהקדם עם הסטטוס של *${childName || 'הילד/ה'}* 💛\n\n` +
         `${!isBusinessHours() ? '_שעות פעילות: ראשון-חמישי 8:00-17:00_' : ''}`,
       isComplete: true,
       createTask: {
         type: 'בדיקת רישום קייטנה',
-        description: `הורה מבקש לבדוק סטטוס רישום קייטנה — ${childName} (ת"ז: ${userMessage})`,
+        description: `הורה מבקש לבדוק סטטוס רישום קייטנה — ${childName} (ת"ז: ${userMessage}) | לא אותר אוטומטית`,
         priority: 'גבוה'
       }
     }
@@ -467,7 +563,7 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
         `${isBusinessHours()
           ? 'נציגה שלנו תחזור אליך עם פתרון בהקדם!'
           : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) לעזור!'}\n\n` +
-        `בינתיים — ניתן לנסות שוב דרך הקישור:\n📲 *[קישור לרישום קייטנה]*`,
+        `בינתיים — ניתן לנסות שוב דרך הקישור:\n📲 https://kidsandfun.co.il/shop/`,
       isComplete: true,
       createTask: {
         type: 'בעיה בהרשמה לקייטנה',

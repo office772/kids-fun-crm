@@ -123,7 +123,10 @@ export async function POST(req: NextRequest) {
     if (meta.length) {
       const childFirst = metaByLabel(meta, /^שם פרטי/)
       const childLast  = metaByLabel(meta, /^שם משפחה/)
-      const childName  = `${childFirst} ${childLast}`.trim()
+      // חלק מההורים מקלידים שם מלא בשדה "שם פרטי" — נמנעים מכפילות ("שי וינטראוב וינטראוב")
+      const childName  = (childLast && childFirst.endsWith(childLast)
+        ? childFirst
+        : `${childFirst} ${childLast}`).trim()
       if (childName) {
         const { data: existingChild } = await supabase
           .from('children').select('id').eq('parent_id', parentId).eq('name', childName).maybeSingle()
@@ -162,6 +165,20 @@ export async function POST(req: NextRequest) {
           paid_at: payStatus === 'שולם' ? (paidAt ?? new Date().toISOString()) : null,
           amount:  total || null,
         }).eq('id', existingPay.id)
+
+        // התשלום הושלם → גם הרישום לקייטנה מאושר (ולהפך בזיכוי/ביטול)
+        if (payStatus === 'שולם') {
+          await supabase.from('registrations')
+            .update({ status: 'מאושר' })
+            .eq('parent_id', parentId).eq('type', 'קייטנה')
+            .eq('status', 'ממתין לאישור')
+            .like('notes', `%#${orderId})%`)
+        } else if (payStatus === 'זיכוי') {
+          await supabase.from('registrations')
+            .update({ status: 'בוטל' })
+            .eq('parent_id', parentId).eq('type', 'קייטנה')
+            .like('notes', `%#${orderId})%`)
+        }
         console.log(`[Woo Webhook] Payment ${wooRef} updated → ${payStatus}`)
       }
     } else {
