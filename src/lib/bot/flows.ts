@@ -239,7 +239,78 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
 // לפני 15: מאשרים אוטומטי + זיכוי מלא
 // אחרי 15: מודיעים על התקנון באופן סופי, אם ההורה מבקש חריג → הסלמה
 // ═══════════════════════════════════════════════════════════════════════════════
-export function handleCancellationFlow(session: BotSession, userMessage: string): BotResponse {
+// ביצוע ביטול בפועל ב-CRM: איתור הרישום (לפי טלפון ההורה או שם הילד) ועדכון ל"בוטל".
+// מחזיר את שם הילד כפי שרשום, או null אם לא אותר חד-משמעית (ואז נציגה משלימה ידנית).
+async function performCancellation(
+  session: BotSession,
+  childNameInput: string,
+  policyNote: string
+): Promise<{ childName: string } | null> {
+  try {
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const supabase = createServiceClient()
+    const name = childNameInput.trim().replace(/\s+/g, ' ')
+
+    // איתור מועמדים: קודם הילדים של ההורה המזוהה לפי טלפון, אחר כך לפי שם בלבד
+    let candidates: { id: string; name: string; parent_id: string }[] = []
+
+    if (session.phone && session.phone !== 'simulator') {
+      const normalized = session.phone.replace(/\D/g, '').replace(/^972/, '0')
+      const intl = '972' + normalized.replace(/^0/, '')
+      const { data: parent } = await supabase
+        .from('parents').select('id')
+        .or(`phone.eq.${normalized},phone.eq.${intl},phone.eq.${session.phone}`)
+        .maybeSingle()
+      if (parent) {
+        const { data } = await supabase
+          .from('children').select('id, name, parent_id')
+          .eq('parent_id', parent.id).ilike('name', `%${name}%`)
+        candidates = data ?? []
+      }
+    }
+    if (!candidates.length) {
+      const { data } = await supabase
+        .from('children').select('id, name, parent_id')
+        .ilike('name', name).limit(2)
+      candidates = data ?? []
+    }
+
+    // דורשים התאמה חד-משמעית — לא מבטלים בניחוש!
+    if (candidates.length !== 1) return null
+    const child = candidates[0]
+
+    // הרישום הפעיל לצהרון
+    const { data: reg } = await supabase
+      .from('registrations')
+      .select('id, status, notes')
+      .eq('child_id', child.id).eq('type', 'צהרון')
+      .in('status', ['מאושר', 'ממתין לאישור'])
+      .order('created_at', { ascending: false })
+      .limit(1).maybeSingle()
+
+    if (!reg) return null
+
+    await supabase.from('registrations').update({
+      status: 'בוטל',
+      notes:  [reg.notes, `בוטל ע"י ההורה דרך הבוט — ${policyNote}`].filter(Boolean).join(' | '),
+    }).eq('id', reg.id)
+
+    await supabase.from('registration_timeline').insert({
+      parent_id:    child.parent_id,
+      event_type:   'status_change',
+      new_value:    'בוטל',
+      description:  `ביטול רישום צהרון דרך הבוט — ${child.name} (${policyNote})`,
+      performed_by: 'בוט',
+    })
+
+    return { childName: child.name }
+  } catch (err) {
+    console.error('[performCancellation] Error:', err)
+    return null
+  }
+}
+
+export async function handleCancellationFlow(session: BotSession, userMessage: string): Promise<BotResponse> {
   const step = session.currentFlow
   const dayOfMonth = new Date().getDate()
 
@@ -282,16 +353,36 @@ export function handleCancellationFlow(session: BotSession, userMessage: string)
   if (step === 'cancel_confirm_before15') {
     const childName = session.collectedData.child_name || 'הילד/ה'
     if (isYes(userMessage)) {
+      // ביצוע הביטול בפועל ב-CRM
+      const result = await performCancellation(
+        session, childName, `לפני ה-15 (יום ${dayOfMonth}) — המשך עד סוף החודש + זיכוי מלא`
+      )
+
+      if (result) {
+        return {
+          text: `✅ *הביטול בוצע ונרשם במערכת!*\n\n` +
+            `*${result.childName}* ממשיך/ה עד סוף החודש הנוכחי.\n` +
+            `הזיכוי יתקבל לחודש הבא 💛\n\n` +
+            `נציגה תוודא את הפסקת החיובים. תודה שהייתם איתנו!`,
+          isComplete: true,
+          createTask: {
+            type: 'ביטול',
+            description: `✅ ביטול בוצע בבוט — ${result.childName} (יום ${dayOfMonth}, לפני ה-15, זיכוי מלא) | להפסיק הוראת קבע ב-PayPlus + לוודא זיכוי`,
+            priority: 'גבוה'
+          }
+        }
+      }
+
+      // לא אותר חד-משמעית — נציגה תשלים ידנית
       return {
-        text: `✅ *הביטול אושר!*\n\n` +
-          `*${childName}* ממשיך/ה עד סוף החודש הנוכחי.\n` +
-          `הזיכוי יתקבל לחודש הבא 💛\n\n` +
-          `פנייה זו מתועדת. תודה!`,
+        text: `✅ *בקשת הביטול נקלטה!*\n\n` +
+          `*${childName}* ממשיך/ה עד סוף החודש הנוכחי, והזיכוי יתקבל לחודש הבא 💛\n\n` +
+          `נציגה שלנו תשלים את הביטול במערכת ותשלח אישור סופי.`,
         isComplete: true,
         createTask: {
           type: 'ביטול',
-          description: `ביטול אושר — ${childName} (יום ${dayOfMonth}, לפני ה-15, זיכוי מלא)`,
-          priority: 'רגיל'
+          description: `ביטול אושר ע"י ההורה — ${childName} (יום ${dayOfMonth}, לפני ה-15, זיכוי מלא) | ⚠️ לא אותר אוטומטית ב-CRM — להשלים ידנית + להפסיק הוראת קבע`,
+          priority: 'גבוה'
         }
       }
     } else {
@@ -324,15 +415,34 @@ export function handleCancellationFlow(session: BotSession, userMessage: string)
     }
 
     if (isYes(userMessage)) {
+      // ביצוע הביטול בפועל ב-CRM
+      const result = await performCancellation(
+        session, childName, `אחרי ה-15 (יום ${dayOfMonth}) — ממשיך חודש נוסף ומסיים בסוף החודש הבא`
+      )
+
+      if (result) {
+        return {
+          text: `✅ *הביטול בוצע ונרשם במערכת!*\n\n` +
+            `*${result.childName}* ממשיך/ה חודש נוסף ומסיים/ת בסוף החודש הבא.\n\n` +
+            `נציגה תוודא את הפסקת החיובים בהתאם. תודה שהייתם איתנו 💛`,
+          isComplete: true,
+          createTask: {
+            type: 'ביטול',
+            description: `✅ ביטול בוצע בבוט — ${result.childName} (יום ${dayOfMonth}, אחרי ה-15, ממשיך חודש נוסף) | להפסיק הוראת קבע ב-PayPlus מהחודש הבא`,
+            priority: 'גבוה'
+          }
+        }
+      }
+
       return {
-        text: `✅ *ביטול התקבל*\n\n` +
+        text: `✅ *בקשת הביטול נקלטה*\n\n` +
           `*${childName}* ממשיך/ה חודש נוסף ומסיים/ת בסוף החודש הבא.\n\n` +
-          `תודה על ההודעה! פנייה זו מתועדת 💛`,
+          `נציגה שלנו תשלים את הביטול במערכת ותשלח אישור סופי 💛`,
         isComplete: true,
         createTask: {
           type: 'ביטול',
-          description: `ביטול לפי תקנון — ${childName} (יום ${dayOfMonth}, אחרי ה-15, ממשיך חודש נוסף)`,
-          priority: 'רגיל'
+          description: `ביטול לפי תקנון — ${childName} (יום ${dayOfMonth}, אחרי ה-15, ממשיך חודש נוסף) | ⚠️ לא אותר אוטומטית ב-CRM — להשלים ידנית`,
+          priority: 'גבוה'
         }
       }
     }

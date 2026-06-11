@@ -64,7 +64,7 @@ async function handleActiveFlow(
     return { ...await handleRegistrationFlow(session, userMessage), intent }
   }
   if (flow.startsWith('cancel_')) {
-    return { ...handleCancellationFlow(session, userMessage), intent }
+    return { ...await handleCancellationFlow(session, userMessage), intent }
   }
   if (flow.startsWith('pickup_')) {
     return { ...handleEarlyPickupFlow(session, userMessage), intent }
@@ -128,7 +128,7 @@ async function handleNewIntent(
       return { ...handleCampRegistrationFlow(), intent }
 
     case 'ביטול':
-      return { ...handleCancellationFlow(session, userMessage), intent }
+      return { ...await handleCancellationFlow(session, userMessage), intent }
 
     case 'שאלת_לוז':
       return { ...handleScheduleFlow(userMessage), intent }
