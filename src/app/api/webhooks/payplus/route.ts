@@ -66,9 +66,10 @@ async function handlePayPlusEvent(body: Record<string, any>) {
     // external_uid = registration_id שהכנסנו בבקשה
     const externalUid = tx?.order?.external_uid ?? body?.order?.external_uid ?? body?.external_uid
 
-    // האם הוראת קבע (חיוב חוזר) או כרטיס רגיל
-    const isRecurring = !!(tx?.recurring_uid ?? tx?.recurring ?? body?.recurring_uid)
-    const paymentType = isRecurring ? 'הוראת קבע' : 'כרטיס אשראי'
+    // האם הוראת קבע (חיוב חוזר) או כרטיס רגיל + מזהה הוראת הקבע (נדרש לביטול אוטומטי)
+    const recurringUid = String(tx?.recurring_uid ?? tx?.recurring ?? body?.recurring_uid ?? '') || null
+    const isRecurring  = !!recurringUid
+    const paymentType  = isRecurring ? 'הוראת קבע' : 'כרטיס אשראי'
 
     // מספר תשלום + סה"כ תשלומים (PayPlus שולח בהוראות קבע)
     const paymentNumber = Number(tx?.payment_number ?? tx?.payment_num ?? body?.payment_number ?? 0) || null
@@ -144,6 +145,14 @@ async function handlePayPlusEvent(body: Record<string, any>) {
       return NextResponse.json({ ok: true, warning: 'parent not resolved' })
     }
 
+    // ── שמירת מזהה הוראת הקבע ברמת ההורה (לביטול אוטומטי בעתיד) ───────────
+    if (recurringUid) {
+      await supabase.from('parents').update({
+        payplus_recurring_uid:    recurringUid,
+        payplus_recurring_status: isSuccess ? 'active' : 'failed',
+      }).eq('id', parentId)
+    }
+
     // ── רשומת תשלום ────────────────────────────────────────────────────────
     await supabase.from('payments').insert({
       parent_id:          parentId,
@@ -154,6 +163,7 @@ async function handlePayPlusEvent(body: Record<string, any>) {
       card_expired:       cardExpired,
       paid_at:            isSuccess ? paidAt : null,
       payplus_ref:        txId || null,
+      payplus_transaction_uid: txId || null,
       source:             'payplus_webhook',
       failure_reason:     isSuccess ? null : (reason || 'חיוב נכשל'),
       payment_number:     paymentNumber,

@@ -379,6 +379,16 @@ export function ParentDetail({ parentId, onClose, onRefresh }: ParentDetailProps
             </div>
           )}
 
+          {/* Recurring cancel button — מופיע רק אם יש הוראת קבע פעילה ב-PayPlus */}
+          {!editMode && parent.payplus_recurring_uid && parent.payplus_recurring_status === 'active' && (
+            <CancelRecurringButton parentId={parent.id} parentName={parent.name || ''} onSuccess={onRefresh} />
+          )}
+          {!editMode && parent.payplus_recurring_status === 'cancelled' && (
+            <div className="mt-4 text-xs px-3 py-2 rounded-lg" style={{ background: '#f5f5f4', color: '#78716c' }}>
+              ✓ הוראת הקבע ב-PayPlus בוטלה{parent.payplus_recurring_cancelled_at ? ` (${new Date(parent.payplus_recurring_cancelled_at).toLocaleDateString('he-IL')})` : ''}
+            </div>
+          )}
+
           {/* Quick stats row */}
           {!editMode && (
             <div className="flex gap-4 mt-4">
@@ -821,6 +831,44 @@ export function ParentDetail({ parentId, onClose, onRefresh }: ParentDetailProps
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── כפתור ביטול הוראת קבע ב-PayPlus (אוטומטי דרך ה-API) ──────────────────
+function CancelRecurringButton({ parentId, parentName, onSuccess }: {
+  parentId: string
+  parentName: string
+  onSuccess?: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const handleCancel = async () => {
+    if (!confirm(`לבטל את הוראת הקבע של ${parentName} ב-PayPlus?\n\nהפעולה תבצע ביטול אוטומטי מיידי. לא ניתן לבטל פעולה זו.`)) return
+    setLoading(true)
+    try {
+      const res = await fetch('/api/payplus/cancel-recurring', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ parentId }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        alert(`✅ הוראת הקבע של ${parentName} בוטלה בהצלחה ב-PayPlus`)
+        onSuccess?.()
+      } else {
+        alert(`❌ ${data.error ?? 'שגיאה'}`)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+  return (
+    <div className="mt-4">
+      <button onClick={handleCancel} disabled={loading}
+        className="text-xs px-3 py-2 rounded-lg font-semibold transition-all hover:opacity-80 disabled:opacity-40"
+        style={{ background: '#fff', color: '#c0392b', border: '1px solid #f5c6b8' }}>
+        {loading ? 'מבטלת...' : '🛑 בטל הוראת קבע ב-PayPlus'}
+      </button>
     </div>
   )
 }

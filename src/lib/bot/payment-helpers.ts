@@ -105,37 +105,49 @@ export async function createPayPlusPaymentLink(
   try {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://kidsandfun.co.il'
 
+    // ─── מבנה הבקשה לפי הדוקומנטציה הרשמית של PayPlus ───────────────────
+    // https://docs.payplus.co.il/reference/post_paymentpages-generatelink
+    //
+    // charge_method: 0=Check, 1=Charge, 2=Approval, 3=Recurring, 4=Refund, 5=Token
+    // הוראת קבע = 3, חיוב חד-פעמי או חודשי באשראי = 1
     const body: Record<string, unknown> = {
-      payment_page_uid: pageUid,
-      charge_default:   params.amount,
-      charge_method:    params.paymentType === 'standing_order' ? 3 : 0,
-      order: {
-        external_uid: params.registrationId,
-        description:  params.description,
-      },
+      payment_page_uid:   pageUid,
+      amount:             params.amount,
+      currency_code:      'ILS',
+      charge_method:      params.paymentType === 'standing_order' ? 3 : 1,
+      sendEmailApproval:  true,
+      sendEmailFailure:   true,
+      send_failure_callback: true,   // קריטי: callback גם על כשלי חיוב, לא רק הצלחות
+      // refURL_callback מקבל את האיוונט בכל חיוב חדש — כולל חיובים חודשיים מתחדשים
+      refURL_success:  `${appUrl}/payment-success?reg=${params.registrationId}`,
+      refURL_failure:  `${appUrl}/payment-fail?reg=${params.registrationId}`,
+      refURL_cancel:   `${appUrl}/payment-fail?reg=${params.registrationId}&cancelled=1`,
+      refURL_callback: `${appUrl}/api/webhooks/payplus`,
+      // לקוח + פריטים — פותחים את כרטיס הלקוח ב-PayPlus ומופיע בחשבונית
       customer: {
         customer_name: params.parentName,
         phone:         params.phone.replace(/\D/g, '').replace(/^0/, '972'),
       },
-      items: [
-        {
-          name:     params.description,
-          quantity: 1,
-          price:    params.amount,
-          vat_type: 1,  // 1 = כולל מע"מ
-        },
-      ],
-      success_url:  `${appUrl}/payment-success?reg=${params.registrationId}`,
-      fail_url:     `${appUrl}/payment-fail?reg=${params.registrationId}`,
-      callback_url: `${appUrl}/api/webhooks/payplus`,
-      lang:         'he',
+      items: [{
+        name:     params.description,
+        quantity: 1,
+        price:    params.amount,
+        vat_type: 1,                 // 1 = כולל מע"מ
+      }],
+      // external_uid — המזהה שלנו לזיהוי הרישום, מוחזר בכל callback
+      order: {
+        external_uid: params.registrationId,
+        description:  params.description,
+      },
+      paying_vat: true,
+      lang:       'he',
     }
 
     // ─── הוראת קבע — הגדרות חיוב חוזר ────────────────────────────────────
     if (params.paymentType === 'standing_order') {
       body.recurring_settings = {
-        billing_cycle: 'monthly',
-        trial_days:    0,
+        billing_cycle: 'monthly',     // חיוב כל חודש
+        trial_days:    0,             // אין תקופת ניסיון
       }
     }
 

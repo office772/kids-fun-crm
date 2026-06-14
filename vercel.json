@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/payments-check",
       "schedule": "30 4 * * *"
+    },
+    {
+      "path": "/api/cron/payplus-sync",
+      "schedule": "0 5 * * *"
     }
   ]
 }
