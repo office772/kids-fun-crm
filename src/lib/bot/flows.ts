@@ -118,8 +118,31 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
           c.framework === 'צהרון' || c.framework === 'שניהם'
         )
 
-        if (tzaharonKids.length > 0) {
-          const kidsText = tzaharonKids
+        // placeholder = ילד שיובא מ-PayPlus/חשבונית ירוקה בלי שם אמיתי ("—", "*", "?")
+        const isPlaceholderName = (n?: string) => {
+          if (!n) return true
+          const trimmed = n.trim()
+          return trimmed.length < 3 || ['—','–','-','*','?'].includes(trimmed)
+        }
+        const placeholderKid = tzaharonKids.find((k: { name: string }) => isPlaceholderName(k.name))
+        const realKids = tzaharonKids.filter((k: { name: string }) => !isPlaceholderName(k.name))
+
+        // אם יש ילד placeholder ואין שום ילד אמיתי — נשלים את השם מההורה
+        if (placeholderKid && realKids.length === 0) {
+          session.collectedData.placeholder_child_id = placeholderKid.id
+          const firstName = parent?.name?.split(' ')[0] ?? ''
+          return {
+            text:
+              `היי${firstName ? ' ' + firstName : ''}! 💛\n\n` +
+              `אני רואה שיש אצלנו תשלום פעיל בשמך, אבל חסר אצלנו שם הילד/ה שלכם 🤔\n\n` +
+              `*מה שם הילד/ה? (שם פרטי + שם משפחה)*\n\n` +
+              `_(זה יישמר אצלנו פעם אחת בלבד, מהפעם הבאה כבר נזהה אתכם)_`,
+            nextFlow: 'register_complete_placeholder',
+          }
+        }
+
+        if (realKids.length > 0) {
+          const kidsText = realKids
             .map((k: { name: string; class_name?: string | null }) =>
               `• *${k.name}*${k.class_name ? ` (כיתה ${k.class_name})` : ''}`).join('\n')
           const firstName = parent?.name?.split(' ')[0] ?? ''
@@ -148,6 +171,42 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
         `*2* — חוף הכרמל\n` +
         `*3* — גני ילדים תל אביב`,
       nextFlow: 'register_area',
+    }
+  }
+
+  // ─── השלמת שם ילד placeholder (הורה זוהה אבל חסר שם בילד) ─────────────
+  if (step === 'register_complete_placeholder') {
+    const name = userMessage.trim().replace(/\s+/g, ' ')
+    const words = name.split(' ').filter(w => w.length >= 2)
+    if (words.length < 2 || /\d/.test(name) || name.length > 60) {
+      return {
+        text:
+          `אנא כתבו *שם פרטי + שם משפחה* של הילד/ה 😊\n` +
+          `_(לדוגמה: נועה כהן)_`,
+        nextFlow: 'register_complete_placeholder',
+      }
+    }
+
+    const childId = session.collectedData.placeholder_child_id
+    if (childId) {
+      try {
+        const { createServiceClient } = await import('@/lib/supabase/server')
+        const supabase = createServiceClient()
+        await supabase.from('children').update({ name }).eq('id', childId)
+      } catch (err) {
+        console.error('[register_complete_placeholder] update error:', err)
+      }
+    }
+
+    return {
+      text:
+        `מעולה, תודה! ✅ עדכנתי את *${name}* אצלנו.\n\n` +
+        `*במה אפשר לעזור?*\n` +
+        `*1* — לרשום ילד/ה נוסף/ת מהמשפחה\n` +
+        `*2* — לעדכן פרטים של ${name}\n` +
+        `*3* — לבדוק סטטוס תשלום\n` +
+        `*4* — שאלה אחרת`,
+      nextFlow: 'register_existing_parent',
     }
   }
 

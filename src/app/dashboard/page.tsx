@@ -35,6 +35,7 @@ export default function DashboardPage() {
   const [frameworkFilter, setFrameworkFilter] = useState<string>('הכל')
   const [areaFilter, setAreaFilter] = useState<string>('הכל')
   const [sourceFilter, setSourceFilter] = useState<string>('הכל')
+  const [showMissingChild, setShowMissingChild] = useState(false)
   const [detailParentId, setDetailParentId] = useState<string | null>(null)
   const [showGlobalSearch, setShowGlobalSearch] = useState(false)
 
@@ -181,8 +182,30 @@ export default function DashboardPage() {
     if (sourceFilter !== 'הכל') {
       if (p.sync_source !== sourceFilter) return false
     }
+    // Missing child name filter — הורים עם תשלום אך ללא שם ילד אמיתי
+    if (showMissingChild) {
+      const isPlaceholder = (n?: string) => {
+        if (!n) return true
+        const t = n.trim()
+        return t.length < 3 || ['—','–','-','*','?'].includes(t)
+      }
+      const hasRealChild = p.children?.some(c => !isPlaceholder(c.name))
+      const hasPayment = (p.payments?.length ?? 0) > 0
+      if (hasRealChild || !hasPayment) return false
+    }
     return true
   })
+
+  const missingChildCount = parents.filter(p => {
+    const isPlaceholder = (n?: string) => {
+      if (!n) return true
+      const t = n.trim()
+      return t.length < 3 || ['—','–','-','*','?'].includes(t)
+    }
+    const hasRealChild = p.children?.some(c => !isPlaceholder(c.name))
+    const hasPayment = (p.payments?.length ?? 0) > 0
+    return hasPayment && !hasRealChild
+  }).length
 
   if (loading) {
     return (
@@ -410,6 +433,24 @@ export default function DashboardPage() {
                       {a === 'הכל' ? 'הכל' : (areaLabels[a] ?? a)}
                     </button>
                   ))}
+                </div>
+              )}
+
+              {/* Missing child name — נראה רק אם יש כאלה */}
+              {missingChildCount > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setShowMissingChild(v => !v)}
+                    className="px-3 py-1.5 rounded-full text-xs font-medium transition-all"
+                    style={
+                      showMissingChild
+                        ? { background: '#f5a623', color: '#fff' }
+                        : { background: '#fff', color: '#7B6010', opacity: 0.9, border: '1px solid #f5a623' }
+                    }
+                    title="הורים עם תשלום פעיל אבל ללא שם ילד אמיתי במערכת"
+                  >
+                    🟡 חסרים פרטי ילד ({missingChildCount})
+                  </button>
                 </div>
               )}
 
@@ -833,6 +874,7 @@ function loadSimState() {
       lastIntent: string | null
       msgCount: number
       sessionId: string
+      testPhone?: string
     }
   } catch { return null }
 }
@@ -849,6 +891,8 @@ function BotSimulator() {
   const [msgCount, setMsgCount] = useState(saved?.msgCount ?? 0)
   const chatRef = useRef<HTMLDivElement>(null)
   const sessionIdRef = useRef(saved?.sessionId ?? ('sim_' + Date.now()))
+  // טלפון לבדיקה — מאפשר לדמות זיהוי הורה אמיתי בסימולטור (כמו בוואטסאפ)
+  const [testPhone, setTestPhone] = useState<string>(saved?.testPhone ?? '')
 
   // persist state to localStorage on every change
   useEffect(() => {
@@ -856,6 +900,7 @@ function BotSimulator() {
       localStorage.setItem(SIM_STORAGE_KEY, JSON.stringify({
         messages, currentFlow, collectedData, lastIntent, msgCount,
         sessionId: sessionIdRef.current,
+        testPhone,
       }))
     } catch { /* storage full or private mode */ }
   }, [messages, currentFlow, collectedData, lastIntent, msgCount])
@@ -897,6 +942,8 @@ function BotSimulator() {
         body: JSON.stringify({
           message: userMsg,
           sessionId: sessionIdRef.current,
+          // טלפון לבדיקה — מאפשר זיהוי הורה אמיתי בסימולטור (כמו בוואטסאפ)
+          testPhone: testPhone || undefined,
           // מצב מהדפדפן — מאפשר לשרת לשחזר את ה-session אחרי רענון
           // (ב-Vercel הזיכרון של השרת מתאפס בין קריאות)
           clientState: {
@@ -953,13 +1000,23 @@ function BotSimulator() {
               </span>
             )}
           </div>
-          <button
-            onClick={reset}
-            className="text-xs px-3 py-1.5 rounded-full font-medium hover:opacity-80 transition-opacity"
-            style={{ background: '#f5f5f4', color: '#78716c' }}
-          >
-            🔄 התחל שיחה חדשה
-          </button>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={testPhone}
+              onChange={e => setTestPhone(e.target.value)}
+              placeholder="טלפון לבדיקה (אופציונלי)"
+              className="text-xs px-3 py-1.5 rounded-full border border-gray-200 w-44 focus:outline-none focus:border-[var(--crm-primary)]"
+              title="הקלידי טלפון של הורה אמיתי כדי לדמות זיהוי בוואטסאפ (למשל 0546164546)"
+            />
+            <button
+              onClick={reset}
+              className="text-xs px-3 py-1.5 rounded-full font-medium hover:opacity-80 transition-opacity"
+              style={{ background: '#f5f5f4', color: '#78716c' }}
+            >
+              🔄 התחל שיחה חדשה
+            </button>
+          </div>
         </div>
 
         {/* WhatsApp chat area */}

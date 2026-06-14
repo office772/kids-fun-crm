@@ -9,7 +9,7 @@ const simulatorSessions = new Map<string, BotSession>()
 
 export async function POST(req: NextRequest) {
   try {
-    const { message, sessionId, parentName, reset, clientState } = await req.json()
+    const { message, sessionId, parentName, reset, clientState, testPhone } = await req.json()
 
     if (!message || !sessionId) {
       return NextResponse.json({ error: 'Missing message or sessionId' }, { status: 400 })
@@ -21,9 +21,17 @@ export async function POST(req: NextRequest) {
 
     // ב-Vercel (serverless) הזיכרון מתאפס בין קריאות — אם ה-session לא בזיכרון,
     // משחזרים אותו ממצב הלקוח (localStorage בדפדפן) כדי שהמסלול לא "יישכח" אחרי רענון.
-    const session: BotSession = simulatorSessions.get(sessionId) || {
+    // טלפון לבדיקה (אם סופק) — מאפשר לדמות זיהוי הורה אמיתי בסימולטור
+    const cleanTestPhone = typeof testPhone === 'string' && testPhone.trim() ? testPhone.trim() : null
+
+    const existing = simulatorSessions.get(sessionId)
+    if (existing && cleanTestPhone && existing.phone !== cleanTestPhone) {
+      existing.phone = cleanTestPhone
+    }
+
+    const session: BotSession = existing || {
       sessionId,
-      phone: 'simulator',
+      phone: cleanTestPhone || 'simulator',
       parentName: parentName || 'הורה לדוגמה',
       currentFlow: clientState?.currentFlow || undefined,
       messages: Array.isArray(clientState?.messages)
