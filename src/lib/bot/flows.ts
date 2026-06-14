@@ -92,8 +92,47 @@ export function buildProactivePaymentMessage(parentName: string): string {
 export async function handleRegistrationFlow(session: BotSession, userMessage: string): Promise<BotResponse> {
   const step = session.currentFlow
 
-  // ─── שלב התחלה: שואלים על אזור ──────────────────────────────────────────
+  // ─── שלב התחלה: זיהוי לפי טלפון ── אם יש רישום קיים, להציג אותו ──────────
   if (!step || step === 'register_start') {
+    if (session.phone && session.phone !== 'simulator') {
+      try {
+        const { createServiceClient } = await import('@/lib/supabase/server')
+        const supabase = createServiceClient()
+        const normalized = session.phone.replace(/\D/g, '').replace(/^972/, '0')
+        const intl       = '972' + normalized.replace(/^0/, '')
+
+        const { data: parent } = await supabase
+          .from('parents')
+          .select('id, name, children(id, name, class_name, area_code, framework)')
+          .or(`phone.eq.${normalized},phone.eq.${intl},phone.eq.${session.phone}`)
+          .maybeSingle()
+
+        const tzaharonKids = (parent?.children ?? []).filter((c: { framework?: string }) =>
+          c.framework === 'צהרון' || c.framework === 'שניהם'
+        )
+
+        if (tzaharonKids.length > 0) {
+          const kidsText = tzaharonKids
+            .map((k: { name: string; class_name?: string | null }) =>
+              `• *${k.name}*${k.class_name ? ` (כיתה ${k.class_name})` : ''}`).join('\n')
+          const firstName = parent?.name?.split(' ')[0] ?? ''
+          return {
+            text:
+              `היי${firstName ? ' ' + firstName : ''}! 💛\n\nראיתי שיש לכם כבר רישום אצלנו:\n${kidsText}\n\n` +
+              `*במה אפשר לעזור?*\n` +
+              `*1* — לרשום ילד/ה נוסף/ת מהמשפחה\n` +
+              `*2* — לעדכן פרטים של ילד קיים\n` +
+              `*3* — לבדוק סטטוס תשלום\n` +
+              `*4* — שאלה אחרת`,
+            nextFlow: 'register_existing_parent',
+          }
+        }
+      } catch (err) {
+        console.error('[register_start] phone lookup error:', err)
+      }
+    }
+
+    // הורה לא מזוהה / חדש → תהליך רישום רגיל
     return {
       text:
         `שמחים שאתם רוצים להצטרף למשפחת Kids & Fun! 🎉\n\n` +
@@ -102,6 +141,64 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
         `*2* — חוף הכרמל\n` +
         `*3* — גני ילדים תל אביב`,
       nextFlow: 'register_area',
+    }
+  }
+
+  // ─── הורה מזוהה — בחירה מה לעשות ───────────────────────────────────────
+  if (step === 'register_existing_parent') {
+    const msg = userMessage.trim()
+    if (msg === '1' || /נוסף|אח|אחות/i.test(msg)) {
+      return {
+        text: `מעולה! 🌟\n\nלאיזה אזור מבקשים לרשום?\n\n*1* — דרום השרון / חוף השרון\n*2* — חוף הכרמל\n*3* — גני ילדים תל אביב`,
+        nextFlow: 'register_area',
+      }
+    }
+    if (msg === '2' || /עדכון|לעדכן|פרטים|לשנות/i.test(msg)) {
+      return {
+        text: `בסדר 😊\n\n*מה תרצו לעדכן?* (לדוגמה: "להעביר את שם הילד לגלי עתלית", "אלרגיה חדשה", "שינוי בית ספר")`,
+        nextFlow: 'register_update_details',
+      }
+    }
+    if (msg === '3' || /סטטוס|תשלום/i.test(msg)) {
+      session.currentFlow = 'payment_status_menu'
+      return handlePaymentStatusFlow(session.parentName)
+    }
+    if (msg === '4' || /שאלה|אחר/i.test(msg)) {
+      return {
+        text: `בסדר גמור 😊\n\nכתבו את שאלתכם ונציגה תחזור אליכם בהקדם 💛`,
+        nextFlow: 'register_existing_question',
+      }
+    }
+    return {
+      text:
+        `לא הבנתי 😊\n\n` +
+        `*1* — לרשום ילד/ה נוסף/ת\n*2* — לעדכן פרטים\n*3* — לבדוק סטטוס תשלום\n*4* — שאלה אחרת`,
+      nextFlow: 'register_existing_parent',
+    }
+  }
+
+  // עדכון פרטים → משימה לנציגה
+  if (step === 'register_update_details') {
+    return {
+      text: `קיבלתי 💛\n\nנציגה תטפל בעדכון ותחזור אליכם לאישור!`,
+      isComplete: true,
+      createTask: {
+        type:        'שאלה כללית',
+        description: `עדכון פרטי רישום — "${userMessage.slice(0, 150)}" | טלפון פונה: ${session.phone}`,
+        priority:    'גבוה',
+      },
+    }
+  }
+
+  if (step === 'register_existing_question') {
+    return {
+      text: `תודה! נציגה תחזור אליכם בהקדם 💛`,
+      isComplete: true,
+      createTask: {
+        type:        'שאלה כללית',
+        description: `שאלה מהורה קיים: "${userMessage.slice(0, 200)}" | טלפון: ${session.phone}`,
+        priority:    'רגיל',
+      },
     }
   }
 
@@ -137,6 +234,59 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
       }
     }
     session.collectedData.child_name = trimmed
+
+    // ⚡ זיהוי משני: אולי הילד הזה כבר רשום אצלנו (גיבוי לטלפון לא-מזוהה)
+    try {
+      const { createServiceClient } = await import('@/lib/supabase/server')
+      const supabase = createServiceClient()
+      const { data: kids } = await supabase
+        .from('children')
+        .select('id, name, class_name, area_code, framework, parent_id')
+        .ilike('name', trimmed)
+        .limit(2)
+
+      if (kids?.length === 1) {
+        const kid = kids[0]
+
+        // נחשיב את הילד כ"רשום פעיל" אם יש רישום פורמלי, או אם framework=צהרון
+        // (חלק גדול מהילדים יובאו מאקסל בלי רשומת registrations)
+        const isTzaharon = kid.framework === 'צהרון' || kid.framework === 'שניהם'
+
+        const { data: reg } = await supabase
+          .from('registrations')
+          .select('status')
+          .eq('child_id', kid.id).eq('type', 'צהרון')
+          .in('status', ['מאושר', 'ממתין לאישור'])
+          .order('created_at', { ascending: false }).limit(1).maybeSingle()
+
+        if (reg || isTzaharon) {
+          const areaLabels: Record<string, string> = {
+            sharon: 'שרון', carmel: 'כרמל', telaviv: 'תל אביב',
+          }
+          const areaName = kid.area_code ? (areaLabels[kid.area_code] ?? kid.area_code) : ''
+          const details = [
+            kid.class_name && `כיתה ${kid.class_name}`,
+            areaName,
+          ].filter(Boolean).join(', ')
+          const statusLine = reg ? `\nסטטוס: *${reg.status}*` : ''
+
+          return {
+            text:
+              `מצאתי! 💛\n\n*${kid.name}* כבר רשום/ה אצלנו${details ? ` (${details})` : ''}.${statusLine}\n\n` +
+              `*במה אפשר לעזור?*\n` +
+              `*1* — לרשום ילד/ה נוסף/ת מהמשפחה\n` +
+              `*2* — לעדכן פרטים של ${kid.name}\n` +
+              `*3* — לבדוק סטטוס תשלום\n` +
+              `*4* — שאלה אחרת`,
+            nextFlow: 'register_existing_parent',
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[register_child_name] lookup error:', err)
+    }
+
+    // ילד חדש — המשך לשלב הכיתה
     return {
       text: `שם יפה 😊\n\n*באיזו כיתה לומד/ת ${trimmed}?*\n_(לדוגמה: א׳, ב׳, גן חובה)_`,
       nextFlow: 'register_class',
