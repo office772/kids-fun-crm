@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Users, Settings, ChevronLeft, RefreshCw, CheckCircle, AlertCircle, Info, UsersRound } from 'lucide-react'
+import { Users, Settings, ChevronLeft, RefreshCw, CheckCircle, AlertCircle, Info, UsersRound, HelpCircle } from 'lucide-react'
 import { CapacitySettings } from '@/components/admin/CapacitySettings'
 import { FrameworkStaffManager } from '@/components/dashboard/FrameworkStaffManager'
+import { BotFAQManager } from '@/components/dashboard/BotFAQManager'
 import Link from 'next/link'
 
 const SYNC_TIMEOUT_MS = 90_000 // לא להשאיר את הכפתור תקוע על "מסנכרן..." לנצח
@@ -97,7 +98,7 @@ function SyncButton({ label, endpoint, color }: { label: string; endpoint: strin
   )
 }
 
-type AdminSection = 'capacity' | 'sync' | 'framework-staff'
+type AdminSection = 'capacity' | 'sync' | 'framework-staff' | 'faq'
 // עתידי: | 'bot-texts' | 'hours' | 'general' | 'payments' ...
 
 interface SectionDef {
@@ -126,6 +127,13 @@ export default function AdminPage() {
       icon: <UsersRound size={18} />,
       description: 'רכזות, גננות וצוות לכל בי"ס/גן/קייטנה',
       component: <FrameworkStaffManager />,
+    },
+    {
+      id: 'faq',
+      label: 'שאלות ותשובות',
+      icon: <HelpCircle size={18} />,
+      description: 'תוכן השאלות שהבוט עונה עליהן אוטומטית',
+      component: <BotFAQManager />,
     },
     {
       id: 'sync',
