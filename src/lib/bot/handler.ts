@@ -41,12 +41,33 @@ export async function processMessage(
     return await llmFallback(session, userMessage, intent)
   }
 
+  // ── שאלה אמיתית? קודם נחפש ב-FAQ של האדמין לפני שמתחילים מסלול ──────────
+  // ככה שאלות מידע כמו "כמה ימים אפשר?" יקבלו תשובה ישירה במקום להיכנס לרישום
+  if (isLikelyQuestion(userMessage) && !isExplicitNumericChoice(userMessage)) {
+    const { findFaqAnswer } = await import('./faq-search')
+    const faqAnswer = await findFaqAnswer(userMessage)
+    if (faqAnswer) {
+      return { text: faqAnswer, intent, isComplete: true }
+    }
+  }
+
   // ── FP: כוונה ברורה → מסלול מוגדר ────────────────────────────────────────
   const fpIntent = await handleNewIntent(session, userMessage, intent)
   if (fpIntent) return fpIntent
 
   // ── LLM: שום FP לא תפס ────────────────────────────────────────────────────
   return await llmFallback(session, userMessage, intent)
+}
+
+// זיהוי אם ההודעה היא שאלת מידע (לא בקשה לפעולה כמו "רישום לצהרון")
+function isLikelyQuestion(msg: string): boolean {
+  const t = msg.trim()
+  if (t.endsWith('?')) return true
+  return /^(האם|מה|מתי|איך|כמה|איפה|למה|אילו|מי|יש|אפשר|מ?אילו)\b/i.test(t)
+}
+
+function isExplicitNumericChoice(msg: string): boolean {
+  return /^[1-9]$/.test(msg.trim())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -193,6 +214,14 @@ async function llmFallback(
   userMessage: string,
   intent: BotIntent
 ): Promise<BotResponse & { intent: BotIntent }> {
+  // קודם — נסה למצוא תשובה ב-FAQ של האדמין (פאנל ניהול)
+  // אם נמצא — חוסך קריאת LLM ועונה מהר ובדיוק לפי הניסוח של עינת
+  const { findFaqAnswer } = await import('./faq-search')
+  const faqAnswer = await findFaqAnswer(userMessage)
+  if (faqAnswer) {
+    return { text: faqAnswer, intent, isComplete: true }
+  }
+
   const llmResult = await callLLMFallback(session, userMessage)
 
   // ── LLM הציע לחזור לזרימה — עדכן session ────────────────────────────────

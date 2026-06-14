@@ -194,12 +194,14 @@ export type FAQCategory = 'תשלומים' | 'לוז' | 'קייטנה' | 'ביט
 
 export interface FAQ {
   id: string
-  key: string           // מפתח ייחודי, למשל: 'sibling_discount'
+  key: string           // מפתח טכני — נוצר אוטומטית מהשאלה
   question: string      // שאלה לתצוגה
   answer: string        // תשובה — תומכת ב-{שם}, {ילד} placeholders
   category: FAQCategory
+  keywords?: string     // מילות מפתח נוספות לחיפוש (ניסוחים שונים שאותו דבר)
   is_active: boolean
   created_at: string
+  updated_at?: string
 }
 
 // ─── BotContent ────────────────────────────────────────────────────────────

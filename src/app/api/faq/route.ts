@@ -67,20 +67,24 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json() as Partial<FAQ>
-  if (!body.key || !body.question || !body.answer || !body.category) {
-    return NextResponse.json({ error: 'key, question, answer, category חובה' }, { status: 400 })
+  if (!body.question || !body.answer || !body.category) {
+    return NextResponse.json({ error: 'question, answer, category חובה' }, { status: 400 })
   }
 
   const { createServiceClient } = await import('@/lib/supabase/server')
   const supabase = createServiceClient()
 
+  // יצירת key אוטומטי מהשאלה אם לא סופק (כדי להסתיר מהמשתמש את הצורך)
+  const autoKey = (body.key && body.key.trim()) || `faq_${Date.now().toString(36)}`
+
   const { data, error } = await supabase
     .from('faqs')
     .insert({
-      key:       body.key,
+      key:       autoKey,
       question:  body.question,
       answer:    body.answer,
       category:  body.category,
+      keywords:  body.keywords || null,
       is_active: body.is_active ?? true,
     })
     .select()
@@ -107,7 +111,7 @@ export async function PATCH(req: NextRequest) {
 
   const { data, error } = await supabase
     .from('faqs')
-    .update(body)
+    .update({ ...body, updated_at: new Date().toISOString() })
     .eq('id', id)
     .select()
     .single()
