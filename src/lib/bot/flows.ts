@@ -259,20 +259,25 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
           .in('status', ['מאושר', 'ממתין לאישור'])
           .order('created_at', { ascending: false }).limit(1).maybeSingle()
 
+        // שם ההורה — לאישור זיהוי חוזר ("הורה רשום: ...")
+        const { data: parentRec } = await supabase
+          .from('parents').select('name').eq('id', kid.parent_id).maybeSingle()
+
         if (reg || isTzaharon) {
           const areaLabels: Record<string, string> = {
-            sharon: 'שרון', carmel: 'כרמל', telaviv: 'תל אביב',
+            sharon: 'דרום השרון / חוף השרון', carmel: 'חוף הכרמל', telaviv: 'תל אביב',
           }
           const areaName = kid.area_code ? (areaLabels[kid.area_code] ?? kid.area_code) : ''
-          const details = [
-            kid.class_name && `כיתה ${kid.class_name}`,
-            areaName,
-          ].filter(Boolean).join(', ')
-          const statusLine = reg ? `\nסטטוס: *${reg.status}*` : ''
+          const lines = [
+            kid.class_name && `כיתה: *${kid.class_name}*`,
+            areaName && `אזור: *${areaName}*`,
+            parentRec?.name && `הורה רשום: *${parentRec.name}*`,
+            reg && `סטטוס: *${reg.status}*`,
+          ].filter(Boolean).join('\n')
 
           return {
             text:
-              `מצאתי! 💛\n\n*${kid.name}* כבר רשום/ה אצלנו${details ? ` (${details})` : ''}.${statusLine}\n\n` +
+              `מצאתי! 💛\n\n*${kid.name}* כבר רשום/ה אצלנו:\n${lines}\n\n` +
               `*במה אפשר לעזור?*\n` +
               `*1* — לרשום ילד/ה נוסף/ת מהמשפחה\n` +
               `*2* — לעדכן פרטים של ${kid.name}\n` +
