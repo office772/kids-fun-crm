@@ -156,6 +156,7 @@ async function createTask(
     type: string
     description: string
     priority: TaskPriority
+    framework?: { area_code: string; school?: string; type?: 'צהרון'|'קייטנה' }
   }
 ) {
   await supabase.from('tasks').insert({
@@ -166,9 +167,13 @@ async function createTask(
     status: 'פתוח',
   })
 
-  // התראה לנייד הנציגה (פעיל אוטומטית ברגע ש-uChat מחובר)
+  // התראה לאדמין + צוות המסגרת (אם הוגדר framework). פעיל ברגע ש-uChat מחובר.
   const { notifyStaff } = await import('@/lib/notify')
-  await notifyStaff({ text: `משימה חדשה (${opts.type}):\n${opts.description}`, priority: opts.priority })
+  await notifyStaff({
+    text: `משימה חדשה (${opts.type}):\n${opts.description}`,
+    priority: opts.priority,
+    framework: opts.framework,
+  })
 }
 
 // ─── POST ──────────────────────────────────────────────────────────────────────
@@ -245,13 +250,35 @@ export async function POST(req: NextRequest) {
     sessionId: session.sessionId,
   })
 
-  // 8. יצירת task אם נדרש
+  // 8. יצירת task אם נדרש — והתראה לצוות המסגרת אם הוגדר notifyFramework
   if (result.createTask) {
+    // אם הפנייה דורשת צוות מסגרת — מאתרים את בית הספר/אזור של הילד
+    let frameworkCtx: { area_code: string; school?: string; type?: 'צהרון'|'קייטנה' } | undefined
+    if (result.notifyFramework?.byChildName) {
+      const { data: kid } = await supabase
+        .from('children').select('area_code, school, framework')
+        .ilike('name', result.notifyFramework.byChildName).limit(1).maybeSingle()
+      if (kid?.area_code) {
+        frameworkCtx = {
+          area_code: kid.area_code,
+          school: kid.school ?? undefined,
+          type: (kid.framework === 'קייטנה' ? 'קייטנה' : 'צהרון'),
+        }
+      }
+    } else if (result.notifyFramework?.area_code) {
+      frameworkCtx = {
+        area_code: result.notifyFramework.area_code,
+        school: result.notifyFramework.school,
+        type: result.notifyFramework.type,
+      }
+    }
+
     await createTask(supabase, {
       parentId: parent.id,
       type: result.createTask.type,
       description: result.createTask.description,
       priority: result.createTask.priority,
+      framework: frameworkCtx,
     })
   }
 

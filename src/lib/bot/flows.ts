@@ -13,6 +13,13 @@ import {
 export interface BotResponse {
   text: string
   escalate?: boolean
+  // הקשר אופציונלי לפניות שצריכות להגיע לצוות המסגרת (איסוף מוקדם, חולה היום…)
+  notifyFramework?: {
+    byChildName?: string                  // לחלץ את המסגרת מתוך הילד
+    area_code?:   string
+    school?:      string
+    type?:        'צהרון' | 'קייטנה'
+  }
   createTask?: {
     type: string
     description: string
@@ -981,7 +988,10 @@ export function handleEarlyPickupFlow(session: BotSession, userMessage: string):
         type: 'איסוף מוקדם',
         description: `איסוף מוקדם — ${childName} בשעה ${time} ע"י ${userMessage}`,
         priority: 'גבוה'
-      }
+      },
+      // הקשר מסגרת — לתשתית notifyStaff (החיפוש בפועל יתבצע ב-manychat webhook
+      // לפי שם הילד או טלפון ההורה)
+      notifyFramework: { byChildName: childName }
     }
   }
 
