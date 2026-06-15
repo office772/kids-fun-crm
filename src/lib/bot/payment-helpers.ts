@@ -105,6 +105,12 @@ export async function createPayPlusPaymentLink(
   try {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://kidsandfun.co.il'
 
+    // ─── בסביבת Sandbox — סכום מקסימלי 5 ₪ לעסקה (כך PayPlus דורשים, אחרת חסימת החשבון).
+    // הסכום המקורי נשמר ב-description כדי שיהיה גלוי בבדיקות.
+    const isSandbox  = process.env.PAYPLUS_SANDBOX === 'true'
+    const realAmount = params.amount
+    const amount     = isSandbox ? 5 : realAmount
+
     // ─── מבנה הבקשה לפי הדוקומנטציה הרשמית של PayPlus ───────────────────
     // https://docs.payplus.co.il/reference/post_paymentpages-generatelink
     //
@@ -112,7 +118,7 @@ export async function createPayPlusPaymentLink(
     // הוראת קבע = 3, חיוב חד-פעמי או חודשי באשראי = 1
     const body: Record<string, unknown> = {
       payment_page_uid:   pageUid,
-      amount:             params.amount,
+      amount,
       currency_code:      'ILS',
       charge_method:      params.paymentType === 'standing_order' ? 3 : 1,
       sendEmailApproval:  true,
@@ -129,9 +135,9 @@ export async function createPayPlusPaymentLink(
         phone:         params.phone.replace(/\D/g, '').replace(/^0/, '972'),
       },
       items: [{
-        name:     params.description,
+        name:     isSandbox ? `[TEST 5₪ במקום ${realAmount}₪] ${params.description}` : params.description,
         quantity: 1,
-        price:    params.amount,
+        price:    amount,
         vat_type: 1,                 // 1 = כולל מע"מ
       }],
       // external_uid — המזהה שלנו לזיהוי הרישום, מוחזר בכל callback
