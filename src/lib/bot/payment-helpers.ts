@@ -144,11 +144,12 @@ export async function createPayPlusPaymentLink(
     }
 
     // ─── הוראת קבע — הגדרות חיוב חוזר (לפי דוק PayPlus) ─────────────────
-    // type: 0=Daily, 1=Weekly, 2=Monthly | range: כל כמה (1=כל חודש) | 0 charges = ללא הגבלה
+    // recurring_type: 0=Daily, 1=Weekly, 2=Monthly | range: כל כמה (1=כל חודש)
+    // number_of_charges: 0 = ללא הגבלה
     if (params.paymentType === 'standing_order') {
       body.recurring_settings = {
-        type:               2,
-        range:              1,
+        recurring_type:     2,
+        recurring_range:    1,
         number_of_charges:  0,
       }
     }
