@@ -303,14 +303,26 @@ export async function loadParentRegistrationContext(
       .order('created_at', { ascending: false })
       .maybeSingle()
 
-    if (!reg) return
-
-    if (reg.child) {
+    if (reg?.child) {
       const child = Array.isArray(reg.child) ? reg.child[0] : reg.child
       session.collectedData.child_name      = child.name
       session.collectedData.area_label      = reg.area_label ?? ''
       session.collectedData.area_code       = reg.area_code  ?? ''
       session.collectedData.registration_id = reg.id
+    } else {
+      // אין רישום פורמלי — לחפש ילד צהרון אצל ההורה (ייבוא היסטורי)
+      const { data: kid } = await supabase
+        .from('children')
+        .select('id, name, area_code')
+        .eq('parent_id', parent.id)
+        .in('framework', ['צהרון', 'שניהם'])
+        .not('name', 'in', '(—,–,-,*,?)')
+        .order('created_at', { ascending: false })
+        .limit(1).maybeSingle()
+      if (kid?.name) {
+        session.collectedData.child_name = kid.name
+        if (kid.area_code) session.collectedData.area_code = kid.area_code
+      }
     }
 
     // עלות לפי branch (TODO: משוך מ-branches.monthly_fee)

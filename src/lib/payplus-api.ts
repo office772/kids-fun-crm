@@ -27,6 +27,38 @@ interface PayPlusResult<T = unknown> {
   error?:  string
 }
 
+// ─── עדכון הוראת קבע — שינוי תאריך חיוב חודשי ───────────────────────────────
+// POST /recurringpayments-update-uid
+export async function updateRecurringBillingDate(
+  recurringUid: string,
+  newDayOfMonth: number
+): Promise<PayPlusResult> {
+  const headers = getAuthHeaders()
+  if (!headers) return { success: false, error: 'PayPlus API לא מוגדר' }
+  if (!recurringUid) return { success: false, error: 'חסר מזהה הוראת קבע' }
+  if (newDayOfMonth < 1 || newDayOfMonth > 28) {
+    return { success: false, error: 'יום החיוב חייב להיות בין 1 ל-28' }
+  }
+  try {
+    const res = await fetch(`${getPayPlusBase()}/recurringpayments-update-uid`, {
+      method:  'POST',
+      headers,
+      body:    JSON.stringify({
+        recurring_payment_uid: recurringUid,
+        billing_day:           newDayOfMonth,
+      }),
+    })
+    if (!res.ok) return { success: false, error: `HTTP ${res.status}` }
+    const data = await res.json()
+    if (data?.results?.status !== '1' && data?.results?.status !== 1) {
+      return { success: false, error: data?.results?.description ?? 'PayPlus החזיר שגיאה' }
+    }
+    return { success: true, data }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'שגיאת רשת' }
+  }
+}
+
 // ─── ביטול הוראת קבע ─────────────────────────────────────────────────────────
 // POST /recurringpayments-deleterecurring-uid
 export async function cancelRecurringPayment(recurringUid: string): Promise<PayPlusResult> {

@@ -91,7 +91,7 @@ async function handleActiveFlow(
     return { ...handleEarlyPickupFlow(session, userMessage), intent }
   }
   if (flow.startsWith('payment_fail_')) {
-    return { ...handlePaymentFailureParentFlow(session, userMessage), intent }
+    return { ...await handlePaymentFailureParentFlow(session, userMessage), intent }
   }
   if (flow.startsWith('payment_setup_')) {
     return { ...await handlePaymentSetupFlow(session, userMessage), intent }
@@ -159,7 +159,7 @@ async function handleNewIntent(
 
     case 'כשל_תשלום':
     case 'כשל_תשלום_יזום':
-      return { ...handlePaymentFailureParentFlow(session, userMessage), intent }
+      return { ...await handlePaymentFailureParentFlow(session, userMessage), intent }
 
     case 'בדיקת_תשלום':
       return { ...handlePaymentStatusFlow(session.parentName), intent }

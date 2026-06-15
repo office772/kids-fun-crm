@@ -1125,7 +1125,7 @@ export async function handlePaymentStatusMenuFlow(
   // בחירה 3 — בעיה / כשל → מסלול כשל תשלום הקיים
   if (msg === '3' || /בעיה|כשל|לא עבר|נכשל|נדחה/i.test(msg)) {
     session.currentFlow = 'payment_fail_start'
-    return handlePaymentFailureParentFlow(session, userMessage)
+    return await handlePaymentFailureParentFlow(session, userMessage)
   }
 
   // בחירה 4 — עלות → תפריט עלויות מפורט
@@ -1304,7 +1304,7 @@ export async function handleCostInfoFlow(
 // ⚠️ אסור לאסוף פרטי כרטיס אשראי דרך WhatsApp!
 //     הבוט רק מתאם שיחה עם נציגה או מתזמן תזכורת CRM.
 // ═══════════════════════════════════════════════════════════════════════════════
-export function handlePaymentFailureParentFlow(session: BotSession, userMessage: string): BotResponse {
+export async function handlePaymentFailureParentFlow(session: BotSession, userMessage: string): Promise<BotResponse> {
   const step = session.currentFlow
 
   // ─── פתיחה — טון חם ולא מלחיץ ────────────────────────────────────────────
@@ -1323,140 +1323,101 @@ export function handlePaymentFailureParentFlow(session: BotSession, userMessage:
     }
   }
 
-  // ─── סיווג הבחירה ─────────────────────────────────────────────────────────
+  // ─── סיווג הבחירה — שומר את הבחירה ועובר לזיהוי כפול ─────────────────────
   if (step === 'payment_fail_type') {
     const msg = userMessage.trim()
+    let branch: 'card'|'method'|'date'|'remind'|'other'|null = null
+    if (msg === '1' || /הוחלף|כרטיס חדש|פרטים חדשים|החלפתי|אשראי חדש/i.test(msg))           branch = 'card'
+    else if (msg === '2' || /אמצעי אחר|שיטה אחרת|מזומן|שיק|צ.?ק|העברה|בנק|הוראת קבע|לשנות שיטה/i.test(msg)) branch = 'method'
+    else if (msg === '3' || /תאריך|מועד|לא מתאים|להזיז|לשנות תאריך/i.test(msg))               branch = 'date'
+    else if (msg === '4' || /עוד|ימים|שבוע|אחר כך|אחרי|לא עכשיו|תחזרו|מאוחר יותר/i.test(msg)) branch = 'remind'
+    else                                                                                       branch = 'other'
 
-    // ענף 1: כרטיס חדש — לא לקחת פרטים! רק לתאם שיחה
-    if (msg === '1' || /הוחלף|כרטיס חדש|פרטים חדשים|החלפתי|אשראי חדש/i.test(msg)) {
+    session.collectedData.payment_fail_branch = branch
+
+    // ענף 5 (אחר) — לא דורש זיהוי, מועבר לנציגה
+    if (branch === 'other') {
       return {
-        text: `מצוין! 💳\n\n` +
-          `נציגה שלנו תתקשר לקחת את הפרטים החדשים בצורה מאובטחת.\n\n` +
-          `*מתי נוח לך לשיחה קצרה?*\n` +
-          `(לדוגמה: "היום בין 14-16", "מחר בבוקר", "עכשיו")`,
-        nextFlow: 'payment_fail_schedule_call',
-        createTask: {
-          type: 'כשל תשלום',
-          description: `הורה מדווח על החלפת כרטיס — ממתין לתיאום שיחה לעדכון פרטים`,
-          priority: 'דחוף'
-        }
+        text: `מבינים 💛\n\n*ספר/י לי מה קורה* ואנחנו נמצא פתרון ביחד:`,
+        nextFlow: 'payment_fail_describe'
       }
     }
 
-    // ענף 2: אמצעי תשלום אחר
-    if (msg === '2' || /אמצעי אחר|שיטה אחרת|מזומן|שיק|צ.?ק|העברה|בנק|הוראת קבע|לשנות שיטה/i.test(msg)) {
+    // כל שאר הענפים — דורשים זיהוי כפול (טלפון + שם ילד)
+    await loadParentRegistrationContext(session.phone, session)
+    const existingChild = session.collectedData.child_name
+    if (existingChild) {
+      // הטלפון זוהה אוטומטית + יש שם ילד מהמערכת → לאישור לפני המשך
       return {
-        text: `*אפשרויות תשלום:*\n\n` +
-          `• 🏦 *הוראת קבע* — חיוב אוטומטי בתאריך קבוע\n` +
-          `• 💳 *אשראי* — חיוב חודשי\n` +
-          `• 💵 *מזומן* — בתחילת כל חודש\n` +
-          `• 📝 *צ׳קים* — מראש\n` +
-          `• 🏛️ *העברה בנקאית*\n\n` +
-          `*מה מתאים לך?*`,
-        nextFlow: 'payment_fail_method_choice',
-        createTask: {
-          type: 'כשל תשלום',
-          description: `הורה מבקש לשנות אמצעי תשלום — ממתין לבחירה`,
-          priority: 'גבוה'
-        }
+        text: `קודם כל וידוא קצר — ההורה של *${existingChild}*?\n\n` +
+              `*כן* — ממשיכים\n*לא* — נזהה אחרת`,
+        nextFlow: 'payment_fail_confirm_child',
       }
     }
-
-    // ענף 3: שינוי תאריך חיוב
-    if (msg === '3' || /תאריך|מועד|לא מתאים|להזיז|לשנות תאריך/i.test(msg)) {
-      return {
-        text: `בטח! *איזה תאריך בחודש* יתאים לך לחיוב?\n` +
-          `(לדוגמה: ה-1, ה-5, ה-10, ה-15...)`,
-        nextFlow: 'payment_fail_new_date',
-        createTask: {
-          type: 'כשל תשלום',
-          description: `הורה מבקש לשנות תאריך חיוב חודשי`,
-          priority: 'רגיל'
-        }
-      }
-    }
-
-    // ענף 4: תחזרו בעוד X ימים
-    if (msg === '4' || /עוד|ימים|שבוע|אחר כך|אחרי|לא עכשיו|תחזרו|מאוחר יותר/i.test(msg)) {
-      return {
-        text: `בסדר גמור 😊\n\n*מתי לחזור אליך?*\n(לדוגמה: "עוד 3 ימים", "בשבוע הבא", "ב-25 לחודש")`,
-        nextFlow: 'payment_fail_remind_when',
-        createTask: {
-          type: 'כשל תשלום',
-          description: `הורה ביקש לחזור אליו מאוחר יותר — ממתין לתאריך`,
-          priority: 'רגיל'
-        }
-      }
-    }
-
-    // ענף 5: אחר / לא ברור
+    // טלפון לא מזוהה → לבקש שם ילד
     return {
-      text: `מבינים 💛\n\n` +
-        `*ספר/י לי מה קורה* ואנחנו נמצא פתרון ביחד:`,
-      nextFlow: 'payment_fail_describe'
+      text: `לפני שנמשיך, לזיהוי:\n\n*מה שם הילד/ה? (שם פרטי + שם משפחה)*`,
+      nextFlow: 'payment_fail_child_name',
     }
   }
 
-  // ─── תיאום שיחה ─────────────────────────────────────────────────────────────
-  if (step === 'payment_fail_schedule_call') {
+  // ─── אישור זהות הילד (כשהזיהוי לפי טלפון הצליח) ──────────────────────────
+  if (step === 'payment_fail_confirm_child') {
+    if (isYes(userMessage)) {
+      return await routePaymentFailBranch(session)
+    }
+    if (isNo(userMessage)) {
+      session.collectedData.child_name = ''
+      return {
+        text: `אין בעיה 😊\n\n*מה שם הילד/ה? (שם פרטי + שם משפחה)*`,
+        nextFlow: 'payment_fail_child_name',
+      }
+    }
     return {
-      text: `✅ *קיבלתי!*\n\n` +
-        `נציגה שלנו תתקשר אליך *${userMessage}* לסיים את עדכון הפרטים.\n\n` +
-        `תודה על הסבלנות 💛`,
+      text: `כתבי *כן* או *לא* בבקשה 😊`,
+      nextFlow: 'payment_fail_confirm_child',
+    }
+  }
+
+  // ─── זיהוי לפי שם ילד (כשהטלפון לא מזוהה) ────────────────────────────────
+  if (step === 'payment_fail_child_name') {
+    const name = userMessage.trim().replace(/\s+/g, ' ')
+    if (name.split(' ').filter(w => w.length >= 2).length < 2 || /\d/.test(name)) {
+      return {
+        text: `אנא כתבו *שם פרטי + שם משפחה* (לדוגמה: נועה כהן) 😊`,
+        nextFlow: 'payment_fail_child_name',
+      }
+    }
+    session.collectedData.child_name = name
+    return await routePaymentFailBranch(session)
+  }
+
+  // ─── ענף 1 (כרטיס): שליחת קישור PayPlus דינמי + ביטול אוטומטי של הישן ───
+  if (step === 'payment_fail_card_link_sent') {
+    // הוראות לאחר השליחה — כשההורה כותב שוב משהו
+    return {
+      text: `כשתסיימי את התשלום בקישור — הוראת הקבע הישנה תבוטל אוטומטית 💛\n\n` +
+            `יש שאלה נוספת? כתבי *תשלום* / *ביטול* / *שעות* / *איסוף מוקדם*.`,
       isComplete: true,
-      createTask: {
-        type: 'כשל תשלום',
-        description: `תאום שיחה לעדכון כרטיס — זמן מועדף: "${userMessage}"`,
-        priority: 'דחוף'
-      }
     }
   }
 
-  // ─── בחירת אמצעי תשלום ───────────────────────────────────────────────────
+  // ─── ענף 2: בחירת אמצעי תשלום אחר ────────────────────────────────────────
   if (step === 'payment_fail_method_choice') {
-    return {
-      text: `✅ *קיבלתי — ${userMessage}*\n\n` +
-        `נציגה שלנו תחזור אליך לסיים את ההסדרה.\n\n` +
-        `${isBusinessHours() ? 'נחזור אליך היום!' : 'נחזור אליך בשעות הפעילות 😊'}`,
-      isComplete: true,
-      createTask: {
-        type: 'כשל תשלום',
-        description: `שינוי אמצעי תשלום — הורה בחר: "${userMessage}"`,
-        priority: 'גבוה'
-      }
-    }
+    return await handlePaymentFailMethodChoice(session, userMessage)
   }
 
-  // ─── שינוי תאריך חיוב ────────────────────────────────────────────────────
+  // ─── ענף 3: שינוי תאריך חיוב — דרך ה-API ─────────────────────────────────
   if (step === 'payment_fail_new_date') {
-    return {
-      text: `✅ *רשמנו — תאריך ${userMessage}*\n\n` +
-        `הבקשה הועברה לנציגה לאישור ועדכון.\n` +
-        `${isBusinessHours() ? 'נאשר בהמשך היום!' : 'נאשר בבוקר הקרוב 😊'}`,
-      isComplete: true,
-      createTask: {
-        type: 'כשל תשלום',
-        description: `שינוי תאריך חיוב חודשי — תאריך מבוקש: ${userMessage}`,
-        priority: 'רגיל'
-      }
-    }
+    return await handlePaymentFailNewDate(session, userMessage)
   }
 
-  // ─── תזכורת CRM — "תחזרו בעוד X ימים" ──────────────────────────────────
+  // ─── ענף 4: תזכורת אוטומטית — מתי לחזור ─────────────────────────────────
   if (step === 'payment_fail_remind_when') {
-    return {
-      text: `👍 *קיבלתי!*\n\nניצור איתך קשר *${userMessage}*.\n\n` +
-        `אם תרצה/י לסדר לפני כן — כתוב/י לנו בכל עת 😊`,
-      isComplete: true,
-      createTask: {
-        type: 'תזכורת כשל תשלום',
-        description: `הורה ביקש לחזור אליו: "${userMessage}" — ליצור קשר ולסדר תשלום`,
-        priority: 'גבוה'
-      }
-    }
+    return await handlePaymentFailRemindWhen(session, userMessage)
   }
 
-  // ─── תיאור חופשי של הבעיה ────────────────────────────────────────────────
+  // ─── תיאור חופשי (ענף "אחר") — נציגה ─────────────────────────────────────
   if (step === 'payment_fail_describe') {
     return {
       text: `תודה שפירטת 💛\n\n` +
@@ -1473,6 +1434,259 @@ export function handlePaymentFailureParentFlow(session: BotSession, userMessage:
   }
 
   return { text: '😊 כתבו *"בעיה בתשלום"* להתחיל מחדש.' }
+}
+
+// ─── מנתב את ההורה לזרימה הנכונה אחרי שזיהוי הילד הושלם ─────────────────────
+async function routePaymentFailBranch(session: BotSession): Promise<BotResponse> {
+  const branch    = session.collectedData.payment_fail_branch
+  const childName = session.collectedData.child_name || 'הילד/ה'
+
+  if (branch === 'card') {
+    // ענף 1: שליחת קישור PayPlus דינמי להזנת כרטיס חדש (יוצר הוראת קבע חדשה)
+    const regId      = session.collectedData.registration_id ?? `cardfix-${Date.now()}`
+    const areaCode   = session.collectedData.area_code ?? 'sharon'
+    const areaLabel  = session.collectedData.area_label ?? 'שרון'
+    const amount     = parseInt(session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE), 10)
+    const result = await createPayPlusPaymentLink({
+      registrationId: regId, parentName: session.parentName ?? '', phone: session.phone,
+      childName, areaCode, areaLabel, amount,
+      description: `החלפת כרטיס — הוראת קבע ${childName}`,
+      paymentType: 'standing_order',
+    })
+    if (result.success && result.paymentUrl) {
+      return {
+        text:
+          `מצוין! 💳 הכנתי קישור מאובטח של PayPlus להזנת הכרטיס החדש:\n\n` +
+          `🔗 ${result.paymentUrl}\n\n` +
+          `אחרי שתסיימי — *הוראת הקבע הישנה תתבטל אוטומטית* והחדשה תתחיל לפעול 💛`,
+        nextFlow: 'payment_fail_card_link_sent',
+        createTask: {
+          type: 'כשל תשלום',
+          description: `החלפת כרטיס — ${childName} | קישור נשלח. לוודא ביטול ההוראה הישנה לאחר התשלום`,
+          priority: 'גבוה',
+        },
+      }
+    }
+    return {
+      text: `קרתה תקלה זמנית בהפקת הקישור 😔\nנציגה תיצור איתך קשר תוך זמן קצר.`,
+      isComplete: true,
+      createTask: {
+        type: 'כשל תשלום',
+        description: `החלפת כרטיס — ${childName} | תקלה בהפקת קישור: ${result.error}`,
+        priority: 'דחוף',
+      },
+    }
+  }
+
+  if (branch === 'method') {
+    return {
+      text: `*באיזה אמצעי תשלום תרצי להמשיך?*\n\n` +
+            `*1* — 🏦 הוראת קבע (אשראי) — מומלץ\n` +
+            `*2* — 💳 כרטיס אשראי חודשי\n` +
+            `*3* — 💵 מזומן\n` +
+            `*4* — 📝 צ׳קים\n` +
+            `*5* — 🏛️ העברה בנקאית`,
+      nextFlow: 'payment_fail_method_choice',
+    }
+  }
+
+  if (branch === 'date') {
+    return {
+      text: `בטח! *באיזה יום בחודש* יתאים לך החיוב? (1-28)\n` +
+            `_(לדוגמה: 1, 5, 10, 15...)_`,
+      nextFlow: 'payment_fail_new_date',
+    }
+  }
+
+  if (branch === 'remind') {
+    return {
+      text: `בסדר גמור 😊\n\n*מתי לחזור אליך?*\n` +
+            `(לדוגמה: "עוד 3 ימים", "ב-25 לחודש", "בעוד שבוע")`,
+      nextFlow: 'payment_fail_remind_when',
+    }
+  }
+
+  return { text: '😊 כתבו *"בעיה בתשלום"* להתחיל מחדש.' }
+}
+
+// ─── ענף 2: אמצעי אחר ────────────────────────────────────────────────────────
+async function handlePaymentFailMethodChoice(session: BotSession, msg: string): Promise<BotResponse> {
+  const childName = session.collectedData.child_name || 'הילד/ה'
+  const m = msg.trim()
+  // אשראי/קבע → קישור PayPlus
+  if (m === '1' || m === '2' || /הוראת קבע|קבע|אשראי|כרטיס/i.test(m)) {
+    session.collectedData.payment_fail_branch = 'card'   // משתמשים באותה לוגיקה
+    return await routePaymentFailBranch(session)
+  }
+  // אמצעים ידניים — הוראות אוטומטיות + תיעוד
+  if (m === '3' || /מזומן/.test(m)) {
+    return {
+      text: `💵 *תשלום במזומן*\n\n` +
+            `העבירי לרכזת המסגרת בתחילת כל חודש את הסכום החודשי.\n\n` +
+            `נעדכן את המערכת שעברתם למזומן — הוראת הקבע הקיימת תבוטל.`,
+      isComplete: true,
+      createTask: {
+        type: 'שינוי שיטת תשלום',
+        description: `${childName} — מעבר למזומן. לבטל הוראת קבע ב-PayPlus`,
+        priority: 'גבוה',
+      },
+    }
+  }
+  if (m === '4' || /צ.?ק|שיק/.test(m)) {
+    return {
+      text: `📝 *תשלום בצ׳קים*\n\n` +
+            `הכיני צ׳קים על שם *"קידס אנד פאן הפקות בע״מ"* — צ׳ק לכל חודש שנותר.\n` +
+            `העבירי לרכזת המסגרת.\n\n` +
+            `נעדכן את המערכת — הוראת הקבע הקיימת תבוטל.`,
+      isComplete: true,
+      createTask: {
+        type: 'שינוי שיטת תשלום',
+        description: `${childName} — מעבר לצ׳קים. לבטל הוראת קבע ב-PayPlus`,
+        priority: 'גבוה',
+      },
+    }
+  }
+  if (m === '5' || /העברה|בנק/.test(m)) {
+    return {
+      text:
+        `🏛️ *העברה בנקאית*\n\n` +
+        formatBankTransferMessage() + `\n\n` +
+        `אחרי כל העברה — שלחי אישור בצ׳אט ונתעד 💛`,
+      isComplete: true,
+      createTask: {
+        type: 'שינוי שיטת תשלום',
+        description: `${childName} — מעבר להעברה בנקאית. לבטל הוראת קבע ב-PayPlus`,
+        priority: 'גבוה',
+      },
+    }
+  }
+  return {
+    text: `לא הבנתי 😊 בחרי 1-5`,
+    nextFlow: 'payment_fail_method_choice',
+  }
+}
+
+// ─── ענף 3: שינוי תאריך חיוב — דרך ה-API ─────────────────────────────────────
+async function handlePaymentFailNewDate(session: BotSession, msg: string): Promise<BotResponse> {
+  const childName = session.collectedData.child_name || 'הילד/ה'
+  const dayMatch  = msg.match(/\d+/)
+  const day       = dayMatch ? parseInt(dayMatch[0], 10) : NaN
+  if (isNaN(day) || day < 1 || day > 28) {
+    return {
+      text: `התאריך לא תקין. *בחרי יום בחודש בין 1 ל-28* 😊\n_(אחרי ה-28 לא בטוח שיהיה תאריך כזה כל חודש)_`,
+      nextFlow: 'payment_fail_new_date',
+    }
+  }
+
+  // מאתרים את ה-recurring_uid של ההורה
+  try {
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const supabase = createServiceClient()
+    const normalized = session.phone.replace(/\D/g, '').replace(/^972/, '0')
+    const { data: parent } = await supabase
+      .from('parents').select('id, payplus_recurring_uid, payplus_recurring_status')
+      .eq('phone', normalized).maybeSingle()
+
+    if (parent?.payplus_recurring_uid && parent.payplus_recurring_status === 'active') {
+      const { updateRecurringBillingDate, isPayPlusApiConfigured } = await import('@/lib/payplus-api')
+      if (isPayPlusApiConfigured()) {
+        const result = await updateRecurringBillingDate(parent.payplus_recurring_uid, day)
+        if (result.success) {
+          await supabase.from('registration_timeline').insert({
+            parent_id:    parent.id,
+            event_type:   'payment',
+            new_value:    `תאריך חיוב עודכן ל-${day}`,
+            description:  `${childName} — תאריך חיוב חודשי שונה ל-${day} (דרך הבוט)`,
+            performed_by: 'בוט',
+          })
+          return {
+            text: `✅ *בוצע!* תאריך החיוב החודשי של *${childName}* עודכן ל-${day} לכל חודש.\n\nיש שאלה נוספת? כתבי לנו 💛`,
+            isComplete: true,
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[payment_fail_new_date] error:', err)
+  }
+
+  // לא הצלחנו אוטומטית → נציגה
+  return {
+    text: `✅ *רשמנו — תאריך ${day}*\n\nנציגה תוודא את העדכון ותחזור אליך באישור 💛`,
+    isComplete: true,
+    createTask: {
+      type: 'כשל תשלום',
+      description: `שינוי תאריך חיוב — ${childName} | יום מבוקש: ${day} | לא בוצע אוטומטית (אין recurring_uid או API נכשל)`,
+      priority: 'גבוה',
+    },
+  }
+}
+
+// ─── ענף 4: תזכורת אוטומטית ─────────────────────────────────────────────────
+async function handlePaymentFailRemindWhen(session: BotSession, msg: string): Promise<BotResponse> {
+  const childName = session.collectedData.child_name || 'הילד/ה'
+  // חישוב תאריך מטקסט חופשי
+  const scheduled = parseRemindWhen(msg)
+  if (!scheduled) {
+    return {
+      text: `לא הצלחתי להבין את התאריך 😊\n\n*כתבי שוב — למשל "עוד 3 ימים", "ב-25 לחודש", "בעוד שבוע"*`,
+      nextFlow: 'payment_fail_remind_when',
+    }
+  }
+  // שומר תזכורת ב-DB
+  try {
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const supabase = createServiceClient()
+    const normalized = session.phone.replace(/\D/g, '').replace(/^972/, '0')
+    const { data: parent } = await supabase.from('parents').select('id').eq('phone', normalized).maybeSingle()
+    if (parent) {
+      await supabase.from('followup_reminders').insert({
+        parent_id:    parent.id,
+        child_name:   childName,
+        reason:       'כשל תשלום',
+        context:      `הורה ביקש לחזור: "${msg.slice(0, 100)}"`,
+        scheduled_for: scheduled.toISOString(),
+      })
+    }
+  } catch (err) {
+    console.error('[payment_fail_remind_when] error:', err)
+  }
+  const dateLabel = scheduled.toLocaleDateString('he-IL', { day: 'numeric', month: 'long' })
+  return {
+    text: `👍 *סבבה!*\n\nנחזור אליך ב-*${dateLabel}* בנוגע ל-${childName}.\n\nאם תרצי לסדר לפני כן — כתבי *"תשלום"* 💛`,
+    isComplete: true,
+  }
+}
+
+// פרסור טקסט חופשי לתאריך תזכורת
+function parseRemindWhen(text: string): Date | null {
+  const now = new Date()
+  const t = text.trim()
+  // "ב-25 לחודש" / "ה-25"
+  const dayMatch = t.match(/(\d{1,2})\s*(?:לחודש|בחודש)?/)
+  const inDaysMatch  = t.match(/עוד\s*(\d+)\s*ימים?/) || t.match(/(\d+)\s*ימים?\s*קדימה?/)
+  const inWeeksMatch = t.match(/עוד\s*(\d+)\s*שבועות?/) || (/בעוד שבוע|שבוע הבא/.test(t) ? [null, '1'] : null)
+
+  if (inDaysMatch) {
+    const d = new Date(now)
+    d.setDate(d.getDate() + parseInt(inDaysMatch[1], 10))
+    return d
+  }
+  if (inWeeksMatch) {
+    const d = new Date(now)
+    d.setDate(d.getDate() + parseInt(String(inWeeksMatch[1]), 10) * 7)
+    return d
+  }
+  if (dayMatch) {
+    const day = parseInt(dayMatch[1], 10)
+    if (day >= 1 && day <= 31) {
+      const d = new Date(now)
+      d.setDate(day)
+      if (d <= now) d.setMonth(d.getMonth() + 1)
+      return d
+    }
+  }
+  return null
 }
 
 
