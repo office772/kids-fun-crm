@@ -466,7 +466,7 @@ async function performCancellation(
   session: BotSession,
   childNameInput: string,
   policyNote: string
-): Promise<{ childName: string } | null> {
+): Promise<{ childName: string; payplusCancelled: boolean } | null> {
   try {
     const { createServiceClient } = await import('@/lib/supabase/server')
     const supabase = createServiceClient()
@@ -516,15 +516,42 @@ async function performCancellation(
       notes:  [reg.notes, `בוטל ע"י ההורה דרך הבוט — ${policyNote}`].filter(Boolean).join(' | '),
     }).eq('id', reg.id)
 
+    // ─── ביטול הוראת קבע ב-PayPlus אוטומטית (אם יש לו אחת פעילה) ──────────
+    let payplusCancelled = false
+    const { data: parent } = await supabase.from('parents')
+      .select('payplus_recurring_uid, payplus_recurring_status')
+      .eq('id', child.parent_id).maybeSingle()
+
+    if (parent?.payplus_recurring_uid && parent.payplus_recurring_status === 'active') {
+      try {
+        const { cancelRecurringPayment, isPayPlusApiConfigured } = await import('@/lib/payplus-api')
+        if (isPayPlusApiConfigured()) {
+          const r = await cancelRecurringPayment(parent.payplus_recurring_uid)
+          if (r.success) {
+            const isSandbox = process.env.PAYPLUS_SANDBOX === 'true'
+            await supabase.from('parents').update({
+              payplus_recurring_status:       isSandbox ? 'cancelled_test' : 'cancelled',
+              payplus_recurring_cancelled_at: new Date().toISOString(),
+            }).eq('id', child.parent_id)
+            payplusCancelled = true
+          }
+        }
+      } catch (err) {
+        console.error('[performCancellation] PayPlus cancel error:', err)
+      }
+    }
+
     await supabase.from('registration_timeline').insert({
       parent_id:    child.parent_id,
       event_type:   'status_change',
       new_value:    'בוטל',
-      description:  `ביטול רישום צהרון דרך הבוט — ${child.name} (${policyNote})`,
+      description:
+        `ביטול רישום צהרון דרך הבוט — ${child.name} (${policyNote})` +
+        (payplusCancelled ? ' | ✅ הוראת קבע ב-PayPlus בוטלה אוטומטית' : ''),
       performed_by: 'בוט',
     })
 
-    return { childName: child.name }
+    return { childName: child.name, payplusCancelled }
   } catch (err) {
     console.error('[performCancellation] Error:', err)
     return null
@@ -580,16 +607,20 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
       )
 
       if (result) {
+        const payplusLine = result.payplusCancelled
+          ? `\n💳 *הוראת הקבע ב-PayPlus בוטלה אוטומטית* — לא יבוצעו חיובים נוספים.\n`
+          : `\n`
         return {
-          text: `✅ *קיבלנו את הוראת הביטול!*\n\n` +
+          text: `✅ *הביטול בוצע!*\n\n` +
             `הרישום של *${result.childName}* עודכן במערכת — ` +
-            `ממשיך/ה עד סוף החודש הנוכחי, והזיכוי יתקבל לחודש הבא.\n\n` +
-            `📨 נשלחה הודעה לנציגה להפסקת החיובים, ` +
-            `ואישור סופי על הביטול יישלח אליך *תוך 1-2 ימי עסקים* 💛`,
+            `ממשיך/ה עד סוף החודש הנוכחי, והזיכוי יתקבל לחודש הבא.${payplusLine}\n` +
+            `אישור סופי בכתב יישלח אליך תוך 1-2 ימי עסקים 💛`,
           isComplete: true,
           createTask: {
             type: 'ביטול',
-            description: `✅ ביטול בוצע בבוט — ${result.childName} (יום ${dayOfMonth}, לפני ה-15, זיכוי מלא) | להפסיק הוראת קבע ב-PayPlus + לשלוח להורה אישור סופי`,
+            description: `✅ ביטול בוצע בבוט — ${result.childName} (יום ${dayOfMonth}, לפני ה-15, זיכוי מלא)` +
+              (result.payplusCancelled ? ' | ✅ הוראת קבע בוטלה אוטומטית' : ' | ⚠️ לבטל ידנית הוראת קבע ב-PayPlus') +
+              ' | לשלוח אישור סופי',
             priority: 'גבוה'
           }
         }
@@ -643,16 +674,20 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
       )
 
       if (result) {
+        const payplusLine = result.payplusCancelled
+          ? `\n💳 *הוראת הקבע ב-PayPlus בוטלה אוטומטית* — לא יבוצעו חיובים נוספים אחרי החודש הבא.\n`
+          : `\n`
         return {
-          text: `✅ *קיבלנו את הוראת הביטול!*\n\n` +
+          text: `✅ *הביטול בוצע!*\n\n` +
             `הרישום של *${result.childName}* עודכן במערכת — ` +
-            `ממשיך/ה חודש נוסף ומסיים/ת בסוף החודש הבא.\n\n` +
-            `📨 נשלחה הודעה לנציגה להפסקת החיובים בהתאם, ` +
-            `ואישור סופי על הביטול יישלח אליך *תוך 1-2 ימי עסקים* 💛`,
+            `ממשיך/ה חודש נוסף ומסיים/ת בסוף החודש הבא.${payplusLine}\n` +
+            `אישור סופי בכתב יישלח אליך תוך 1-2 ימי עסקים 💛`,
           isComplete: true,
           createTask: {
             type: 'ביטול',
-            description: `✅ ביטול בוצע בבוט — ${result.childName} (יום ${dayOfMonth}, אחרי ה-15, ממשיך חודש נוסף) | להפסיק הוראת קבע ב-PayPlus מהחודש הבא + לשלוח להורה אישור סופי`,
+            description: `✅ ביטול בוצע בבוט — ${result.childName} (יום ${dayOfMonth}, אחרי ה-15, ממשיך חודש נוסף)` +
+              (result.payplusCancelled ? ' | ✅ הוראת קבע בוטלה אוטומטית' : ' | ⚠️ לבטל ידנית הוראת קבע ב-PayPlus מהחודש הבא') +
+              ' | לשלוח אישור סופי',
             priority: 'גבוה'
           }
         }

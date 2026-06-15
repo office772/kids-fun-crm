@@ -93,6 +93,14 @@ export function classifyIntent(text: string): BotIntent {
   const trimmed = text.trim()
   const lowerText = trimmed.toLowerCase()
 
+  // ─── חוקים מקדימים: צירופי מילים שמובילים לכוונה ברורה ────────────────
+  // "לבטל צהרון/קייטנה" → ביטול (לא רישום!) — אחרת המילה "צהרון" תפעיל רישום
+  const cancelWords   = /ביטול|לבטל|לסיים|להפסיק|לא רוצה|לעזוב|לא ממשיך|לא נמשיך/
+  const tzaharonWords = /צהרון|קייטנה|קיטנה|הרשמה|רישום/
+  if (cancelWords.test(lowerText) && tzaharonWords.test(lowerText)) {
+    return 'ביטול'
+  }
+
   // סדר עדיפות — כשל תשלום לפני בדיקת תשלום
   const priorityOrder: BotIntent[] = [
     'בקשת_נציג',

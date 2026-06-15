@@ -143,11 +143,13 @@ export async function createPayPlusPaymentLink(
       lang:       'he',
     }
 
-    // ─── הוראת קבע — הגדרות חיוב חוזר ────────────────────────────────────
+    // ─── הוראת קבע — הגדרות חיוב חוזר (לפי דוק PayPlus) ─────────────────
+    // type: 0=Daily, 1=Weekly, 2=Monthly | range: כל כמה (1=כל חודש) | 0 charges = ללא הגבלה
     if (params.paymentType === 'standing_order') {
       body.recurring_settings = {
-        billing_cycle: 'monthly',     // חיוב כל חודש
-        trial_days:    0,             // אין תקופת ניסיון
+        type:               2,
+        range:              1,
+        number_of_charges:  0,
       }
     }
 
