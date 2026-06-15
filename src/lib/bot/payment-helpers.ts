@@ -176,10 +176,13 @@ export async function createPayPlusPaymentLink(
     }
 
     // תגובת PayPlus:
-    // { results: { status: '1', description: 'OK' }, data: { payment_page_link, page_request_uid } }
+    // { results: { status: 'success'|'error', code: 0|1, description: '...' }, data: {...} }
+    // 🔑 status הוא 'success'/'error' (string), code הוא 0=הצלחה / 1=כשל.
+    //    בעבר הקוד בדק status === '1' — זה היה שגוי וגרם לכל הקישורים להיכשל!
     const data = await res.json()
 
-    if (data?.results?.status !== '1') {
+    if (data?.results?.code !== 0) {
+      console.error('[PayPlus] generateLink failed:', JSON.stringify(data).slice(0, 500))
       return {
         success: false,
         error:   data?.results?.description ?? 'PayPlus החזיר שגיאה',
