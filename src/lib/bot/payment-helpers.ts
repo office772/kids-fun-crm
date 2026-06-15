@@ -155,7 +155,10 @@ export async function createPayPlusPaymentLink(
         recurring_type:     2,                                  // 2 = Monthly
         recurring_range:    1,                                  // כל חודש אחד
         number_of_charges:  0,                                  // ללא הגבלה
-        start_date:         tomorrow.getTime(),                 // milliseconds since epoch
+        start_date:         parseInt(
+                              `${tomorrow.getFullYear()}${String(tomorrow.getMonth()+1).padStart(2,'0')}${String(tomorrow.getDate()).padStart(2,'0')}`,
+                              10
+                            ),                                   // YYYYMMDD integer
       }
     }
 
