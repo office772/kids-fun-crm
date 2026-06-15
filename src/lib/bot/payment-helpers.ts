@@ -147,18 +147,15 @@ export async function createPayPlusPaymentLink(
     // recurring_type: 0=Daily, 1=Weekly, 2=Monthly | range: כל כמה (1=כל חודש)
     // number_of_charges: 0 = ללא הגבלה
     if (params.paymentType === 'standing_order') {
-      // start_date — string "YYYY-MM-DD" לפי דוק PayPlus (recurringpayments/add).
-      // חייב עתידי (לא היום).
+      // start_date — יום בחודש (1-31) לא תאריך מלא! PayPlus יחייב בכל חודש ביום הזה.
+      // נבדק מול ה-API ב-2026-06-15: ערך 16 → success, "2026-06-16" → integer error.
       const tomorrow = new Date()
       tomorrow.setDate(tomorrow.getDate() + 1)
-      const yyyy = tomorrow.getFullYear()
-      const mm   = String(tomorrow.getMonth() + 1).padStart(2, '0')
-      const dd   = String(tomorrow.getDate()).padStart(2, '0')
       body.recurring_settings = {
         recurring_type:     2,                  // 2 = Monthly
         recurring_range:    1,                  // כל חודש אחד
         number_of_charges:  0,                  // ללא הגבלה
-        start_date:         `${yyyy}-${mm}-${dd}`,
+        start_date:         tomorrow.getDate(), // יום בחודש בלבד (1-31)
       }
     }
 
