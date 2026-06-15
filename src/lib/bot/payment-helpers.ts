@@ -172,7 +172,7 @@ export async function createPayPlusPaymentLink(
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '')
-      return { success: false, error: `PayPlus HTTP ${res.status}: ${errText.slice(0, 120)}` }
+      return { success: false, error: `PayPlus HTTP ${res.status}: ${errText.slice(0, 500)}` }
     }
 
     // תגובת PayPlus:
