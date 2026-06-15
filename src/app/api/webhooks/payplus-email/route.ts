@@ -93,6 +93,16 @@ export async function POST(req: NextRequest) {
       body = { body: raw }
     }
 
+    // ── שער נושא: רק מיילי כשל ────────────────────────────────────────────────
+    // ה-Apps Script שולח את *כל* מיילי PayPlus (כי הוא ASCII בלבד ולא יכול
+    // לסנן עברית). הסינון האמיתי קורה כאן, איפה שעברית בטוחה ב-UTF-8.
+    // קבלות ("החיוב התקבל"), אבטחה וקודי כניסה — נדחים מיד.
+    const subject = String(body.subject ?? '')
+    if (subject && !/נכשל/.test(subject)) {
+      console.log(`[PayPlus Email] subject not a failure — ignoring: "${subject}"`)
+      return NextResponse.json({ ok: true, ignored: true, reason: 'not-a-failure-subject' })
+    }
+
     const failure = parseFailure(body)
     console.log('[PayPlus Email] parsed:', JSON.stringify(failure))
 
