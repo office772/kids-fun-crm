@@ -81,26 +81,26 @@ export async function createPayPlusPaymentLink(
 ): Promise<PayPlusOrderResult> {
   const { isDemoMode } = await import('@/lib/demo-data')
 
-  // ─── דמו מוד / sandbox — סימולציה מציאותית ──────────────────────────────
-  if (isDemoMode() || process.env.PAYPLUS_SANDBOX === 'true') {
+  // ─── דמו מוד (demo data בלבד) — סימולציה ─────────────────────────────────
+  if (isDemoMode()) {
     return simulatePayPlusResponse(params)
   }
 
-  // ─── generateLink API חסום — החזר לינק סטטי לפי אזור ──────────────────
-  const staticUrl = PAYPLUS_STATIC_LINKS[params.areaCode] ?? PAYPLUS_STATIC_LINKS.default
-  if (staticUrl) {
-    console.log(`[PayPlus] Static link for area=${params.areaCode}: ${staticUrl}`)
-    return { success: true, paymentUrl: staticUrl }
-  }
-
-  const apiKey  = process.env.PAYPLUS_API_KEY
+  const apiKey    = process.env.PAYPLUS_API_KEY
   const secretKey = process.env.PAYPLUS_SECRET_KEY
-  const pageUid = process.env.PAYPLUS_PAGE_UID
+  const pageUid   = process.env.PAYPLUS_PAGE_UID
 
+  // ─── אין מפתחות API — fallback ללינקים סטטיים (כמו לפני הפתיחה) ─────────
   if (!apiKey || !secretKey || !pageUid) {
-    console.warn('[PayPlus] Missing env vars: PAYPLUS_API_KEY / PAYPLUS_SECRET_KEY / PAYPLUS_PAGE_UID')
+    const staticUrl = PAYPLUS_STATIC_LINKS[params.areaCode] ?? PAYPLUS_STATIC_LINKS.default
+    if (staticUrl) {
+      console.log(`[PayPlus] No API keys — static link for area=${params.areaCode}`)
+      return { success: true, paymentUrl: staticUrl }
+    }
     return { success: false, error: 'PayPlus לא מוגדר — בדוק .env.local' }
   }
+
+  // ─── מכאן והלאה: קריאה אמיתית ל-API (sandbox או prod לפי PAYPLUS_SANDBOX) ─
 
   try {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://kidsandfun.co.il'
