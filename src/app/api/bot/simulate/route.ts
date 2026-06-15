@@ -65,6 +65,36 @@ export async function POST(req: NextRequest) {
 
     simulatorSessions.set(sessionId, session)
 
+    // ─── שמירת task ב-DB כדי שיופיע בלשונית "פניות" ─────────────────────────
+    // הסימולטור עד עכשיו רק החזיר createTask ב-response — אבל לא שמר ב-DB.
+    // עכשיו שומרים בדיוק כמו ב-webhook הראשי (manychat/route.ts).
+    if (response.createTask) {
+      try {
+        const { createServiceClient } = await import('@/lib/supabase/server')
+        const supabase = createServiceClient()
+        // חיפוש הורה לפי הטלפון (אם זוהה) — אחרת parent_id = null
+        let parentId: string | null = null
+        if (cleanTestPhone) {
+          const normalized = cleanTestPhone.replace(/\D/g, '').replace(/^972/, '0')
+          const intl       = '972' + normalized.replace(/^0/, '')
+          const { data: parent } = await supabase
+            .from('parents').select('id')
+            .or(`phone.eq.${normalized},phone.eq.${intl}`)
+            .maybeSingle()
+          parentId = parent?.id ?? null
+        }
+        await supabase.from('tasks').insert({
+          parent_id:   parentId,
+          type:        response.createTask.type,
+          description: `[סימולטור] ${response.createTask.description}`,
+          priority:    response.createTask.priority,
+          status:      'פתוח',
+        })
+      } catch (err) {
+        console.error('[simulator] task insert error:', err)
+      }
+    }
+
     return NextResponse.json({
       reply: response.text,
       intent: response.intent,
