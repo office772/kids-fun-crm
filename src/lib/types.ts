@@ -30,7 +30,7 @@ export interface Parent {
   archive_reason?: string        // 'קייטנה' | 'אחר'
   archived_at?: string
   payplus_recurring_uid?: string                                   // מזהה הוראת הקבע ב-PayPlus
-  payplus_recurring_status?: 'active' | 'cancelled' | 'expired' | 'failed'
+  payplus_recurring_status?: 'active' | 'cancelled' | 'cancelled_test' | 'expired' | 'failed'
   payplus_recurring_cancelled_at?: string
   created_at: string
   updated_at: string

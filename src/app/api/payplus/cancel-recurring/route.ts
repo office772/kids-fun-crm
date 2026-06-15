@@ -46,19 +46,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: result.error }, { status: 500 })
   }
 
-  // עדכון מצב ב-CRM
+  // האם הביטול בוצע בסביבת טסטים? (משפיע על תיוג ההצגה ב-CRM)
+  const isSandbox = process.env.PAYPLUS_SANDBOX === 'true'
+  const envLabel  = isSandbox ? '🧪 בסביבת טסטים' : ''
+
+  // עדכון מצב ב-CRM — סטטוס כולל סימון "test" כך שניתן להבחין בכרטיס
   await supabase.from('parents').update({
-    payplus_recurring_status:       'cancelled',
+    payplus_recurring_status:       isSandbox ? 'cancelled_test' : 'cancelled',
     payplus_recurring_cancelled_at: new Date().toISOString(),
   }).eq('id', parentId)
 
   await supabase.from('registration_timeline').insert({
     parent_id:    parentId,
     event_type:   'status_change',
-    new_value:    'הוראת קבע בוטלה',
-    description:  `הוראת קבע בוטלה אוטומטית ב-PayPlus דרך הדשבורד (UID: ${parent.payplus_recurring_uid})`,
+    new_value:    isSandbox ? 'הוראת קבע בוטלה (טסט)' : 'הוראת קבע בוטלה',
+    description:  `${isSandbox ? '🧪 ' : ''}הוראת קבע בוטלה אוטומטית ב-PayPlus${envLabel ? ' — ' + envLabel : ''} דרך הדשבורד (UID: ${parent.payplus_recurring_uid})`,
     performed_by: 'נציגה',
+    metadata:     { sandbox: isSandbox, recurring_uid: parent.payplus_recurring_uid },
   })
 
-  return NextResponse.json({ ok: true, parent: parent.name })
+  return NextResponse.json({ ok: true, parent: parent.name, sandbox: isSandbox })
 }

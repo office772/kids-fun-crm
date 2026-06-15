@@ -388,6 +388,12 @@ export function ParentDetail({ parentId, onClose, onRefresh }: ParentDetailProps
               ✓ הוראת הקבע ב-PayPlus בוטלה{parent.payplus_recurring_cancelled_at ? ` (${new Date(parent.payplus_recurring_cancelled_at).toLocaleDateString('he-IL')})` : ''}
             </div>
           )}
+          {!editMode && parent.payplus_recurring_status === 'cancelled_test' && (
+            <div className="mt-4 text-xs px-3 py-2 rounded-lg flex items-center gap-2" style={{ background: '#fef3c7', color: '#7B6010', border: '1px solid #fbbf24' }}>
+              <span>🧪</span>
+              <span><b>בוטלה בסביבת טסטים</b>{parent.payplus_recurring_cancelled_at ? ` — ${new Date(parent.payplus_recurring_cancelled_at).toLocaleDateString('he-IL')}` : ''} (הוראה אמיתית לא נגעה)</span>
+            </div>
+          )}
 
           {/* Quick stats row */}
           {!editMode && (
