@@ -147,10 +147,13 @@ export async function createPayPlusPaymentLink(
     // recurring_type: 0=Daily, 1=Weekly, 2=Monthly | range: כל כמה (1=כל חודש)
     // number_of_charges: 0 = ללא הגבלה
     if (params.paymentType === 'standing_order') {
+      // start_date: היום (בפורמט YYYY-MM-DD)
+      const startDate = new Date().toISOString().slice(0, 10)
       body.recurring_settings = {
-        recurring_type:     2,
-        recurring_range:    1,
-        number_of_charges:  0,
+        recurring_type:     2,            // 2 = Monthly
+        recurring_range:    1,            // כל חודש אחד
+        number_of_charges:  0,            // ללא הגבלה
+        start_date:         startDate,
       }
     }
 
