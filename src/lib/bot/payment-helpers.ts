@@ -103,7 +103,10 @@ export async function createPayPlusPaymentLink(
   // ─── מכאן והלאה: קריאה אמיתית ל-API (sandbox או prod לפי PAYPLUS_SANDBOX) ─
 
   try {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://kidsandfun.co.il'
+    // ⚠️ refURL של PayPlus (success/fail/callback) חייבים להצביע לאפליקציית Next עצמה,
+    // ולא ל-NEXT_PUBLIC_APP_URL שמצביע לאתר WordPress (kidsandfun.co.il) ומחזיר 404 —
+    // מה שגרם גם ל-404 אחרי תשלום וגם לכך שה-webhook לא נקרא (תשלומים/רישומים לא נרשמו).
+    const appUrl = process.env.PAYPLUS_RETURN_BASE_URL ?? 'https://kids-fun-app-psi.vercel.app'
 
     // ─── בסביבת Sandbox — סכום מקסימלי 5 ₪ לעסקה (כך PayPlus דורשים, אחרת חסימת החשבון).
     // הסכום המקורי נשמר ב-description כדי שיהיה גלוי בבדיקות.
