@@ -966,7 +966,7 @@ export function handleLateCampFlow(session: BotSession, userMessage: string): Bo
         `${isBusinessHours() ? 'ניצור קשר בהמשך היום!' : 'ניצור קשר מחר בבוקר! 🌅'}`,
       isComplete: true,
       createTask: {
-        type: 'רישום מאוחר לקייטנה',
+        type: 'רישום מאוחר',
         description: `בקשת רישום לקייטנה אחרי סגירת מועד — ${childName} כיתה ${userMessage}`,
         priority: 'גבוה'
       }
@@ -1561,7 +1561,7 @@ async function handlePaymentFailMethodChoice(session: BotSession, msg: string): 
             `נעדכן את המערכת שעברתם למזומן — הוראת הקבע הקיימת תבוטל.`,
       isComplete: true,
       createTask: {
-        type: 'שינוי שיטת תשלום',
+        type: 'כשל תשלום',
         description: `${childName} — מעבר למזומן. לבטל הוראת קבע ב-PayPlus`,
         priority: 'גבוה',
       },
@@ -1575,7 +1575,7 @@ async function handlePaymentFailMethodChoice(session: BotSession, msg: string): 
             `נעדכן את המערכת — הוראת הקבע הקיימת תבוטל.`,
       isComplete: true,
       createTask: {
-        type: 'שינוי שיטת תשלום',
+        type: 'כשל תשלום',
         description: `${childName} — מעבר לצ׳קים. לבטל הוראת קבע ב-PayPlus`,
         priority: 'גבוה',
       },
@@ -1589,7 +1589,7 @@ async function handlePaymentFailMethodChoice(session: BotSession, msg: string): 
         `אחרי כל העברה — שלחי אישור בצ׳אט ונתעד 💛`,
       isComplete: true,
       createTask: {
-        type: 'שינוי שיטת תשלום',
+        type: 'כשל תשלום',
         description: `${childName} — מעבר להעברה בנקאית. לבטל הוראת קבע ב-PayPlus`,
         priority: 'גבוה',
       },
@@ -1637,6 +1637,11 @@ async function handlePaymentFailNewDate(session: BotSession, msg: string): Promi
           return {
             text: `✅ *בוצע!* תאריך החיוב החודשי של *${childName}* עודכן ל-${day} לכל חודש.\n\nיש שאלה נוספת? כתבי לנו 💛`,
             isComplete: true,
+            createTask: {
+              type: 'כשל תשלום',
+              description: `שינוי תאריך חיוב — ${childName} | עודכן ל-${day} לחודש דרך הבוט (בוצע ב-PayPlus)`,
+              priority: 'רגיל',
+            },
           }
         }
       }
@@ -1690,6 +1695,12 @@ async function handlePaymentFailRemindWhen(session: BotSession, msg: string): Pr
   return {
     text: `👍 *סבבה!*\n\nנחזור אליך ב-*${dateLabel}* בנוגע ל-${childName}.\n\nאם תרצי לסדר לפני כן — כתבי *"תשלום"* 💛`,
     isComplete: true,
+    // יוצר גם פנייה גלויה בדשבורד (followup_reminders לבדו לא מופיע בלשונית "פניות")
+    createTask: {
+      type: 'כשל תשלום',
+      description: `תזכורת כשל תשלום — ${childName} | לחזור ב-${dateLabel} | "${msg.slice(0, 80)}"`,
+      priority: 'רגיל',
+    },
   }
 }
 
