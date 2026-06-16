@@ -1363,7 +1363,7 @@ export async function handlePaymentFailureParentFlow(session: BotSession, userMe
     const msg = userMessage.trim()
     let branch: 'card'|'method'|'date'|'remind'|'other'|null = null
     if (msg === '1' || /הוחלף|כרטיס חדש|פרטים חדשים|החלפתי|אשראי חדש/i.test(msg))           branch = 'card'
-    else if (msg === '2' || /אמצעי אחר|שיטה אחרת|מזומן|שיק|צ.?ק|העברה|בנק|הוראת קבע|לשנות שיטה/i.test(msg)) branch = 'method'
+    else if (msg === '2' || /אמצעי|תשלום אחר|שיטה אחרת|שיטת תשלום|לשנות שיטה|לשנות אמצעי|לעבור|דרך אחרת|דרך תשלום|מזומן|שיק|צ.?ק|העברה|בנק|הוראת קבע/i.test(msg)) branch = 'method'
     else if (msg === '3' || /תאריך|מועד|לא מתאים|להזיז|לשנות תאריך/i.test(msg))               branch = 'date'
     else if (msg === '4' || /עוד|ימים|שבוע|אחר כך|אחרי|לא עכשיו|תחזרו|מאוחר יותר/i.test(msg)) branch = 'remind'
     else                                                                                       branch = 'other'
