@@ -1,4 +1,6 @@
-import { PAYPLUS_STATIC_LINKS } from '@/lib/bot/payment-helpers'
+import { PAYPLUS_STATIC_LINKS, createPayPlusPaymentLink } from '@/lib/bot/payment-helpers'
+
+export const dynamic = 'force-dynamic'
 
 const AREA_LABELS: Record<string, string> = {
   carmel:  'חוף הכרמל',
@@ -6,17 +8,63 @@ const AREA_LABELS: Record<string, string> = {
   telaviv: 'גני ילדים תל אביב',
 }
 
+// עלות חודשית לפי אזור (בסנדבוקס מוגבל אוטומטית ל-5₪ בתוך createPayPlusPaymentLink).
+// TODO: למשוך מהגדרת הסניף כשתתווסף עמודת monthly_fee.
+const AREA_FEES: Record<string, number> = {
+  carmel:  935,
+  telaviv: 946,
+  sharon:  1470,
+}
+
+// ─── מייצר קישור תשלום דינמי (הוראת קבע) לפי הרישום שנשמר ──────────────────
+// דינמי = מכבד את הגדרת הסנדבוקס (5₪) ומחזיר קישור paymentsdev בבדיקות,
+// במקום הלינקים הסטטיים שהם פרודקשן עם הסכום המלא (1470₪ וכו').
+async function buildDynamicPaymentUrl(area: string, regId: string): Promise<string | null> {
+  try {
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const supabase = createServiceClient()
+    const { data: reg } = await supabase
+      .from('registrations')
+      .select('id, area_code, area_label, parent:parents(name, phone), child:children(name)')
+      .eq('id', regId)
+      .maybeSingle()
+    if (!reg) return null
+
+    const parent = Array.isArray(reg.parent) ? reg.parent[0] : reg.parent
+    const child  = Array.isArray(reg.child)  ? reg.child[0]  : reg.child
+    const areaCode = reg.area_code ?? area
+    const amount   = AREA_FEES[areaCode] ?? 935
+
+    const result = await createPayPlusPaymentLink({
+      registrationId: reg.id,
+      parentName:     parent?.name ?? '',
+      phone:          parent?.phone ?? '',
+      childName:      child?.name ?? '',
+      areaCode,
+      areaLabel:      reg.area_label ?? AREA_LABELS[areaCode] ?? '',
+      amount,
+      description:    `הוראת קבע צהרון — ${child?.name ?? ''}`.trim(),
+      paymentType:    'standing_order',
+    })
+    return result.success && result.paymentUrl ? result.paymentUrl : null
+  } catch {
+    return null
+  }
+}
+
 // דף הצלחה לאחר הגשת טופס הרישום.
-// אם ידוע האזור — מציגים מיד את קישור התשלום (הוראת קבע ב-PayPlus),
-// כדי שההורה יסגור את המעגל בלי לחכות לנציגה.
-export default function SuccessPage({
+export default async function SuccessPage({
   searchParams,
 }: {
-  searchParams: { area?: string }
+  searchParams: { area?: string; reg?: string }
 }) {
   const area = searchParams?.area ?? ''
-  const paymentUrl = PAYPLUS_STATIC_LINKS[area]
+  const reg  = searchParams?.reg ?? ''
   const areaLabel = AREA_LABELS[area] ?? ''
+
+  // קישור דינמי (מועדף) → נפילה ללינק סטטי רק אם הדינמי נכשל
+  const dynamicUrl = reg ? await buildDynamicPaymentUrl(area, reg) : null
+  const paymentUrl = dynamicUrl ?? PAYPLUS_STATIC_LINKS[area]
 
   return (
     <div className="min-h-screen bg-[#fdf6ef] flex flex-col items-center justify-center px-4 py-10 text-center" dir="rtl">
