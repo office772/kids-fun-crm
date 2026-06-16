@@ -82,7 +82,9 @@ export async function GET(req: NextRequest) {
   }
   if (!pageUid) return htmlPage('חסר page_uid', `<h1 class="err">חסר page_uid לסביבה זו</h1>`)
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3002'
+  // כתובות החזרה — לפי הדומיין שממנו נכנסו (לא NEXT_PUBLIC_APP_URL שמצביע לאתר WordPress),
+  // כדי שאחרי התשלום PayPlus יחזיר לעמודי payment-success/payment-fail באותה אפליקציה.
+  const appUrl = new URL(req.url).origin
   const envLabel = isProd ? 'מסוף אמיתי (פרודקשן)' : 'סנדבוקס (טסט)'
 
   const body: Record<string, unknown> = {
