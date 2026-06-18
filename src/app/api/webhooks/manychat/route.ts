@@ -20,6 +20,7 @@ export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { processMessage } from '@/lib/bot/handler'
+import { isBusinessHours } from '@/lib/bot/flows'
 import type { BotSession, TaskPriority } from '@/lib/types'
 
 // ─── Auth ──────────────────────────────────────────────────────────────────────
@@ -47,6 +48,22 @@ function isAllowedPhone(raw: string): boolean {
   if (ALLOWED_PHONES.length === 0) return true            // רשימה ריקה = כולם מורשים
   const digits = raw.replace(/\D/g, '').replace(/^0/, '972')
   return ALLOWED_PHONES.some(p => p.replace(/\D/g, '') === digits)
+}
+
+// ─── הודעת היעדרות למספרים שעדיין לא בבוט (שלב בדיקות) ───────────────────────
+// המוח היחיד הוא ה-webhook: מספר בבוט → בוט, כל השאר → ההודעה הזו.
+// (יש לכבות את הודעת ה-away המובנית של uChat כדי שלא תופיע פעמיים.)
+function awayMessage(): string {
+  if (isBusinessHours()) {
+    return `שלום, הגעתם לקידס אנד פאן 😎\n\n` +
+      `קיבלנו את הודעתך — נציג/ה יחזרו אליך בהקדם.\n\n` +
+      `תודה,\nהנהלת קידס אנד פאן 🌟`
+  }
+  return `שלום, הגעתם לקידס אנד פאן 😎\n` +
+    `המשרד סגור כעת.\n` +
+    `שעות הפעילות הן א׳-ה׳ בין השעות 10:00-15:00.\n\n` +
+    `נחזור בהקדם בשעות הפעילות,\n` +
+    `הנהלת קידס אנד פאן 🌟`
 }
 
 // ─── TaskType mapper ───────────────────────────────────────────────────────────
@@ -213,10 +230,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing phone or message' }, { status: 400 })
   }
 
-  // שלב בדיקות — להגיב רק למספרים המורשים; כל מספר אחר מתעלם בלי תשובה
+  // שלב בדיקות — המספרים בבוט מקבלים את הבוט; כל מספר אחר מקבל הודעת היעדרות בלבד
   if (!isAllowedPhone(phone)) {
-    console.log(`[manychat] phone ${phone} not in whitelist — ignoring (no reply)`)
-    return NextResponse.json({ reply: '', ignored: true }, { status: 200 })
+    console.log(`[manychat] phone ${phone} not in whitelist — away message`)
+    return NextResponse.json({ reply: awayMessage(), away: true }, { status: 200 })
   }
 
   const supabase = createServiceClient()
