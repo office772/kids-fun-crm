@@ -202,9 +202,10 @@ async function loadRecentMessages(
     .order('created_at', { ascending: false })
     .limit(8)
   if (!data?.length) return []
-  return data
+  const rows = data as Array<{ direction: string; message_text: string | null; created_at: string }>
+  return rows
     .reverse()
-    .map(m => ({
+    .map((m) => ({
       role: (m.direction === 'נכנס' ? 'user' : 'bot') as 'user' | 'bot',
       text: m.message_text ?? '',
       timestamp: new Date(m.created_at),
