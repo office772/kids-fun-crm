@@ -27,9 +27,29 @@ export interface BotResponse {
   }
   nextFlow?: string
   isComplete?: boolean
+  // כשהמשתמש חרג מהמסלול (שאלה/הקשר במקום הקלט המבוקש) — לתת ל-LLM לטפל עם הקשר
+  useLLM?: boolean
 }
 
 const BOT_NAME = 'Kids & Fun'
+
+// ─── זיהוי קלט "מחוץ למסלול" ─────────────────────────────────────────────────
+// כשמבקשים שם ילד/ה והמשתמש כותב שאלה/משפט/תלונה — לא לחפש את זה כשם!
+// במקום זה נחזיר useLLM כדי שה-LLM (עם הקשר השיחה) יבין או יבקש הבהרה.
+const META_WORDS = new Set([
+  'איך','למה','מה','מתי','איפה','מי','האם','אבל','לא','כן','כתבת','אמרת','אמרתי',
+  'מצאת','שמצאת','הבנת','הבנתי','רוצה','צריך','צריכה','אפשר','תסביר','התכוונת',
+  'אומר','אומרת','נכון','בעצם','הרי','שאמרת','שכתבת',
+])
+function looksOffScript(text: string): boolean {
+  const t = text.trim()
+  if (!t) return false
+  if (t.includes('?')) return true
+  const words = t.split(/\s+/).filter(Boolean)
+  if (words.length > 4) return true                 // שם = 2-4 מילים; משפט ארוך = לא שם
+  if (words.some(w => META_WORDS.has(w))) return true
+  return false
+}
 
 // ─── utils ────────────────────────────────────────────────────────────────────
 export function isBusinessHours(): boolean {
@@ -292,6 +312,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
   // ─── שלב שם ילד ──────────────────────────────────────────────────────────
   if (step === 'register_child_name') {
     const trimmed = userMessage.trim()
+    if (looksOffScript(trimmed)) return { text: '', useLLM: true }
     const parts = trimmed.split(/\s+/)
     if (parts.length < 2) {
       return {
@@ -1203,8 +1224,11 @@ async function handlePaymentStatusChildName(
   userMessage: string
 ): Promise<BotResponse> {
   const nameInput = userMessage.trim().replace(/\s+/g, ' ')
-  const words = nameInput.split(' ').filter(w => w.length >= 2)
 
+  // חרג מהמסלול (שאלה/הקשר ולא שם) → LLM יבין עם ההקשר, לא נחפש את המשפט כשם
+  if (looksOffScript(nameInput)) return { text: '', useLLM: true }
+
+  const words = nameInput.split(' ').filter(w => w.length >= 2)
   if (words.length < 2 || /\d/.test(nameInput)) {
     return {
       text:
@@ -1417,6 +1441,7 @@ export async function handlePaymentFailureParentFlow(session: BotSession, userMe
   // ─── זיהוי לפי שם ילד (כשהטלפון לא מזוהה) ────────────────────────────────
   if (step === 'payment_fail_child_name') {
     const name = userMessage.trim().replace(/\s+/g, ' ')
+    if (looksOffScript(name)) return { text: '', useLLM: true }
     if (name.split(' ').filter(w => w.length >= 2).length < 2 || /\d/.test(name)) {
       return {
         text: `אנא כתבו *שם פרטי + שם משפחה* (לדוגמה: נועה כהן) 😊`,

@@ -430,7 +430,12 @@ export async function getPaymentStatusByPhone(phone: string): Promise<string | n
       .order('created_at', { ascending: false })
       .limit(1)
 
-    if (!payments?.length) return null
+    // נמצא הורה אך אין רשומת תשלום — לומר זאת במפורש (לא "לא נמצא")
+    if (!payments?.length) {
+      return `🔍 *סטטוס תשלום${parent.name ? ` — ${parent.name}` : ''}*\n\n` +
+        `מצאתי אתכם במערכת, אבל *אין עדיין רשומת תשלום פעילה*.\n\n` +
+        `אם תרצו להסדיר תשלום — כתבו *"הסדרת תשלום"* ונתחיל יחד 💛`
+    }
     return formatPaymentStatusText(parent.name, payments as PaymentRow[])
   } catch (err) {
     console.error('[getPaymentStatusByPhone] Error:', err)
@@ -472,7 +477,11 @@ export async function getPaymentStatusByChildName(childName: string): Promise<st
       .order('created_at', { ascending: false })
       .limit(1)
 
-    if (!payments?.length) return null
+    // נמצא הילד/ה אך אין רשומת תשלום — לומר זאת (במקום "לא אותר חד-משמעית")
+    if (!payments?.length) {
+      return `🔍 מצאתי את *${children[0].name}* במערכת, אבל *אין עדיין רשומת תשלום פעילה*.\n\n` +
+        `אם תרצו להסדיר תשלום — כתבו *"הסדרת תשלום"* ונתחיל 💛`
+    }
     return formatPaymentStatusText(parent?.name ?? children[0].name, payments as PaymentRow[])
   } catch (err) {
     console.error('[getPaymentStatusByChildName] Error:', err)

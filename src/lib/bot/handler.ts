@@ -35,6 +35,8 @@ export async function processMessage(
   // ── FP: מסלול פעיל — ממשיכים בו ──────────────────────────────────────────
   if (session.currentFlow) {
     const fpResult = await handleActiveFlow(session, userMessage, intent)
+    // המסלול ביקש להעביר ל-LLM (המשתמש חרג — שאלה/הקשר ולא הקלט המבוקש)
+    if (fpResult?.useLLM) return await llmFallback(session, userMessage, intent)
     if (fpResult) return fpResult
 
     // המסלול הפעיל לא הכיר את ההודעה — LLM עם הקשר

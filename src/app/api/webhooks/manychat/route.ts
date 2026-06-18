@@ -190,6 +190,27 @@ async function clearSession(
   await supabase.from('bot_sessions').delete().eq('phone', phone)
 }
 
+// טעינת היסטוריית שיחה אחרונה (ל-context של ה-LLM — שיבין הקשר ולא יתנהג כטופס)
+async function loadRecentMessages(
+  supabase: ReturnType<typeof createServiceClient>,
+  phone: string
+): Promise<BotSession['messages']> {
+  const { data } = await supabase
+    .from('conversations')
+    .select('direction, message_text, created_at')
+    .eq('phone', phone)
+    .order('created_at', { ascending: false })
+    .limit(8)
+  if (!data?.length) return []
+  return data
+    .reverse()
+    .map(m => ({
+      role: (m.direction === 'נכנס' ? 'user' : 'bot') as 'user' | 'bot',
+      text: m.message_text ?? '',
+      timestamp: new Date(m.created_at),
+    }))
+}
+
 // ─── Parent lookup / create ────────────────────────────────────────────────────
 async function getOrCreateParent(
   supabase: ReturnType<typeof createServiceClient>,
@@ -324,6 +345,9 @@ export async function POST(req: NextRequest) {
     session.parentId = parent.id
     session.parentName = session.parentName || parent.name
   }
+
+  // טעינת היסטוריית שיחה ל-context של ה-LLM (לפני רישום ההודעה הנוכחית)
+  session.messages = await loadRecentMessages(supabase, phone)
 
   // 3. רישום ההודעה הנכנסת
   await logConversation(supabase, {
