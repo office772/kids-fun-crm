@@ -137,33 +137,50 @@ async function loadSession(
   supabase: ReturnType<typeof createServiceClient>,
   phone: string
 ): Promise<BotSession | null> {
-  const { data } = await supabase
+  // ⚠️ עמודות הטבלה: current_flow, collected_data, last_message_at, expires_at
+  // (לא session_data/last_activity — אי-התאמה זו גרמה לכך שה-session לא נשמר!)
+  const { data, error } = await supabase
     .from('bot_sessions')
-    .select('session_data, last_activity')
+    .select('parent_id, current_flow, collected_data, last_message_at, expires_at')
     .eq('phone', phone)
-    .single()
+    .maybeSingle()
 
+  if (error) { console.error('[manychat] loadSession error:', error.message); return null }
   if (!data) return null
 
   // פג תוקף אחרי 30 דקות של חוסר פעילות
-  const lastActivity = new Date(data.last_activity).getTime()
-  if (Date.now() - lastActivity > 30 * 60 * 1000) return null
+  const expired = data.expires_at
+    ? new Date(data.expires_at).getTime() < Date.now()
+    : (data.last_message_at ? Date.now() - new Date(data.last_message_at).getTime() > 30 * 60 * 1000 : true)
+  if (expired) return null
 
-  return data.session_data as BotSession
+  return {
+    sessionId:     `${phone}-session`,
+    phone,
+    parentId:      data.parent_id ?? undefined,
+    currentFlow:   data.current_flow ?? undefined,
+    collectedData: (data.collected_data as BotSession['collectedData']) ?? {},
+    messages:      [],
+  }
 }
 
 async function saveSession(
   supabase: ReturnType<typeof createServiceClient>,
   session: BotSession
 ) {
-  await supabase.from('bot_sessions').upsert(
+  const now = Date.now()
+  const { error } = await supabase.from('bot_sessions').upsert(
     {
-      phone: session.phone,
-      session_data: session,
-      last_activity: new Date().toISOString(),
+      phone:           session.phone,
+      parent_id:       session.parentId ?? null,
+      current_flow:    session.currentFlow ?? null,
+      collected_data:  session.collectedData ?? {},
+      last_message_at: new Date(now).toISOString(),
+      expires_at:      new Date(now + 30 * 60 * 1000).toISOString(),
     },
     { onConflict: 'phone' }
   )
+  if (error) console.error('[manychat] saveSession error:', error.message)
 }
 
 async function clearSession(
