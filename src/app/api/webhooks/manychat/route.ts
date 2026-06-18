@@ -66,6 +66,48 @@ function awayMessage(): string {
     `הנהלת קידס אנד פאן 🌟`
 }
 
+// ─── אדמין (קורלי) — resume מהוואטסאפ ────────────────────────────────────────
+function normPhone(raw: string): string {
+  return raw.replace(/\D/g, '').replace(/^0/, '972')
+}
+function isAdminPhone(raw: string): boolean {
+  const admin = process.env.STAFF_ADMIN_PHONE
+  return !!admin && normPhone(raw) === normPhone(admin)
+}
+
+// מטפל בהודעות מהאדמין (קורלי). מחזיר טקסט תשובה, או null אם לא אדמין.
+async function handleAdminCommand(phone: string, message: string, userNs: string | null): Promise<string | null> {
+  if (!isAdminPhone(phone)) return null
+
+  // שמירת ה-user_ns של קורלי (לשליחת התראות אליה בעתיד)
+  if (userNs) {
+    try {
+      const { createServiceClient } = await import('@/lib/supabase/server')
+      const supabase = createServiceClient()
+      const normalized = phone.replace(/\D/g, '').replace(/^972/, '0')
+      await supabase.from('parents').update({ uchat_user_ns: userNs })
+        .or(`phone.eq.${normalized},phone.eq.${'972' + normalized.replace(/^0/, '')}`)
+    } catch { /* לא חוסם */ }
+  }
+
+  const m = message.trim()
+  if (!/^\s*(החזר|להחזיר|resume)/i.test(m)) return null  // לא פקודת resume → תיפול ל-away רגיל
+
+  const phoneMatch = m.match(/972\d{8,9}|0\d{8,9}/)
+  if (!phoneMatch) {
+    return 'כדי להחזיר את הבוט — כתבי *החזר* ואחריו מספר הפונה.\nלדוגמה: *החזר 0541234567* 💛'
+  }
+  const { getUserNsByPhone, resumeBot } = await import('@/lib/uchat')
+  const targetNs = await getUserNsByPhone(phoneMatch[0])
+  if (!targetNs) {
+    return `לא מצאתי פונה פעיל עם המספר ${phoneMatch[0]} 🤔\nודאי שהמספר נכון.`
+  }
+  const ok = await resumeBot(targetNs)
+  return ok
+    ? `✅ הבוט חזר לפעולה עבור ${phoneMatch[0]} 💛`
+    : `הייתה תקלה בהחזרת הבוט עבור ${phoneMatch[0]}. אפשר לנסות שוב או דרך הדשבורד.`
+}
+
 // ─── TaskType mapper ───────────────────────────────────────────────────────────
 // ממפה את הטיפוס החופשי שחוזר מ-flows.ts לערך חוקי בטבלת tasks
 function toTaskType(raw: string): string {
@@ -225,9 +267,19 @@ export async function POST(req: NextRequest) {
   const messageText = ((body.message ?? body.text ?? '') as string).trim()
   const firstName = (body.first_name as string | undefined) ?? undefined
   const lastName = (body.last_name as string | undefined) ?? undefined
+  // user_ns של uChat — נדרש ל-resume/notify. uChat שולח אותו בגוף ה-External Request.
+  const userNs = ((body.user_ns ?? body.subscriber_ns ?? body.ns ?? '') as string).trim() || null
 
   if (!phone || !messageText) {
     return NextResponse.json({ error: 'Missing phone or message' }, { status: 400 })
+  }
+
+  // ─── פקודת אדמין (קורלי) — החזרת אוטומציה לבוט מהוואטסאפ שלה ───────────────
+  // קורלי שולחת "החזר <מספר הפונה>" → resume לאותו פונה. רץ לפני ה-whitelist
+  // כי מספר האדמין אינו ברשימת מספרי הבוט.
+  const adminReply = await handleAdminCommand(phone, messageText, userNs)
+  if (adminReply !== null) {
+    return NextResponse.json({ reply: adminReply, admin: true }, { status: 200 })
   }
 
   // שלב בדיקות — המספרים בבוט מקבלים את הבוט; כל מספר אחר מקבל הודעת היעדרות בלבד
@@ -240,6 +292,11 @@ export async function POST(req: NextRequest) {
 
   // 1. טעינת הורה
   const parent = await getOrCreateParent(supabase, phone, firstName, lastName)
+
+  // שמירת ה-user_ns של הפונה (לצורך resume/notify עתידי)
+  if (userNs && parent.id) {
+    await supabase.from('parents').update({ uchat_user_ns: userNs }).eq('id', parent.id)
+  }
 
   // 2. טעינת session או יצירה חדשה
   let session = await loadSession(supabase, phone)

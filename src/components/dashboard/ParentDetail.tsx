@@ -280,6 +280,28 @@ export function ParentDetail({ parentId, onClose, onRefresh }: ParentDetailProps
                 </span>
               )}
               <button
+                onClick={async () => {
+                  try {
+                    const res = await fetch('/api/uchat/resume', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ parentId }),
+                    })
+                    const data = await res.json()
+                    alert(data.success
+                      ? '✅ הבוט הוחזר לפעולה עבור הפונה'
+                      : `לא הצלחתי להחזיר: ${data.error || 'שגיאה'}`)
+                  } catch {
+                    alert('שגיאת תקשורת — נסי שוב')
+                  }
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-full hover:opacity-80 transition-opacity"
+                style={{ background: '#E6F1FB', color: '#0C447C' }}
+                title="החזר את אוטומציית הבוט לפונה (אחרי שנציגה התערבה)"
+              >
+                🤖 החזר בוט
+              </button>
+              <button
                 onClick={() => setEditMode(m => !m)}
                 className="p-2 rounded-full hover:bg-gray-100 transition-colors"
                 style={{ color: '#6D436D' }}
