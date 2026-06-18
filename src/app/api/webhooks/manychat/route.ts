@@ -34,6 +34,21 @@ function isAuthorized(req: NextRequest): boolean {
   return header === WEBHOOK_SECRET
 }
 
+// ─── Whitelist זמני (שלב בדיקות) ─────────────────────────────────────────────
+// רק המספרים האלה מקבלים תשובה מהבוט. כל מספר אחר — הבוט מתעלם (לא עונה).
+// לפתיחה לכולם בסיום הבדיקות: לרוקן את המערך → ALLOWED_PHONES = []
+const ALLOWED_PHONES = [
+  '972544535688',
+  '972546603344',
+  '972546888587',
+]
+
+function isAllowedPhone(raw: string): boolean {
+  if (ALLOWED_PHONES.length === 0) return true            // רשימה ריקה = כולם מורשים
+  const digits = raw.replace(/\D/g, '').replace(/^0/, '972')
+  return ALLOWED_PHONES.some(p => p.replace(/\D/g, '') === digits)
+}
+
 // ─── TaskType mapper ───────────────────────────────────────────────────────────
 // ממפה את הטיפוס החופשי שחוזר מ-flows.ts לערך חוקי בטבלת tasks
 function toTaskType(raw: string): string {
@@ -196,6 +211,12 @@ export async function POST(req: NextRequest) {
 
   if (!phone || !messageText) {
     return NextResponse.json({ error: 'Missing phone or message' }, { status: 400 })
+  }
+
+  // שלב בדיקות — להגיב רק למספרים המורשים; כל מספר אחר מתעלם בלי תשובה
+  if (!isAllowedPhone(phone)) {
+    console.log(`[manychat] phone ${phone} not in whitelist — ignoring (no reply)`)
+    return NextResponse.json({ reply: '', ignored: true }, { status: 200 })
   }
 
   const supabase = createServiceClient()
