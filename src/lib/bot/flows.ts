@@ -53,9 +53,10 @@ function looksOffScript(text: string): boolean {
 
 // ─── utils ────────────────────────────────────────────────────────────────────
 export function isBusinessHours(): boolean {
-  const now = new Date()
-  const day = now.getDay() // 0=ראשון
-  const hour = now.getHours()
+  // ⚠️ השרת (Vercel) רץ ב-UTC — חובה לחשב לפי שעון ישראל, אחרת "סגור" כשפתוח.
+  const il = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }))
+  const day = il.getDay() // 0=ראשון
+  const hour = il.getHours()
   return [0, 1, 2, 3, 4].includes(day) && hour >= 8 && hour < 17
 }
 

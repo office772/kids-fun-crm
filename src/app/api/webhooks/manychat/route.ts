@@ -20,7 +20,6 @@ export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { processMessage } from '@/lib/bot/handler'
-import { isBusinessHours } from '@/lib/bot/flows'
 import { isTestPhone as isAllowedPhone } from '@/lib/bot/test-phones'
 import type { BotSession, TaskPriority } from '@/lib/types'
 
@@ -37,23 +36,8 @@ function isAuthorized(req: NextRequest): boolean {
 }
 
 // ─── Whitelist זמני (שלב בדיקות) — מנוהל ב-src/lib/bot/test-phones.ts ─────────
+// רק מספרי הבדיקה מקבלים את הבוט. הורים אמיתיים → reply ריק (הבוט שותק).
 // (isAllowedPhone מיובא בראש הקובץ)
-
-// ─── הודעת היעדרות למספרים שעדיין לא בבוט (שלב בדיקות) ───────────────────────
-// המוח היחיד הוא ה-webhook: מספר בבוט → בוט, כל השאר → ההודעה הזו.
-// (יש לכבות את הודעת ה-away המובנית של uChat כדי שלא תופיע פעמיים.)
-function awayMessage(): string {
-  if (isBusinessHours()) {
-    return `שלום, הגעתם לקידס אנד פאן 😎\n\n` +
-      `קיבלנו את הודעתך — נציג/ה יחזרו אליך בהקדם.\n\n` +
-      `תודה,\nהנהלת קידס אנד פאן 🌟`
-  }
-  return `שלום, הגעתם לקידס אנד פאן 😎\n` +
-    `המשרד סגור כעת.\n` +
-    `שעות הפעילות הן א׳-ה׳ בין השעות 10:00-15:00.\n\n` +
-    `נחזור בהקדם בשעות הפעילות,\n` +
-    `הנהלת קידס אנד פאן 🌟`
-}
 
 // ─── אדמין (קורלי) — resume מהוואטסאפ ────────────────────────────────────────
 function normPhone(raw: string): string {
@@ -310,10 +294,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ reply: adminReply, admin: true }, { status: 200 })
   }
 
-  // שלב בדיקות — המספרים בבוט מקבלים את הבוט; כל מספר אחר מקבל הודעת היעדרות בלבד
+  // שלב בדיקות — רק מספרי הבדיקה מקבלים את הבוט. כל מספר אחר (הורים אמיתיים) —
+  // הבוט לא מגיב כלל (reply ריק) כדי לא לשלוח להם כלום. הצוות מטפל בהם ידנית.
   if (!isAllowedPhone(phone)) {
-    console.log(`[manychat] phone ${phone} not in whitelist — away message`)
-    return NextResponse.json({ reply: awayMessage(), away: true }, { status: 200 })
+    console.log(`[manychat] phone ${phone} not a test number — silent (no reply)`)
+    return NextResponse.json({ reply: '', skip: true, ignored: true }, { status: 200 })
   }
 
   const supabase = createServiceClient()
