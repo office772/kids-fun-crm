@@ -753,6 +753,36 @@ export function ParentDetail({ parentId, onClose, onRefresh }: ParentDetailProps
           {/* ── Registrations Tab ── */}
           {activeTab === 'registrations' && (
             <div className="space-y-4">
+              <button
+                onClick={async () => {
+                  const c = parent.children?.[0]
+                  if (!c) { alert('להורה אין ילד/ה במערכת'); return }
+                  if (!confirm(`להוסיף רישום לקייטנה ל-${c.name}? (סטטוס: מאושר — ללא רישום אמיתי באתר)`)) return
+                  try {
+                    const res = await fetch('/api/admin/add-camp-registration', {
+                      method: 'POST', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ parentId, childId: c.id }),
+                    })
+                    const data = await res.json()
+                    if (data.success) {
+                      alert(`✅ נוסף רישום קייטנה ל-${data.childName}` +
+                        (data.childHasIdNumber ? '' : '\n⚠️ לילד/ה אין ת"ז — מסלול "בדיקת רישום לקייטנה" בבוט לא יוכל לאמת.'))
+                      const r = await fetch(`/api/registrations?parent_id=${parentId}`)
+                      const rd = await r.json()
+                      if (Array.isArray(rd)) setRegistrations(rd)
+                      onRefresh?.()
+                    } else {
+                      alert(`לא הצלחתי: ${data.error || 'שגיאה'}`)
+                    }
+                  } catch {
+                    alert('שגיאת תקשורת — נסי שוב')
+                  }
+                }}
+                className="w-full rounded-2xl py-3 font-semibold text-sm transition-opacity hover:opacity-80"
+                style={{ background: '#E1F5EE', color: '#0F6E56' }}
+              >
+                🏕️ הוסף רישום לקייטנה (ידני / לבדיקה)
+              </button>
               {registrations.length === 0 ? (
                 <div className="text-center py-10" style={{ color: '#a8a29e' }}>
                   <p className="text-3xl mb-2">📂</p>
