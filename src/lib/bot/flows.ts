@@ -52,9 +52,13 @@ function looksOffScript(text: string): boolean {
 }
 
 // ─── utils ────────────────────────────────────────────────────────────────────
+// "עכשיו" לפי שעון ישראל — חובה כי Vercel רץ ב-UTC (אחרת שעה/תאריך שגויים).
+export function israelNow(): Date {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }))
+}
+
 export function isBusinessHours(): boolean {
-  // ⚠️ השרת (Vercel) רץ ב-UTC — חובה לחשב לפי שעון ישראל, אחרת "סגור" כשפתוח.
-  const il = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }))
+  const il = israelNow()
   const day = il.getDay() // 0=ראשון
   const hour = il.getHours()
   return [0, 1, 2, 3, 4].includes(day) && hour >= 8 && hour < 17
@@ -582,7 +586,7 @@ async function performCancellation(
 
 export async function handleCancellationFlow(session: BotSession, userMessage: string): Promise<BotResponse> {
   const step = session.currentFlow
-  const dayOfMonth = new Date().getDate()
+  const dayOfMonth = israelNow().getDate()  // כלל ה-15 לפי שעון ישראל
 
   if (!step || step === 'cancel_start') {
     return {
@@ -2084,7 +2088,7 @@ export async function handlePaymentSetupFlow(
         `📝 *תשלום ב-${numChecks} צ׳קים*\n\n` +
         `• ${numChecks} צ׳קים × ${amount}₪ = *${totalAmount}₪ סה"כ*\n` +
         `• כל צ׳ק לסדר ל*Kids & Fun*\n` +
-        `• תאריכי הצ׳קים: ה-1 לכל חודש, רצוף מ-${new Date().toLocaleDateString('he-IL', { month: 'long', year: 'numeric' })}\n\n` +
+        `• תאריכי הצ׳קים: ה-1 לכל חודש, רצוף מ-${new Date().toLocaleDateString('he-IL', { month: 'long', year: 'numeric', timeZone: 'Asia/Jerusalem' })}\n\n` +
         `נציגה שלנו תתאם איתך לקבלת הצ׳קים.\n\n` +
         `${isBusinessHours() ? 'ניצור קשר היום! 💛' : 'ניצור קשר בשעות הפעילות 💛'}`,
       isComplete: true,
