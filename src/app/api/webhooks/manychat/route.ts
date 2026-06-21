@@ -21,6 +21,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { processMessage } from '@/lib/bot/handler'
 import { isBusinessHours } from '@/lib/bot/flows'
+import { isTestPhone as isAllowedPhone } from '@/lib/bot/test-phones'
 import type { BotSession, TaskPriority } from '@/lib/types'
 
 // ─── Auth ──────────────────────────────────────────────────────────────────────
@@ -35,20 +36,8 @@ function isAuthorized(req: NextRequest): boolean {
   return header === WEBHOOK_SECRET
 }
 
-// ─── Whitelist זמני (שלב בדיקות) ─────────────────────────────────────────────
-// רק המספרים האלה מקבלים תשובה מהבוט. כל מספר אחר — הבוט מתעלם (לא עונה).
-// לפתיחה לכולם בסיום הבדיקות: לרוקן את המערך → ALLOWED_PHONES = []
-const ALLOWED_PHONES = [
-  '972544535688',
-  '972546603344',
-  '972546888587',
-]
-
-function isAllowedPhone(raw: string): boolean {
-  if (ALLOWED_PHONES.length === 0) return true            // רשימה ריקה = כולם מורשים
-  const digits = raw.replace(/\D/g, '').replace(/^0/, '972')
-  return ALLOWED_PHONES.some(p => p.replace(/\D/g, '') === digits)
-}
+// ─── Whitelist זמני (שלב בדיקות) — מנוהל ב-src/lib/bot/test-phones.ts ─────────
+// (isAllowedPhone מיובא בראש הקובץ)
 
 // ─── הודעת היעדרות למספרים שעדיין לא בבוט (שלב בדיקות) ───────────────────────
 // המוח היחיד הוא ה-webhook: מספר בבוט → בוט, כל השאר → ההודעה הזו.

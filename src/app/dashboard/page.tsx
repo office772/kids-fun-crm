@@ -633,6 +633,7 @@ export default function DashboardPage() {
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <BotSimulator />
             </div>
+            <TesterReset />
           </div>
         )}
       </main>
@@ -784,6 +785,61 @@ function StatCard({
       <div className="text-sm font-medium" style={{ color: 'var(--crm-text)', opacity: 0.6 }}>
         {label}
       </div>
+    </div>
+  )
+}
+
+// =========================================
+// TesterReset — איפוס פונה לבדיקה (לבודק, דרך הפרונטהנד)
+// =========================================
+function TesterReset() {
+  const TEST_NUMBERS = [
+    { phone: '0544535688', label: 'מספר בדיקה 1' },
+    { phone: '0546603344', label: 'מספר בדיקה 2' },
+    { phone: '0546888587', label: 'מספר בדיקה 3' },
+  ]
+  const [busy, setBusy] = useState<string | null>(null)
+  const [done, setDone] = useState<string | null>(null)
+
+  const reset = async (phone: string, label: string) => {
+    if (!confirm(`להתחיל בדיקה חדשה מ-${label}?\n\nזה ימחק את כל הרשומות של המספר הזה (הורה, רישום, פניות, שיחה), כדי שהבוט יתייחס אליו כהורה חדש לגמרי.`)) return
+    setBusy(phone); setDone(null)
+    try {
+      const res = await fetch('/api/admin/reset-tester', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      })
+      const data = await res.json()
+      setDone(data.success
+        ? `✅ ${label} אופס! אפשר להתחיל בדיקה חדשה מהוואטסאפ.`
+        : `❌ לא הצלחתי: ${data.error || 'שגיאה'}`)
+    } catch {
+      setDone('❌ שגיאת תקשורת — נסי שוב')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border-2 p-6" style={{ borderColor: '#FDE047' }}>
+      <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--crm-primary)' }}>🧪 איפוס פונה לבדיקה</h2>
+      <p className="text-sm mb-4" style={{ color: 'var(--crm-text)', opacity: 0.7 }}>
+        אחרי כל בדיקה — לחצי כאן כדי "לנקות" את מספר הבדיקה. כך הבוט יתייחס אליו כהורה חדש לגמרי בפעם הבאה.
+      </p>
+      <div className="flex flex-wrap gap-3">
+        {TEST_NUMBERS.map(n => (
+          <button
+            key={n.phone}
+            onClick={() => reset(n.phone, n.label)}
+            disabled={busy === n.phone}
+            className="px-4 py-2.5 rounded-xl font-semibold text-sm transition-opacity hover:opacity-80 disabled:opacity-40"
+            style={{ background: '#FEF9C3', color: '#7B6010' }}
+          >
+            {busy === n.phone ? 'מאפס…' : `🔄 ${n.label} (${n.phone})`}
+          </button>
+        ))}
+      </div>
+      {done && <p className="mt-4 text-sm font-medium" style={{ color: 'var(--crm-text)' }}>{done}</p>}
     </div>
   )
 }
