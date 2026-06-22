@@ -783,6 +783,33 @@ export function ParentDetail({ parentId, onClose, onRefresh }: ParentDetailProps
               >
                 🏕️ הוסף רישום לקייטנה (ידני / לבדיקה)
               </button>
+              <button
+                onClick={async () => {
+                  const c = parent.children?.[0]
+                  if (!c) { alert('להורה אין ילד/ה במערכת'); return }
+                  const idNumber = window.prompt(`הזיני ת"ז של ${c.name} (לאימות בבוט במסלול בדיקת קייטנה):`, '')
+                  if (!idNumber) return
+                  try {
+                    const res = await fetch('/api/admin/set-child-id', {
+                      method: 'POST', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ childId: c.id, idNumber }),
+                    })
+                    const data = await res.json()
+                    if (data.success) {
+                      alert(`✅ ת"ז עודכנה ל-${data.childName}`)
+                      onRefresh?.()
+                    } else {
+                      alert(`לא הצלחתי: ${data.error || 'שגיאה'}`)
+                    }
+                  } catch {
+                    alert('שגיאת תקשורת — נסי שוב')
+                  }
+                }}
+                className="w-full rounded-2xl py-3 font-semibold text-sm transition-opacity hover:opacity-80"
+                style={{ background: '#EEF2FF', color: '#3730A3' }}
+              >
+                ✏️ הזן / עדכן ת"ז לילד/ה (לבדיקת קייטנה)
+              </button>
               {registrations.length === 0 ? (
                 <div className="text-center py-10" style={{ color: '#a8a29e' }}>
                   <p className="text-3xl mb-2">📂</p>
