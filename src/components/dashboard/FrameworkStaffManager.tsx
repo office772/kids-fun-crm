@@ -32,12 +32,12 @@ const AREA_LABELS: Record<string, string> = {
 
 const ROLES = ['רכזת', 'גננת', 'סייעת', 'מנהל/ת', 'אחר']
 
-export function FrameworkStaffManager() {
+export function FrameworkStaffManager({ typeFilter }: { typeFilter?: 'צהרון' | 'קייטנה' } = {}) {
   const [frameworks, setFrameworks] = useState<Framework[]>([])
   const [loading, setLoading] = useState(true)
   const [editingStaff, setEditingStaff] = useState<Partial<StaffMember> & { framework_id: string } | null>(null)
   const [addingFramework, setAddingFramework] = useState(false)
-  const [newFramework, setNewFramework] = useState({ name: '', area_code: 'sharon', type: 'קייטנה' as 'צהרון' | 'קייטנה' })
+  const [newFramework, setNewFramework] = useState({ name: '', area_code: 'sharon', type: (typeFilter ?? 'קייטנה') as 'צהרון' | 'קייטנה' })
 
   const load = async () => {
     setLoading(true)
@@ -94,9 +94,10 @@ export function FrameworkStaffManager() {
     return <div className="text-center py-12 text-gray-400">טוען מסגרות...</div>
   }
 
-  // קיבוץ לפי אזור ואז סוג
+  // סינון לפי סוג (אם הופרד בפאנל הניהול) + קיבוץ לפי אזור ואז סוג
+  const visibleFrameworks = typeFilter ? frameworks.filter(f => f.type === typeFilter) : frameworks
   const grouped: Record<string, Framework[]> = {}
-  for (const f of frameworks) {
+  for (const f of visibleFrameworks) {
     const key = `${f.area_code}|${f.type}`
     if (!grouped[key]) grouped[key] = []
     grouped[key].push(f)
@@ -113,9 +114,9 @@ export function FrameworkStaffManager() {
       {/* Header */}
       <div className="flex items-end justify-between mb-6">
         <div>
-          <h1 className="text-5xl font-bold leading-none mb-1"
+          <h1 className="text-3xl md:text-5xl font-bold leading-tight mb-1"
             style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}>
-            צוותי מסגרות
+            {typeFilter ? `צוותי ${typeFilter}` : 'צוותי מסגרות'}
           </h1>
           <p className="text-sm mt-2" style={{ color: 'var(--crm-text)', opacity: 0.6 }}>
             רכזות, גננות וצוות לכל בי&quot;ס/גן/קייטנה. הודעות איסוף מוקדם וחולים יישלחו לצוות המסגרת הרלוונטית (+ עותק לאדמין).

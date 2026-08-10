@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic'
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from 'next/server'
+import { isAuthorizedWebhook, unauthorized } from '@/lib/api-auth'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -35,6 +36,7 @@ function normalizePhone(raw: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  if (!isAuthorizedWebhook(req, 'INTERNAL_SYNC_SECRET')) return unauthorized()
   try {
     const records: RecurringRecord[] = await req.json()
 

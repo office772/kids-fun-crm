@@ -16,6 +16,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 
 import type { BotSession } from '@/lib/types'
+import { resolveMonthlyFee } from './pricing'
 
 export type PaymentMethod =
   | 'credit'           // 💳 כרטיס אשראי — חיוב חודשי דרך PayPlus
@@ -131,7 +132,8 @@ export async function createPayPlusPaymentLink(
       refURL_success:  `${appUrl}/payment-success?reg=${params.registrationId}`,
       refURL_failure:  `${appUrl}/payment-fail?reg=${params.registrationId}`,
       refURL_cancel:   `${appUrl}/payment-fail?reg=${params.registrationId}&cancelled=1`,
-      refURL_callback: `${appUrl}/api/webhooks/payplus`,
+      // אם הוגדר PAYPLUS_WEBHOOK_SECRET — מצרפים אותו ל-callback כדי שיעבור אימות בצד שלנו
+      refURL_callback: `${appUrl}/api/webhooks/payplus${process.env.PAYPLUS_WEBHOOK_SECRET ? `?secret=${encodeURIComponent(process.env.PAYPLUS_WEBHOOK_SECRET)}` : ''}`,
       // לקוח + פריטים — פותחים את כרטיס הלקוח ב-PayPlus ומופיע בחשבונית
       customer: {
         customer_name: params.parentName,
@@ -317,11 +319,14 @@ export async function loadParentRegistrationContext(
     // מצא רישום פעיל
     const { data: reg } = await supabase
       .from('registrations')
-      .select('id, area_code, area_label, child:children(id, name)')
+      .select('id, area_code, area_label, child:children(id, name, school, class_name)')
       .eq('parent_id', parent.id)
       .in('status', ['מאושר', 'ממתין לאישור'])
       .order('created_at', { ascending: false })
       .maybeSingle()
+
+    let school: string | null = null
+    let className: string | null = null
 
     if (reg?.child) {
       const child = Array.isArray(reg.child) ? reg.child[0] : reg.child
@@ -329,11 +334,13 @@ export async function loadParentRegistrationContext(
       session.collectedData.area_label      = reg.area_label ?? ''
       session.collectedData.area_code       = reg.area_code  ?? ''
       session.collectedData.registration_id = reg.id
+      school    = child.school ?? null
+      className = child.class_name ?? null
     } else {
       // אין רישום פורמלי — לחפש ילד צהרון אצל ההורה (ייבוא היסטורי)
       const { data: kid } = await supabase
         .from('children')
-        .select('id, name, area_code')
+        .select('id, name, area_code, school, class_name')
         .eq('parent_id', parent.id)
         .in('framework', ['צהרון', 'שניהם'])
         .not('name', 'in', '(—,–,-,*,?)')
@@ -342,11 +349,24 @@ export async function loadParentRegistrationContext(
       if (kid?.name) {
         session.collectedData.child_name = kid.name
         if (kid.area_code) session.collectedData.area_code = kid.area_code
+        school    = kid.school ?? null
+        className = kid.class_name ?? null
       }
     }
 
-    // עלות לפי branch (TODO: משוך מ-branches.monthly_fee)
-    session.collectedData.monthly_fee = session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE)
+    if (school)    session.collectedData.child_school = school
+    if (className) session.collectedData.child_class  = className
+
+    // ─── מחיר דינמי לפי בית-ספר/כיתה (מודל קורלי) ─────────────────────────────
+    // resolveMonthlyFee מחזיר null כשאי-אפשר לקבוע בוודאות — אז לא קובעים
+    // סכום מנוחש; זרימת התשלום תזהה זאת ותפנה לנציגה במקום לחייב סכום שגוי.
+    const fee = resolveMonthlyFee({ area_code: session.collectedData.area_code, school, class_name: className })
+    if (fee != null) {
+      session.collectedData.monthly_fee = String(fee)
+    } else {
+      session.collectedData.fee_unresolved = '1'
+      console.log(`[pricing] לא נקבע מחיר לבי"ס="${school}" כיתה="${className}" — נדרשת נציגה`)
+    }
 
   } catch (err) {
     console.error('[loadParentRegistrationContext] Error:', err)
@@ -485,6 +505,61 @@ export async function getPaymentStatusByChildName(childName: string): Promise<st
     return formatPaymentStatusText(parent?.name ?? children[0].name, payments as PaymentRow[])
   } catch (err) {
     console.error('[getPaymentStatusByChildName] Error:', err)
+    return null
+  }
+}
+
+// ─── מציאת הוראת קבע פעילה לחידוש כרטיס (לפי טלפון או שם ילד) ─────────────────
+// מזהה את ההורה לפי טלפון הפונה, ואם אין — לפי שם הילד (התאמה חד-משמעית).
+// מחזיר את ה-recurring_uid הפעיל, או null אם אין הוראת קבע במערכת.
+export async function findRecurringForRenewal(
+  phone: string,
+  childName?: string,
+): Promise<{ uid: string; parentId: string } | null> {
+  try {
+    const { isDemoMode } = await import('@/lib/demo-data')
+    if (isDemoMode()) return null
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const supabase = createServiceClient()
+
+    // 1) לפי טלפון הפונה
+    if (phone && phone !== 'simulator') {
+      const normalized = phone.replace(/\D/g, '').replace(/^972/, '0')
+      const intl       = '972' + normalized.replace(/^0/, '')
+      const { data: byPhone } = await supabase
+        .from('parents')
+        .select('id, payplus_recurring_uid, payplus_recurring_status')
+        .or(`phone.eq.${normalized},phone.eq.${intl},phone.eq.${phone}`)
+        .not('payplus_recurring_uid', 'is', null)
+        .maybeSingle()
+      if (byPhone?.payplus_recurring_uid && byPhone.payplus_recurring_status === 'active') {
+        return { uid: byPhone.payplus_recurring_uid, parentId: byPhone.id }
+      }
+    }
+
+    // 2) לפי שם הילד (התאמה חד-משמעית בלבד — לא מנחשים)
+    const name = childName?.trim()
+    if (name && name.length >= 2) {
+      let { data: kids } = await supabase
+        .from('children').select('parent_id').ilike('name', name).limit(2)
+      if (!kids?.length) {
+        const res = await supabase.from('children').select('parent_id').ilike('name', `%${name}%`).limit(2)
+        kids = res.data
+      }
+      if (kids && kids.length === 1) {
+        const { data: parent } = await supabase
+          .from('parents')
+          .select('id, payplus_recurring_uid, payplus_recurring_status')
+          .eq('id', kids[0].parent_id)
+          .maybeSingle()
+        if (parent?.payplus_recurring_uid && parent.payplus_recurring_status === 'active') {
+          return { uid: parent.payplus_recurring_uid, parentId: parent.id }
+        }
+      }
+    }
+    return null
+  } catch (err) {
+    console.error('[findRecurringForRenewal] error:', err)
     return null
   }
 }

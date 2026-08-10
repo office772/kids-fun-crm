@@ -6,9 +6,11 @@ export const dynamic = 'force-dynamic'
 // אם לא נקלט כלום — נפתחת משימה דחופה בטאב "פניות" בדשבורד.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { isAuthorizedCron, unauthorized } from '@/lib/api-auth'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (!isAuthorizedCron(req)) return unauthorized()
   try {
     const { createServiceClient } = await import('@/lib/supabase/server')
     const supabase = createServiceClient()

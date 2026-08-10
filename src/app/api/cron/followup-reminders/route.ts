@@ -6,9 +6,20 @@ export const dynamic = 'force-dynamic'
 // ומסמן את התזכורת כ-sent.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { isAuthorizedCron, unauthorized } from '@/lib/api-auth'
+import { isQuietHours } from '@/lib/bot/flows'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (!isAuthorizedCron(req)) return unauthorized()
+
+  // ⏰ שעות שקט: אסור לשלוח הודעה יזומה להורה לפני 08:00 / אחרי 21:30 (שעון ישראל).
+  // (התראות לצוות מותרות תמיד.) כשתחובר שליחה יזומה ללקוח — לגדר אותה ב-canMessageParent.
+  const canMessageParent = !isQuietHours()
+  if (!canMessageParent) {
+    console.log('[Cron followup-reminders] שעות שקט — דילוג על שליחה יזומה להורים (פתיחת פניות לצוות תמשיך).')
+  }
+
   const { createServiceClient } = await import('@/lib/supabase/server')
   const supabase = createServiceClient()
 

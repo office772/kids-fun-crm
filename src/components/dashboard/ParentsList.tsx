@@ -14,6 +14,8 @@ interface Props {
   onBulkDelete?: (ids: string[]) => void
   viewMode?: 'grid' | 'list'
   onViewModeChange?: (mode: 'grid' | 'list') => void
+  // תצוגת תקציר נקייה (סקירה): בלי בחירה/עריכה/מחיקה/מקור — רק נתונים + סטטוס
+  preview?: boolean
 }
 
 export function ParentsList({
@@ -24,6 +26,7 @@ export function ParentsList({
   onBulkDelete,
   viewMode = 'grid',
   onViewModeChange,
+  preview = false,
 }: Props) {
   const [selectedParent, setSelectedParent] = useState<Parent | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -108,7 +111,7 @@ export function ParentsList({
       )}
 
       {/* Select-all row when items exist */}
-      {filtered.length > 0 && selected.size === 0 && (
+      {!preview && filtered.length > 0 && selected.size === 0 && (
         <div className="flex items-center gap-2 mb-2 px-1">
           <button onClick={toggleAll} className="text-xs flex items-center gap-1.5 transition-opacity hover:opacity-80"
             style={{ color: '#a8a29e' }}>
@@ -145,20 +148,22 @@ export function ParentsList({
 
       {/* LIST VIEW */}
       {viewMode === 'list' && filtered.length > 0 && (
-        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+        <div className={preview ? 'overflow-hidden' : 'bg-white rounded-2xl border border-crm-border overflow-hidden'}>
           <table className="w-full text-sm" dir="rtl">
             <thead>
-              <tr style={{ background: '#fdf6ef' }} className="border-b border-gray-100">
-                <th className="px-4 py-3 w-8">
-                  <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0}
-                    onChange={toggleAll} className="w-4 h-4 accent-[var(--crm-primary)] cursor-pointer" />
-                </th>
+              <tr style={{ background: 'var(--crm-surface-soft)' }} className="border-b border-crm-border">
+                {!preview && (
+                  <th className="px-4 py-3 w-8">
+                    <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0}
+                      onChange={toggleAll} className="w-4 h-4 accent-[var(--crm-primary)] cursor-pointer" />
+                  </th>
+                )}
                 <th className="text-right px-3 py-3 font-semibold" style={{ color: 'var(--crm-primary)' }}>שם</th>
                 <th className="text-right px-3 py-3 font-semibold hidden sm:table-cell" style={{ color: 'var(--crm-primary)' }}>טלפון</th>
                 <th className="text-right px-3 py-3 font-semibold hidden md:table-cell" style={{ color: 'var(--crm-primary)' }}>ילד/ה</th>
                 <th className="text-right px-3 py-3 font-semibold" style={{ color: 'var(--crm-primary)' }}>סטטוס</th>
-                <th className="text-right px-3 py-3 font-semibold hidden lg:table-cell" style={{ color: 'var(--crm-primary)' }}>מקור</th>
-                <th className="px-3 py-3 w-20"></th>
+                {!preview && <th className="text-right px-3 py-3 font-semibold hidden lg:table-cell" style={{ color: 'var(--crm-primary)' }}>מקור</th>}
+                {!preview && <th className="px-3 py-3 w-20"></th>}
               </tr>
             </thead>
             <tbody>
@@ -169,18 +174,20 @@ export function ParentsList({
                 return (
                   <tr key={parent.id}
                     onClick={() => setSelectedParent(parent)}
-                    className="border-b border-gray-50 hover:bg-[#fdf9f5] transition-colors cursor-pointer"
-                    style={i % 2 !== 0 ? { background: '#fafaf9' } : {}}>
-                    <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                      <input type="checkbox" checked={selected.has(parent.id)}
-                        onChange={() => toggleSelect(parent.id)}
-                        className="w-4 h-4 accent-[var(--crm-primary)] cursor-pointer" />
-                    </td>
+                    className="border-b border-crm-border hover:bg-crm-surface-soft transition-colors cursor-pointer"
+                    style={i % 2 !== 0 ? { background: 'var(--crm-surface-soft)' } : {}}>
+                    {!preview && (
+                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={selected.has(parent.id)}
+                          onChange={() => toggleSelect(parent.id)}
+                          className="w-4 h-4 accent-[var(--crm-primary)] cursor-pointer" />
+                      </td>
+                    )}
                     <td className="px-3 py-3 font-medium" style={{ color: 'var(--crm-text)' }}>
                       {parent.name || 'הורה לא מזוהה'}
                     </td>
-                    <td className="px-3 py-3 text-gray-500 hidden sm:table-cell" dir="ltr">{parent.phone}</td>
-                    <td className="px-3 py-3 text-gray-500 hidden md:table-cell">
+                    <td className="px-3 py-3 text-crm-text-muted hidden sm:table-cell" dir="ltr">{parent.phone}</td>
+                    <td className="px-3 py-3 text-crm-text-muted hidden md:table-cell">
                       {child ? `${child.name}${child.class_name ? ` (${child.class_name})` : ''}` : '—'}
                     </td>
                     <td className="px-3 py-3">
@@ -189,29 +196,33 @@ export function ParentsList({
                         {health.icon} {health.label}
                       </span>
                     </td>
-                    <td className="px-3 py-3 hidden lg:table-cell">
-                      <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: src.bg, color: src.color }}>
-                        {src.icon} {src.label}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
-                      <div className="flex items-center gap-1 justify-end">
-                        {onEdit && (
-                          <button onClick={() => onEdit(parent)}
-                            className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
-                            style={{ color: '#a8a29e' }} title="עריכה">
-                            <Pencil size={13} />
-                          </button>
-                        )}
-                        {onDelete && (
-                          <button onClick={(e) => handleDelete(e, parent.id)}
-                            className="p-1.5 rounded-lg hover:bg-red-50 transition-colors"
-                            style={{ color: '#e57373' }} title="מחיקה">
-                            <Trash2 size={13} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
+                    {!preview && (
+                      <td className="px-3 py-3 hidden lg:table-cell">
+                        <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: src.bg, color: src.color }}>
+                          {src.icon} {src.label}
+                        </span>
+                      </td>
+                    )}
+                    {!preview && (
+                      <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-1 justify-end">
+                          {onEdit && (
+                            <button onClick={() => onEdit(parent)}
+                              className="p-1.5 rounded-lg hover:bg-crm-surface-soft transition-colors"
+                              style={{ color: 'var(--crm-text-muted)' }} title="עריכה">
+                              <Pencil size={13} />
+                            </button>
+                          )}
+                          {onDelete && (
+                            <button onClick={(e) => handleDelete(e, parent.id)}
+                              className="p-1.5 rounded-lg hover:bg-red-50 transition-colors"
+                              style={{ color: '#e57373' }} title="מחיקה">
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 )
               })}

@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Users, Settings, ChevronLeft, RefreshCw, CheckCircle, AlertCircle, Info, UsersRound, HelpCircle } from 'lucide-react'
+import { Users, Settings, ChevronLeft, RefreshCw, CheckCircle, AlertCircle, Info, UsersRound, MessageSquare, BookOpen, Building2 } from 'lucide-react'
 import { CapacitySettings } from '@/components/admin/CapacitySettings'
+import { SchoolCapacitySettings } from '@/components/admin/SchoolCapacitySettings'
 import { FrameworkStaffManager } from '@/components/dashboard/FrameworkStaffManager'
-import { BotFAQManager } from '@/components/dashboard/BotFAQManager'
+import { BotSimulator, TesterReset } from '@/components/dashboard/BotSimulator'
+import { HelpGuide } from '@/components/admin/HelpGuide'
 import Link from 'next/link'
 
 const SYNC_TIMEOUT_MS = 90_000 // לא להשאיר את הכפתור תקוע על "מסנכרן..." לנצח
@@ -71,9 +73,9 @@ function SyncButton({ label, endpoint, color }: { label: string; endpoint: strin
     : 'bg-red-50 text-red-700'
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-2">
+    <div className="bg-white rounded-xl border border-crm-border p-4 space-y-2">
       <div className="flex items-center justify-between">
-        <span className="font-medium text-[#3d2b1f] text-sm">{label}</span>
+        <span className="font-medium text-crm-text text-sm">{label}</span>
         <button
           onClick={handleSync}
           disabled={state === 'loading'}
@@ -98,7 +100,7 @@ function SyncButton({ label, endpoint, color }: { label: string; endpoint: strin
   )
 }
 
-type AdminSection = 'capacity' | 'sync' | 'framework-staff' | 'faq'
+type AdminSection = 'guide' | 'capacity' | 'school-capacity' | 'sync' | 'staff-tzaharon' | 'staff-kaytana' | 'simulator'
 // עתידי: | 'bot-texts' | 'hours' | 'general' | 'payments' ...
 
 interface SectionDef {
@@ -110,10 +112,17 @@ interface SectionDef {
 }
 
 export default function AdminPage() {
-  const [activeSection, setActiveSection] = useState<AdminSection>('capacity')
+  const [activeSection, setActiveSection] = useState<AdminSection>('guide')
 
   // SECTIONS מוגדר בתוך הפונקציה כדי למנוע כשל קומפילציה של RSC
   const SECTIONS: SectionDef[] = [
+    {
+      id: 'guide',
+      label: 'מדריך שימוש',
+      icon: <BookOpen size={18} />,
+      description: 'מדריך מלא למערכת ולמסלולי הבוט',
+      component: <HelpGuide />,
+    },
     {
       id: 'capacity',
       label: 'קיבולת אזורים',
@@ -122,18 +131,43 @@ export default function AdminPage() {
       component: <CapacitySettings />,
     },
     {
-      id: 'framework-staff',
-      label: 'צוותי מסגרות',
-      icon: <UsersRound size={18} />,
-      description: 'רכזות, גננות וצוות לכל בי"ס/גן/קייטנה',
-      component: <FrameworkStaffManager />,
+      id: 'school-capacity',
+      label: 'קיבולת לפי מסגרת',
+      icon: <Building2 size={18} />,
+      description: 'מקסימום נרשמים לכל בי"ס/גן',
+      component: <SchoolCapacitySettings />,
     },
     {
-      id: 'faq',
-      label: 'שאלות ותשובות',
-      icon: <HelpCircle size={18} />,
-      description: 'תוכן השאלות שהבוט עונה עליהן אוטומטית',
-      component: <BotFAQManager />,
+      id: 'staff-tzaharon',
+      label: 'צוותי צהרון',
+      icon: <UsersRound size={18} />,
+      description: 'רכזות וצוות לבתי"ס/גנים (צהרון)',
+      component: <FrameworkStaffManager typeFilter="צהרון" />,
+    },
+    {
+      id: 'staff-kaytana',
+      label: 'צוותי קייטנה',
+      icon: <UsersRound size={18} />,
+      description: 'צוות לקייטנות',
+      component: <FrameworkStaffManager typeFilter="קייטנה" />,
+    },
+    {
+      id: 'simulator',
+      label: 'סימולטור בוט',
+      icon: <MessageSquare size={18} />,
+      description: 'בדיקת הבוט לפני/אחרי חיבור WhatsApp',
+      component: (
+        <div className="space-y-6">
+          <div>
+            <h3 className="font-bold text-lg" style={{ color: 'var(--crm-primary)' }}>סימולטור בוט</h3>
+            <p className="text-xs mb-4" style={{ color: 'var(--crm-text-muted)' }}>בדקי את הבוט בסביבה בטוחה — בדיוק כמו בוואטסאפ.</p>
+          </div>
+          <div className="bg-crm-surface rounded-crm border border-crm-border p-4 md:p-6">
+            <BotSimulator />
+          </div>
+          <TesterReset />
+        </div>
+      ),
     },
     {
       id: 'sync',
@@ -143,8 +177,8 @@ export default function AdminPage() {
       component: (
         <div className="space-y-4">
           <div>
-            <h3 className="font-semibold text-[#3d2b1f] mb-1">סנכרון נתונים חיצוניים</h3>
-            <p className="text-xs text-gray-500 mb-4">
+            <h3 className="font-semibold text-crm-text mb-1">סנכרון נתונים חיצוניים</h3>
+            <p className="text-xs text-crm-text-muted mb-4">
               מייבא הורים ותשלומים ממערכות חיצוניות לתוך ה-CRM. קריאה בלבד — לא משנה כלום אצל הספקים.
             </p>
           </div>
@@ -155,14 +189,14 @@ export default function AdminPage() {
           />
 
           {/* PayPlus — אין סנכרון ידני: PayPlus חוסם קריאות שרת. הכל אוטומטי דרך webhook */}
-          <div className="bg-white rounded-xl border border-gray-100 p-4">
+          <div className="bg-white rounded-xl border border-crm-border p-4">
             <div className="flex items-center justify-between">
-              <span className="font-medium text-[#3d2b1f] text-sm">💳 PayPlus (הוראות קבע + כרטיסי אשראי)</span>
+              <span className="font-medium text-crm-text text-sm">💳 PayPlus (הוראות קבע + כרטיסי אשראי)</span>
               <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-green-50 text-green-700">
                 ✓ אוטומטי
               </span>
             </div>
-            <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+            <p className="text-xs text-crm-text-muted mt-2 leading-relaxed">
               אין צורך בסנכרון ידני. PayPlus חוסם קריאות מהשרת, אבל כל תשלום חדש —
               כולל כשלי חיוב והוראות קבע — נכנס אוטומטית בזמן אמת דרך webhook.
             </p>
@@ -184,20 +218,20 @@ export default function AdminPage() {
   const current = SECTIONS.find(s => s.id === activeSection)!
 
   return (
-    <div className="min-h-screen bg-[#fdf6ef]" dir="rtl">
+    <div className="min-h-screen bg-crm-bg" dir="rtl">
 
       {/* Header */}
-      <header className="bg-white shadow-sm sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Settings size={20} className="text-[#5c3d2e]" />
-            <span className="font-bold text-[#3d2b1f] text-lg">פאנל ניהול</span>
-            <span className="text-gray-300 mx-1">|</span>
-            <span className="text-[#5c3d2e] font-semibold text-sm">🌟 Kids &amp; Fun</span>
+      <header className="bg-crm-surface border-b border-crm-border sticky top-0 z-50">
+        <div className="max-w-6xl mx-auto px-4 md:px-6 h-16 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 md:gap-3 min-w-0">
+            <Settings size={20} className="text-crm-primary shrink-0" />
+            <span className="font-bold text-crm-text text-lg">פאנל ניהול</span>
+            <span className="text-crm-text-muted mx-1 hidden sm:inline">|</span>
+            <span className="text-crm-primary font-semibold text-sm hidden sm:inline">🌟 Kids &amp; Fun</span>
           </div>
           <Link
             href="/dashboard"
-            className="flex items-center gap-1 text-sm text-gray-500 hover:text-[#5c3d2e] transition-colors"
+            className="flex items-center gap-1 text-sm text-crm-text-muted hover:text-crm-primary transition-colors"
           >
             <ChevronLeft size={16} />
             חזרה לדשבורד
@@ -205,29 +239,29 @@ export default function AdminPage() {
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto px-4 md:px-6 py-8 flex gap-6">
+      <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8 flex flex-col md:flex-row gap-4 md:gap-6">
 
-        {/* Sidebar */}
-        <aside className="w-56 shrink-0">
-          <nav className="bg-white rounded-2xl shadow-sm p-2 space-y-1">
+        {/* Sidebar — שורת לשוניות אופקית במובייל, אנכית בדסקטופ */}
+        <aside className="w-full md:w-56 md:shrink-0">
+          <nav className="bg-crm-surface rounded-2xl border border-crm-border p-2 flex md:flex-col gap-1 overflow-x-auto md:overflow-visible">
             {SECTIONS.map(section => {
               const isActive = activeSection === section.id
               return (
                 <button
                   key={section.id}
                   onClick={() => setActiveSection(section.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-right ${
+                  className={`flex-shrink-0 md:w-full flex items-center md:items-start gap-3 px-4 py-2.5 md:py-3 rounded-xl text-sm font-medium transition-all text-right whitespace-nowrap md:whitespace-normal ${
                     isActive
-                      ? 'bg-[#5c3d2e] text-white'
-                      : 'text-[#3d2b1f] hover:bg-[#f5e6d8]'
+                      ? 'bg-crm-primary text-white'
+                      : 'text-crm-text hover:bg-crm-surface-soft'
                   }`}
                 >
-                  <span className={isActive ? 'text-white' : 'text-[#5c3d2e]'}>
+                  <span className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-crm-primary'}`}>
                     {section.icon}
                   </span>
-                  <div className="text-right">
+                  <div className="text-right min-w-0">
                     <div>{section.label}</div>
-                    <div className={`text-xs font-normal mt-0.5 ${isActive ? 'text-white/70' : 'text-gray-400'}`}>
+                    <div className={`hidden md:block text-xs font-normal mt-0.5 ${isActive ? 'text-white/70' : 'text-crm-text-muted'}`}>
                       {section.description}
                     </div>
                   </div>
@@ -235,12 +269,12 @@ export default function AdminPage() {
               )
             })}
 
-            {/* placeholders לסעיפים עתידיים */}
-            <div className="pt-2 border-t border-[#f0e0d0]">
+            {/* placeholders לסעיפים עתידיים — דסקטופ בלבד */}
+            <div className="hidden md:block pt-2 border-t border-crm-border">
               {['טקסטים לבוט', 'שעות פעילות', 'הגדרות כלליות'].map(label => (
                 <div key={label}
-                  className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-gray-300 cursor-not-allowed">
-                  <div className="w-4 h-4 rounded bg-gray-100" />
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-crm-text-muted cursor-not-allowed">
+                  <div className="w-4 h-4 rounded bg-crm-surface-soft" />
                   <div>
                     <div>{label}</div>
                     <div className="text-xs mt-0.5">בקרוב</div>

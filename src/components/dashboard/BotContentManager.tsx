@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Plus, Pencil, Trash2, Search, X, Check } from 'lucide-react'
+import { Plus, Pencil, Trash2, Search, X, Check, LayoutGrid, List } from 'lucide-react'
 import { BotContent, BotContentCategory, BotContentFlow } from '@/lib/types'
 
 // ─── Demo data ───────────────────────────────────────────────────────────────
@@ -56,6 +56,7 @@ export function BotContentManager() {
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  const [view, setView] = useState<'cards' | 'table'>('cards')
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
@@ -103,152 +104,155 @@ export function BotContentManager() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-2xl font-bold" style={{ color: 'var(--crm-primary)' }}>ניהול תכני בוט</h2>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--crm-text)', opacity: 0.6 }}>{items.length} הודעות במערכת · {items.filter(i => i.is_active).length} פעילות</p>
+          <p className="text-sm mt-0.5" style={{ color: 'var(--crm-text-muted)' }}>{items.length} הודעות · {items.filter(i => i.is_active).length} פעילות</p>
         </div>
-        <button
-          onClick={openAdd}
-          className="flex items-center gap-2 px-4 py-2 rounded-full font-semibold text-sm transition-opacity hover:opacity-90"
-          style={{ background: 'var(--crm-action)', color: 'var(--crm-text)' }}
-        >
-          <Plus size={16} />
-          הוסף הודעה
-        </button>
+        <div className="flex items-center gap-2">
+          {/* View toggle */}
+          <div className="flex items-center gap-0.5 bg-crm-surface border border-crm-border rounded-full px-1 py-1">
+            <button onClick={() => setView('cards')} className="p-1.5 rounded-full transition-colors"
+              style={view === 'cards' ? { background: 'var(--crm-primary)', color: '#fff' } : { color: 'var(--crm-text-muted)' }} title="כרטיסים">
+              <LayoutGrid size={15} />
+            </button>
+            <button onClick={() => setView('table')} className="p-1.5 rounded-full transition-colors"
+              style={view === 'table' ? { background: 'var(--crm-primary)', color: '#fff' } : { color: 'var(--crm-text-muted)' }} title="טבלה">
+              <List size={15} />
+            </button>
+          </div>
+          <button
+            onClick={openAdd}
+            className="flex items-center gap-2 px-4 py-2 rounded-full font-semibold text-sm transition-opacity hover:opacity-90"
+            style={{ background: 'var(--crm-action)', color: 'var(--crm-text)' }}
+          >
+            <Plus size={16} />
+            הוסף הודעה
+          </button>
+        </div>
       </div>
 
-      {/* Search + filters */}
-      <div className="space-y-3">
-        <div className="relative">
-          <Search size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400" />
+      {/* Toolbar: search + dropdown filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search size={15} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--crm-text-muted)' }} />
           <input
             type="text"
             placeholder="חיפוש לפי כותרת, מפתח או תוכן..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full border-2 border-gray-200 rounded-full pr-9 pl-9 py-2.5 text-sm focus:outline-none bg-white text-right"
-            onFocus={e => (e.target.style.borderColor = 'var(--crm-primary)')}
-            onBlur={e => (e.target.style.borderColor = '#e5e7eb')}
+            className="w-full border rounded-full pr-9 pl-9 py-2 text-sm focus:outline-none bg-crm-surface text-right"
+            style={{ borderColor: 'var(--crm-border)' }}
           />
           {search && (
-            <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600">
+            <button onClick={() => setSearch('')} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--crm-text-muted)' }}>
               <X size={14} />
             </button>
           )}
         </div>
-
-        {/* Category pills */}
-        <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-xs font-medium" style={{ color: 'var(--crm-text)', opacity: 0.5 }}>קטגוריה:</span>
-          {CATEGORIES.map(c => (
-            <button
-              key={c.value}
-              onClick={() => setCatFilter(c.value as BotContentCategory | 'all')}
-              className="px-3 py-1 rounded-full text-xs font-medium transition-all"
-              style={catFilter === c.value
-                ? { background: 'var(--crm-primary)', color: '#fff' }
-                : { background: '#fff', color: 'var(--crm-text)', border: '1px solid #e5e7eb' }}
-            >{c.label}</button>
-          ))}
-        </div>
-
-        {/* Flow pills */}
-        <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-xs font-medium" style={{ color: 'var(--crm-text)', opacity: 0.5 }}>מסלול:</span>
-          {FLOWS.map(f => (
-            <button
-              key={f.value}
-              onClick={() => setFlowFilter(f.value as BotContentFlow | 'all')}
-              className="px-3 py-1 rounded-full text-xs font-medium transition-all"
-              style={flowFilter === f.value
-                ? { background: 'var(--crm-accent)', color: '#fff' }
-                : { background: '#fff', color: 'var(--crm-text)', border: '1px solid #e5e7eb' }}
-            >{f.label}</button>
-          ))}
-        </div>
+        <select
+          value={catFilter}
+          onChange={e => setCatFilter(e.target.value as BotContentCategory | 'all')}
+          className="rounded-full border bg-crm-surface px-4 py-2 text-sm cursor-pointer focus:outline-none"
+          style={catFilter !== 'all'
+            ? { borderColor: 'var(--crm-primary)', color: 'var(--crm-primary)', fontWeight: 600 }
+            : { borderColor: 'var(--crm-border)', color: 'var(--crm-text)' }}
+        >
+          {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.value === 'all' ? 'כל הקטגוריות' : c.label}</option>)}
+        </select>
+        <select
+          value={flowFilter}
+          onChange={e => setFlowFilter(e.target.value as BotContentFlow | 'all')}
+          className="rounded-full border bg-crm-surface px-4 py-2 text-sm cursor-pointer focus:outline-none"
+          style={flowFilter !== 'all'
+            ? { borderColor: 'var(--crm-primary)', color: 'var(--crm-primary)', fontWeight: 600 }
+            : { borderColor: 'var(--crm-border)', color: 'var(--crm-text)' }}
+        >
+          {FLOWS.map(f => <option key={f.value} value={f.value}>{f.value === 'all' ? 'כל המסלולים' : f.label}</option>)}
+        </select>
       </div>
 
-      {/* Table */}
-      <div className="space-y-2">
-        {filtered.length === 0 && (
-          <div className="text-center py-12 text-stone-400">
-            <div className="text-4xl mb-2">🔍</div>
-            <p>לא נמצאו תוצאות</p>
-          </div>
-        )}
-        {filtered.map(item => (
-          <div
-            key={item.id}
-            className="bg-white rounded-2xl border p-4 flex items-start gap-4 transition-shadow hover:shadow-sm"
-            style={{ borderColor: item.is_active ? '#f3f4f6' : '#f5dde5', opacity: item.is_active ? 1 : 0.7 }}
-          >
-            {/* Active toggle */}
-            <button
-              onClick={() => toggleActive(item.id)}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all hover:opacity-80 flex-shrink-0"
-              style={
-                item.is_active
-                  ? { background: '#e8d5e8', color: '#6D436D', border: '1px solid #c9a8c9' }
-                  : { background: '#f5f5f4', color: '#a8a29e', border: '1px solid #e5e7eb' }
-              }
+      {/* Empty state */}
+      {filtered.length === 0 && (
+        <div className="text-center py-14" style={{ color: 'var(--crm-text-muted)' }}>
+          <div className="text-4xl mb-2">🔍</div>
+          <p>לא נמצאו תוצאות</p>
+        </div>
+      )}
+
+      {/* Cards view — קונטור רך, מינימום צביעה */}
+      {filtered.length > 0 && view === 'cards' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {filtered.map(item => (
+            <div
+              key={item.id}
+              className="bg-crm-surface rounded-crm border border-crm-border p-5 transition-shadow hover:shadow-crm"
+              style={{ opacity: item.is_active ? 1 : 0.6 }}
             >
-              <span className="w-2 h-2 rounded-full" style={{ background: item.is_active ? '#6D436D' : '#d1d5db' }} />
-              {item.is_active ? 'פעיל' : 'כבוי'}
-            </button>
-
-            {/* Content */}
-            <div className="flex-1 min-w-0">
-              <div className="flex flex-wrap items-center gap-2 mb-1">
-                <span className="font-semibold text-sm" style={{ color: 'var(--crm-text)' }}>{item.title}</span>
-                <span className="font-mono text-xs px-1.5 py-0.5 rounded" style={{ background: '#f5f5f4', color: '#78716c' }}>{item.key}</span>
-                <CategoryBadge category={item.category} />
-                <FlowBadge flow={item.flow} />
-              </div>
-              {item.step_label && (
-                <p className="text-xs mb-1.5" style={{ color: 'var(--crm-text)', opacity: 0.5 }}>{item.step_label}</p>
-              )}
-              <p className="text-sm leading-relaxed whitespace-pre-line line-clamp-2" style={{ color: 'var(--crm-text)', opacity: 0.75 }}>{item.content}</p>
-            </div>
-
-            {/* Actions */}
-            <div className="flex items-center gap-1 flex-shrink-0">
-              <button
-                onClick={() => openEdit(item)}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-gray-100"
-                style={{ color: 'var(--crm-text)', opacity: 0.55 }}
-              >
-                <Pencil size={14} />
-              </button>
-              {deleteConfirm === item.id ? (
-                <div className="flex items-center gap-1">
-                  <button onClick={() => handleDelete(item.id)} className="w-7 h-7 rounded-full flex items-center justify-center bg-red-100 text-red-600 hover:bg-red-200">
-                    <Check size={13} />
-                  </button>
-                  <button onClick={() => setDeleteConfirm(null)} className="w-7 h-7 rounded-full flex items-center justify-center bg-gray-100 text-gray-500 hover:bg-gray-200">
-                    <X size={13} />
-                  </button>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <h3 className="font-semibold text-base" style={{ color: 'var(--crm-text)' }}>{item.title}</h3>
+                    <span className="font-mono text-xs px-1.5 py-0.5 rounded border" style={{ background: 'var(--crm-surface-soft)', color: 'var(--crm-text-muted)', borderColor: 'var(--crm-border)' }}>{item.key}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 mb-2.5">
+                    <CategoryBadge category={item.category} />
+                    <FlowBadge flow={item.flow} />
+                    {item.step_label && <span className="text-xs" style={{ color: 'var(--crm-text-muted)' }}>{item.step_label}</span>}
+                  </div>
+                  <p className="text-sm leading-relaxed whitespace-pre-line line-clamp-2" style={{ color: 'var(--crm-text)', opacity: 0.7 }}>{item.content}</p>
                 </div>
-              ) : (
-                <button
-                  onClick={() => setDeleteConfirm(item.id)}
-                  className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-gray-100"
-                  style={{ color: 'var(--crm-text)', opacity: 0.4 }}
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
+                <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                  <ActivePill active={item.is_active} onClick={() => toggleActive(item.id)} />
+                  <RowActions item={item} onEdit={openEdit} deleteConfirm={deleteConfirm} setDeleteConfirm={setDeleteConfirm} onDelete={handleDelete} />
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {/* Table view — נקי, מבוסס קונטור */}
+      {filtered.length > 0 && view === 'table' && (
+        <div className="bg-crm-surface rounded-crm border border-crm-border overflow-x-auto">
+          <table className="w-full text-sm" dir="rtl">
+            <thead>
+              <tr className="border-b border-crm-border" style={{ background: 'var(--crm-surface-soft)' }}>
+                <th className="text-right px-4 py-3 font-semibold" style={{ color: 'var(--crm-primary)' }}>כותרת</th>
+                <th className="text-right px-3 py-3 font-semibold hidden md:table-cell" style={{ color: 'var(--crm-primary)' }}>מפתח</th>
+                <th className="text-right px-3 py-3 font-semibold" style={{ color: 'var(--crm-primary)' }}>קטגוריה</th>
+                <th className="text-right px-3 py-3 font-semibold hidden sm:table-cell" style={{ color: 'var(--crm-primary)' }}>מסלול</th>
+                <th className="text-right px-3 py-3 font-semibold" style={{ color: 'var(--crm-primary)' }}>סטטוס</th>
+                <th className="px-3 py-3 w-20"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((item, i) => (
+                <tr key={item.id} className="border-b border-crm-border hover:bg-crm-surface-soft transition-colors"
+                  style={i % 2 !== 0 ? { background: 'var(--crm-surface-soft)' } : {}}>
+                  <td className="px-4 py-3 font-medium" style={{ color: 'var(--crm-text)' }}>{item.title}</td>
+                  <td className="px-3 py-3 hidden md:table-cell">
+                    <span className="font-mono text-xs px-1.5 py-0.5 rounded border" style={{ background: 'var(--crm-surface)', color: 'var(--crm-text-muted)', borderColor: 'var(--crm-border)' }}>{item.key}</span>
+                  </td>
+                  <td className="px-3 py-3"><CategoryBadge category={item.category} /></td>
+                  <td className="px-3 py-3 hidden sm:table-cell"><FlowBadge flow={item.flow} /></td>
+                  <td className="px-3 py-3"><ActivePill active={item.is_active} onClick={() => toggleActive(item.id)} /></td>
+                  <td className="px-3 py-3">
+                    <RowActions item={item} onEdit={openEdit} deleteConfirm={deleteConfirm} setDeleteConfirm={setDeleteConfirm} onDelete={handleDelete} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }}>
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" dir="rtl">
             {/* Modal header */}
-            <div className="flex items-center justify-between p-6 pb-4 border-b border-gray-100">
+            <div className="flex items-center justify-between p-6 pb-4 border-b border-crm-border">
               <h3 className="text-lg font-bold" style={{ color: 'var(--crm-primary)' }}>
                 {editItem ? 'עריכת הודעה' : 'הודעה חדשה'}
               </h3>
@@ -267,18 +271,18 @@ export function BotContentManager() {
                     value={form.key}
                     onChange={e => setForm(f => ({ ...f, key: e.target.value.replace(/\s/g, '_').toLowerCase() }))}
                     placeholder="greeting"
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none"
+                    className="w-full border border-crm-border rounded-xl px-3 py-2 text-sm font-mono focus:outline-none"
                     onFocus={e => (e.target.style.borderColor = 'var(--crm-primary)')}
-                    onBlur={e => (e.target.style.borderColor = '#e5e7eb')}
+                    onBlur={e => (e.target.style.borderColor = 'var(--crm-border)')}
                     dir="ltr"
                   />
                 </div>
                 <div>
                   <label className="text-xs font-semibold mb-1 block" style={{ color: 'var(--crm-text)' }}>קטגוריה</label>
                   <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value as BotContentCategory }))}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none bg-white"
+                    className="w-full border border-crm-border rounded-xl px-3 py-2 text-sm focus:outline-none bg-white"
                     onFocus={e => (e.target.style.borderColor = 'var(--crm-primary)')}
-                    onBlur={e => (e.target.style.borderColor = '#e5e7eb')}>
+                    onBlur={e => (e.target.style.borderColor = 'var(--crm-border)')}>
                     {CATEGORIES.filter(c => c.value !== 'all').map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </select>
                 </div>
@@ -289,9 +293,9 @@ export function BotContentManager() {
                 <div>
                   <label className="text-xs font-semibold mb-1 block" style={{ color: 'var(--crm-text)' }}>מסלול</label>
                   <select value={form.flow} onChange={e => setForm(f => ({ ...f, flow: e.target.value as BotContentFlow }))}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none bg-white"
+                    className="w-full border border-crm-border rounded-xl px-3 py-2 text-sm focus:outline-none bg-white"
                     onFocus={e => (e.target.style.borderColor = 'var(--crm-primary)')}
-                    onBlur={e => (e.target.style.borderColor = '#e5e7eb')}>
+                    onBlur={e => (e.target.style.borderColor = 'var(--crm-border)')}>
                     {FLOWS.filter(f => f.value !== 'all').map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
                   </select>
                 </div>
@@ -301,9 +305,9 @@ export function BotContentManager() {
                     value={form.step_label}
                     onChange={e => setForm(f => ({ ...f, step_label: e.target.value }))}
                     placeholder="שלב 1 — ברכה"
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none"
+                    className="w-full border border-crm-border rounded-xl px-3 py-2 text-sm focus:outline-none"
                     onFocus={e => (e.target.style.borderColor = 'var(--crm-primary)')}
-                    onBlur={e => (e.target.style.borderColor = '#e5e7eb')}
+                    onBlur={e => (e.target.style.borderColor = 'var(--crm-border)')}
                   />
                 </div>
               </div>
@@ -315,9 +319,9 @@ export function BotContentManager() {
                   value={form.title}
                   onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
                   placeholder="שם תצוגה של ההודעה"
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none"
+                  className="w-full border border-crm-border rounded-xl px-3 py-2 text-sm focus:outline-none"
                   onFocus={e => (e.target.style.borderColor = 'var(--crm-primary)')}
-                  onBlur={e => (e.target.style.borderColor = '#e5e7eb')}
+                  onBlur={e => (e.target.style.borderColor = 'var(--crm-border)')}
                 />
               </div>
 
@@ -342,9 +346,9 @@ export function BotContentManager() {
                   onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
                   rows={5}
                   placeholder="כתוב את תוכן ההודעה. השתמש בלחצנים למעלה להוספת משתני תצוגה."
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none resize-none"
+                  className="w-full border border-crm-border rounded-xl px-3 py-2 text-sm focus:outline-none resize-none"
                   onFocus={e => (e.target.style.borderColor = 'var(--crm-primary)')}
-                  onBlur={e => (e.target.style.borderColor = '#e5e7eb')}
+                  onBlur={e => (e.target.style.borderColor = 'var(--crm-border)')}
                 />
               </div>
 
@@ -389,43 +393,95 @@ export function BotContentManager() {
   )
 }
 
-// ─── Badge helpers ────────────────────────────────────────────────────────────
+// ─── סטטוס פעיל/כבוי — קונטור בלבד ─────────────────────────────────────────
+function ActivePill({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border font-medium transition-colors hover:bg-crm-surface-soft flex-shrink-0"
+      style={active
+        ? { borderColor: 'var(--crm-primary)', color: 'var(--crm-primary)' }
+        : { borderColor: 'var(--crm-border)', color: 'var(--crm-text-muted)' }}
+    >
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: active ? 'var(--crm-primary)' : 'var(--crm-text-muted)' }} />
+      {active ? 'פעיל' : 'כבוי'}
+    </button>
+  )
+}
 
-const CAT_COLORS: Record<BotContentCategory, { bg: string; color: string }> = {
-  general:      { bg: '#f5f5f4', color: '#78716c' },
-  registration: { bg: '#dcfce7', color: '#15803d' },
-  cancellation: { bg: '#f5dde5', color: '#7d2d4a' },
-  payment:      { bg: '#fce9e6', color: '#a05a4f' },
-  schedule:     { bg: '#fef3c7', color: '#b45309' },
-  camp:         { bg: '#ede8f5', color: '#5a3d7a' },
+// ─── פעולות שורה (עריכה/מחיקה) — אייקוני רפאים ──────────────────────────────
+function RowActions({ item, onEdit, deleteConfirm, setDeleteConfirm, onDelete }: {
+  item: BotContent
+  onEdit: (i: BotContent) => void
+  deleteConfirm: string | null
+  setDeleteConfirm: (id: string | null) => void
+  onDelete: (id: string) => void
+}) {
+  return (
+    <div className="flex items-center gap-1 flex-shrink-0">
+      <button onClick={() => onEdit(item)}
+        className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-crm-surface-soft"
+        style={{ color: 'var(--crm-text-muted)' }} title="עריכה">
+        <Pencil size={14} />
+      </button>
+      {deleteConfirm === item.id ? (
+        <div className="flex items-center gap-1">
+          <button onClick={() => onDelete(item.id)} className="w-7 h-7 rounded-full flex items-center justify-center border" style={{ background: 'var(--crm-danger-bg)', color: 'var(--crm-danger)', borderColor: 'var(--crm-danger)' }} title="אישור מחיקה">
+            <Check size={13} />
+          </button>
+          <button onClick={() => setDeleteConfirm(null)} className="w-7 h-7 rounded-full flex items-center justify-center border" style={{ borderColor: 'var(--crm-border)', color: 'var(--crm-text-muted)' }} title="ביטול">
+            <X size={13} />
+          </button>
+        </div>
+      ) : (
+        <button onClick={() => setDeleteConfirm(item.id)}
+          className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-crm-surface-soft"
+          style={{ color: 'var(--crm-text-muted)' }} title="מחיקה">
+          <Trash2 size={14} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ─── Badge helpers ────────────────────────────────────────────────────────────
+// קונטור רך: צ'יפ ניטרלי עם מסגרת + נקודת-צבע קטנה בלבד (מינימום צביעה).
+
+const Chip = ({ label, dot }: { label: string; dot: string }) => (
+  <span
+    className="inline-flex items-center gap-1.5 text-xs px-2.5 py-0.5 rounded-full border"
+    style={{ background: 'var(--crm-surface)', borderColor: 'var(--crm-border)', color: 'var(--crm-text-muted)' }}
+  >
+    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: dot }} />
+    {label}
+  </span>
+)
+
+const CAT_META: Record<BotContentCategory, { label: string; dot: string }> = {
+  general:      { label: 'כללי',   dot: '#9A7B6B' },
+  registration: { label: 'רישום',  dot: '#6D436D' },
+  cancellation: { label: 'ביטול',  dot: '#B0455E' },
+  payment:      { label: 'תשלום',  dot: '#D29486' },
+  schedule:     { label: 'לו"ז',   dot: '#C98A2B' },
+  camp:         { label: 'קייטנה', dot: '#9B4A38' },
 }
 
 function CategoryBadge({ category }: { category: BotContentCategory }) {
-  const labels: Record<BotContentCategory, string> = {
-    general: 'כללי', registration: 'רישום', cancellation: 'ביטול', payment: 'תשלום', schedule: 'לו"ז', camp: 'קייטנה',
-  }
-  const { bg, color } = CAT_COLORS[category]
-  return (
-    <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: bg, color }}>{labels[category]}</span>
-  )
+  const m = CAT_META[category] ?? { label: category, dot: '#9A7B6B' }
+  return <Chip label={m.label} dot={m.dot} />
 }
 
-const FLOW_COLORS: Record<BotContentFlow, { bg: string; color: string }> = {
-  general:       { bg: '#f5f5f4',  color: '#78716c' },
-  'צהרון':       { bg: '#6D436D',  color: '#ffffff' },
-  'קייטנה':      { bg: '#2A6B6B',  color: '#ffffff' },
-  'ביטול':       { bg: '#f5dde5',  color: '#7d2d4a' },
-  'תשלום':       { bg: '#fce9e6',  color: '#a05a4f' },
-  'לוז':         { bg: '#fef3c7',  color: '#b45309' },
-  'איסוף_מוקדם': { bg: '#fef9c3', color: '#854d0e' },
+const FLOW_META: Record<BotContentFlow, { label: string; dot: string }> = {
+  general:       { label: 'כללי',        dot: '#9A7B6B' },
+  'צהרון':       { label: 'צהרון',       dot: '#6D436D' },
+  'קייטנה':      { label: 'קייטנה',      dot: '#D29486' },
+  'ביטול':       { label: 'ביטול',       dot: '#B0455E' },
+  'תשלום':       { label: 'תשלום',       dot: '#9B4A38' },
+  'לוז':         { label: 'לו"ז',        dot: '#C98A2B' },
+  'איסוף_מוקדם': { label: 'איסוף מוקדם', dot: '#6D436D' },
 }
 
 function FlowBadge({ flow }: { flow: BotContentFlow }) {
-  const labels: Record<BotContentFlow, string> = {
-    general: 'כללי', 'צהרון': 'צהרון', 'קייטנה': 'קייטנה', 'ביטול': 'ביטול', 'תשלום': 'תשלום', 'לוז': 'לו"ז', 'איסוף_מוקדם': 'איסוף מוקדם',
-  }
-  const { bg, color } = FLOW_COLORS[flow] ?? { bg: '#f5f5f4', color: '#78716c' }
-  return (
-    <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: bg, color }}>{labels[flow]}</span>
-  )
+  const m = FLOW_META[flow] ?? { label: flow, dot: '#9A7B6B' }
+  return <Chip label={m.label} dot={m.dot} />
 }

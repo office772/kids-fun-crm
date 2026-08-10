@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
+import { normIntl, phoneVariants } from '@/lib/phone'
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,6 +17,7 @@ export async function POST(req: NextRequest) {
       // פרטי ילד
       childName,
       childClass,
+      childSchool,        // בית-ספר / גן — קובע את המחיר
       childBirthDate,
       childAllergies,
       childMedicalNotes,
@@ -31,7 +33,7 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = createServiceClient()
-    const cleanPhone = parentPhone.replace(/\D/g, '').replace(/^0/, '972')
+    const cleanPhone = normIntl(parentPhone)
 
     // ─── בדיקת קיבולת לפני רישום ────────────────────────────────────────────
     const { data: branch } = await supabase
@@ -53,14 +55,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // קיבולת לפי מסגרת (opt-in — רק אם הוגדר max_capacity לגן/בי"ס)
+    const { isSchoolFull } = await import('@/lib/school-capacity')
+    if (await isSchoolFull(supabase, childSchool)) {
+      return NextResponse.json({ error: 'אין מקום פנוי במסגרת', waitingList: true }, { status: 409 })
+    }
+
     // ─── צור / עדכן הורה ────────────────────────────────────────────────────
     let parentId: string
 
-    const { data: existingParent } = await supabase
+    // חיפוש לפי כל וריאנטי הטלפון (+972/972/0…) — כדי לא לכפול הורה שכבר נוצר ע"י הבוט
+    const { data: parentMatches } = await supabase
       .from('parents')
       .select('id')
-      .eq('phone', cleanPhone)
-      .maybeSingle()
+      .in('phone', phoneVariants(parentPhone))
+      .limit(1)
+    const existingParent = parentMatches?.[0]
 
     if (existingParent) {
       parentId = existingParent.id
@@ -97,6 +107,7 @@ export async function POST(req: NextRequest) {
         parent_id:     parentId,
         name:          childName,
         class_name:    childClass || null,
+        school:        childSchool || null,
         birth_date:    childBirthDate || null,
         framework:     'צהרון',
         area_code:     areaCode,

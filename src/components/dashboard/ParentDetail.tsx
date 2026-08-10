@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { X, Phone, Mail, User, Clock, MessageCircle, CreditCard, FileText, Edit3, Check, ChevronDown } from 'lucide-react'
 import { Parent, Task, Conversation, RegistrationTimeline, Registration } from '@/lib/types'
 import { StatusBadge } from './StatusBadge'
+import { ChildrenSection } from './ChildrenSection'
 import { getPaymentHealthInfo, getParentPaymentHealthInfo, getSourceLabel } from '@/lib/payment-status'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -474,6 +475,9 @@ export function ParentDetail({ parentId, onClose, onRefresh }: ParentDetailProps
           {/* ── Overview Tab ── */}
           {activeTab === 'overview' && (
             <div className="space-y-4">
+
+              {/* Children — רשימת ילדים + הוספת ילד/ה נוסף/ת */}
+              <ChildrenSection parent={parent} onRefresh={onRefresh} />
 
               {/* Alerts */}
               {hasFailedPayment && (

@@ -53,14 +53,50 @@ export async function findFaqAnswer(userMessage: string): Promise<string | null>
       if (!best || score > best.score) best = { row: faq, score, matched }
     }
 
-    // סף: 2+ מילים תואמות, או מילה אחת ארוכה מאוד (5+ אותיות)
-    if (best && (best.matched.length >= 2 || best.matched.some(w => w.length >= 5))) {
-      console.log(`[FAQ search] match (score=${best.score}, matched=${best.matched.join(',')}) → ${best.row.question}`)
-      return best.row.answer
+    // ── סף מחמיר — למנוע תשובות FAQ לא-רלוונטיות (משוב קורלי 2026-07) ──────────
+    // הבעיה הקודמת: 2 מילים קצרות משותפות החזירו תשובה שמורה לא-קשורה כמעט לכל
+    // הודעה. עכשיו דורשים התאמה *ספֶּציפית*: מילות-תוכן ארוכות, לא מילים תפלות.
+    if (best) {
+      const strong = best.matched.filter(w => w.length >= 4)          // מילות תוכן
+      const verySpecific = best.matched.some(w => w.length >= 6)      // מילה ייחודית מאוד
+      const confident =
+        verySpecific ||
+        strong.length >= 2 ||
+        (strong.length >= 1 && best.matched.length >= 3)
+      if (confident && best.score >= 3) {
+        console.log(`[FAQ search] match (score=${best.score}, matched=${best.matched.join(',')}) → ${best.row.question}`)
+        return best.row.answer
+      }
     }
     return null
   } catch (err) {
     console.error('[FAQ search] error:', err)
+    return null
+  }
+}
+
+// ─── חיפוש FAQ לפי "עוגן" נושא ─────────────────────────────────────────────
+// מחזיר את תשובת ה-FAQ הראשון הפעיל שהשאלה/מילות-המפתח שלו מכילות אחת
+// ממילות העוגן. משמש לכוונות מוגדרות (כמו שאלת_לו"ז) כדי שגם ניסוח קצר
+// כמו "שעות" / "חגים" / הספרה "4" יחזיר תמיד את ה-FAQ הנכון — ללא תלות
+// בסף ההתאמה המעורפל של findFaqAnswer.
+export async function findFaqByTopic(anchors: string[]): Promise<string | null> {
+  try {
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const supabase = createServiceClient()
+    const { data: faqs } = await supabase
+      .from('faqs').select('question, answer, keywords').eq('is_active', true)
+
+    if (!faqs?.length) return null
+
+    const needles = anchors.map(a => a.toLowerCase())
+    for (const faq of (faqs as FAQRow[])) {
+      const hay = [faq.question, faq.keywords ?? ''].join(' ').toLowerCase()
+      if (needles.some(n => hay.includes(n))) return faq.answer
+    }
+    return null
+  } catch (err) {
+    console.error('[FAQ topic] error:', err)
     return null
   }
 }

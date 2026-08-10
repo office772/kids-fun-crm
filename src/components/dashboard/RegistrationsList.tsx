@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { ChevronDown, Check, RefreshCw, Send, Copy, CheckCheck, Trash2, Search } from 'lucide-react'
+import { ChevronDown, Check, RefreshCw, Send, Copy, CheckCheck, Trash2, Search, ClipboardList, Clock, Hourglass, CheckCircle2 } from 'lucide-react'
 import { Registration } from '@/lib/types'
+import { StatCard } from '@/components/dashboard/StatCard'
 
 // ─── מיפוי area_code → label ──────────────────────────────────────────────────
 const AREA_LABELS: Record<string, string> = {
@@ -349,62 +350,59 @@ export function RegistrationsList({ onOpenParent }: { onOpenParent?: (parentId: 
   return (
     <div className="space-y-5" dir="rtl">
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: 'סה״כ רישומים',  value: registrations.length,                                    color: '#6D436D', bg: '#F0EBF3' },
-          { label: 'ממתינים לאישור', value: pendingCount,                                            color: '#7B6010', bg: '#FEF9C3' },
-          { label: 'רשימת המתנה',   value: waitingCount,                                             color: '#9B4A38', bg: '#FAF0ED' },
-          { label: 'מאושרים',       value: registrations.filter(r => r.status === 'מאושר').length,   color: '#297058', bg: '#E6F4EF' },
-        ].map(card => (
-          <div key={card.label} className="rounded-2xl p-4 text-center" style={{ background: card.bg }}>
-            <p className="text-3xl font-bold" style={{ color: card.color }}>{card.value}</p>
-            <p className="text-xs font-medium mt-1" style={{ color: card.color, opacity: 0.8 }}>{card.label}</p>
-          </div>
-        ))}
+      {/* Summary cards — אחיד עם הדשבורד */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard icon={<ClipboardList size={22} />} label="סה״כ רישומים" value={registrations.length} accent="primary" onClick={() => setStatusFilter('הכל')} />
+        <StatCard icon={<Clock size={22} />} label="ממתינים לאישור" value={pendingCount} accent="action" onClick={() => setStatusFilter('ממתין לאישור')} />
+        <StatCard icon={<Hourglass size={22} />} label="רשימת המתנה" value={waitingCount} accent="accent" onClick={() => setStatusFilter('רשימת המתנה')} />
+        <StatCard icon={<CheckCircle2 size={22} />} label="מאושרים" value={registrations.filter(r => r.status === 'מאושר').length} accent="success" onClick={() => setStatusFilter('מאושר')} />
       </div>
 
-      {/* Filters + search */}
+      {/* Filters + search — דרופדאונים נקיים */}
       <div className="flex flex-wrap items-center gap-2">
-        {/* Status filters */}
-        <div className="flex gap-1.5 flex-wrap">
+        {/* Status filter */}
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          className="rounded-full border bg-crm-surface px-4 py-2 text-sm cursor-pointer focus:outline-none transition-colors"
+          style={statusFilter !== 'הכל'
+            ? { borderColor: 'var(--crm-primary)', color: 'var(--crm-primary)', fontWeight: 600 }
+            : { borderColor: 'var(--crm-border)', color: 'var(--crm-text)' }}
+        >
           {['הכל', ...STATUS_ORDER].map(s => (
-            <button key={s} onClick={() => setStatusFilter(s)}
-              className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
-              style={statusFilter === s
-                ? { background: '#6D436D', color: '#fff' }
-                : { background: '#f5f5f4', color: '#78716c', border: '1px solid #e5e7eb' }}>
-              {s}
-              {counts[s] !== undefined && counts[s] > 0 && <span className="mr-1 opacity-70">({counts[s]})</span>}
-            </button>
+            <option key={s} value={s}>
+              {s === 'הכל' ? `כל הסטטוסים${counts['הכל'] ? ` (${counts['הכל']})` : ''}` : `${s}${counts[s] ? ` (${counts[s]})` : ''}`}
+            </option>
           ))}
-        </div>
+        </select>
 
-        <div className="h-5 w-px bg-gray-200 mx-1" />
-
-        {/* Type filters */}
-        {['הכל', 'צהרון', 'קייטנה'].map(t => (
-          <button key={t} onClick={() => setTypeFilter(t)}
-            className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
-            style={typeFilter === t
-              ? { background: '#2A6B6B', color: '#fff' }
-              : { background: '#f5f5f4', color: '#78716c', border: '1px solid #e5e7eb' }}>
-            {t === 'צהרון' ? '🎒 ' : t === 'קייטנה' ? '🏕️ ' : ''}{t}
-          </button>
-        ))}
+        {/* Type filter */}
+        <select
+          value={typeFilter}
+          onChange={e => setTypeFilter(e.target.value)}
+          className="rounded-full border bg-crm-surface px-4 py-2 text-sm cursor-pointer focus:outline-none transition-colors"
+          style={typeFilter !== 'הכל'
+            ? { borderColor: 'var(--crm-primary)', color: 'var(--crm-primary)', fontWeight: 600 }
+            : { borderColor: 'var(--crm-border)', color: 'var(--crm-text)' }}
+        >
+          <option value="הכל">כל הסוגים</option>
+          <option value="צהרון">צהרון</option>
+          <option value="קייטנה">קייטנה</option>
+        </select>
 
         {/* Search */}
-        <div className="relative">
-          <Search size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2" style={{ color: '#a8a29e' }} />
+        <div className="relative flex-1 min-w-[160px] max-w-xs">
+          <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--crm-text-muted)' }} />
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="חיפוש הורה / ילד..."
-            className="pr-8 pl-3 py-1.5 text-xs border border-gray-200 rounded-full focus:outline-none bg-white text-right w-44"
+            className="w-full pr-9 pl-3 py-2 text-sm border rounded-full focus:outline-none bg-crm-surface text-right"
+            style={{ borderColor: 'var(--crm-border)' }}
           />
         </div>
 
-        <button onClick={load} className="p-1.5 rounded-full hover:bg-gray-100 transition-colors mr-auto"
-          style={{ color: '#a8a29e' }} title="רענן">
-          <RefreshCw size={14} />
+        <button onClick={load} className="p-2 rounded-full hover:bg-crm-surface-soft transition-colors mr-auto"
+          style={{ color: 'var(--crm-text-muted)' }} title="רענן">
+          <RefreshCw size={16} />
         </button>
       </div>
 

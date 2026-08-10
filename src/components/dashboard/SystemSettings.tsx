@@ -30,9 +30,9 @@ const DEMO_SETTINGS: SystemSetting[] = [
 
   // whatsapp
   {
-    id: '5', category: 'whatsapp', key: 'manychat_webhook_secret', label: 'ManyChat Webhook Secret',
+    id: '5', category: 'whatsapp', key: 'manychat_webhook_secret', label: 'uChat Webhook Secret',
     value: 'your-secret-here', value_type: 'text',
-    description: 'מפתח לאימות הודעות נכנסות מ-ManyChat',
+    description: 'מפתח לאימות הודעות נכנסות מ-uChat',
   },
   {
     id: '6', category: 'whatsapp', key: 'whatsapp_number', label: 'מספר WhatsApp עסקי',

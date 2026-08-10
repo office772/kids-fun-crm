@@ -13,7 +13,8 @@ export const dynamic = 'force-dynamic'
 // לייבוא היסטורי משתמשים בכלי הדפדפן → POST /api/sync/payplus-recurring.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { isAuthorizedWebhook, unauthorized } from '@/lib/api-auth'
 
 const PAYPLUS_BASE = process.env.PAYPLUS_SANDBOX === 'true'
   ? 'https://restapidev.payplus.co.il/api/v1.0'
@@ -26,7 +27,8 @@ function normalizePhone(raw: string): string {
   return p
 }
 
-export async function POST() {
+export async function POST(req: NextRequest) {
+  if (!isAuthorizedWebhook(req, 'INTERNAL_SYNC_SECRET')) return unauthorized()
   const apiKey    = process.env.PAYPLUS_API_KEY
   const secretKey = process.env.PAYPLUS_SECRET_KEY
 

@@ -7,7 +7,7 @@
 ## Stack
 - **Frontend + Backend**: Next.js 14 (App Router)
 - **DB**: Supabase (PostgreSQL) — פרויקט `neuknudswaqtnhfraibl`
-- **WhatsApp**: ManyChat/uchat → webhook
+- **WhatsApp**: uChat → webhook (תיקיית ה-route בשם `manychat` מטעמי URL היסטורי)
 - **LLM Fallback**: Claude Haiku (Anthropic API)
 - **Hosting**: Vercel (בפיתוח — localhost)
 
@@ -35,7 +35,7 @@ npm run dev
 | `src/lib/bot/handler.ts` | ניתוב FP → LLM |
 | `src/lib/bot/intent-classifier.ts` | זיהוי כוונה מהודעה |
 | `src/lib/bot/llm-fallback.ts` | Claude API fallback |
-| `src/app/api/webhooks/manychat/route.ts` | webhook ראשי מ-ManyChat |
+| `src/app/api/webhooks/manychat/route.ts` | webhook ראשי מ-uChat (שם התיקייה manychat — היסטורי) |
 | `src/app/api/bot/simulate/route.ts` | סימולטור דשבורד |
 | `src/app/dashboard/page.tsx` | דשבורד CRM מלא |
 | `src/lib/types.ts` | כל הטיפוסים |
@@ -74,7 +74,7 @@ npm run dev
 - [ ] Auth לדשבורד (כרגע פתוח לכולם)
 - [ ] PayPlus / חשבונית ירוקה — webhook לכשלי תשלום
 - [ ] בדיקת תשלום אמיתית מ-Supabase (כרגע מציג אפשרויות בלבד)
-- [ ] חיבור ManyChat אמיתי (webhook מוכן, ממתין לחיבור)
+- [x] חיבור uChat אמיתי (מחובר; webhook `manychat` + whitelist מספרי בדיקה)
 
 ## .env.local — מה צריך
 ```

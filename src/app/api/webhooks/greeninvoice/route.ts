@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic'
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from 'next/server'
+import { isAuthorizedWebhook, unauthorized } from '@/lib/api-auth'
 
 function normalizePhone(raw: string): string {
   let p = raw.replace(/[\s\-\.\(\)\+]/g, '')
@@ -14,6 +15,7 @@ function normalizePhone(raw: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  if (!isAuthorizedWebhook(req, 'GREENINVOICE_WEBHOOK_SECRET')) return unauthorized()
   try {
     const body = await req.json()
     console.log('[GI Webhook]', JSON.stringify(body, null, 2))

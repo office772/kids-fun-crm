@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Users, ClipboardList, AlertCircle, MessageSquare } from 'lucide-react'
+import { Users, ClipboardList, AlertCircle, MessageSquare, ChevronDown, CheckCircle2, Clock, UserPlus, Filter, Check, Trash2 } from 'lucide-react'
 import { Parent, Task, SyncSource } from '@/lib/types'
 import { Navigation } from '@/components/dashboard/Navigation'
 import { ParentsList } from '@/components/dashboard/ParentsList'
@@ -9,16 +9,21 @@ import { TaskList } from '@/components/dashboard/TaskList'
 import { StatusBadge } from '@/components/dashboard/StatusBadge'
 import { AddParentModal } from '@/components/dashboard/AddParentModal'
 import { BotContentManager } from '@/components/dashboard/BotContentManager'
+import { BotFlowKanban } from '@/components/dashboard/BotFlowKanban'
 import { BotFAQManager } from '@/components/dashboard/BotFAQManager'
 import { BotAssets } from '@/components/dashboard/BotAssets'
 import { SystemSettings } from '@/components/dashboard/SystemSettings'
 import { RegistrationsList } from '@/components/dashboard/RegistrationsList'
+import { AttendanceList } from '@/components/dashboard/AttendanceList'
 import { ParentDetail } from '@/components/dashboard/ParentDetail'
 import { GlobalSearch } from '@/components/dashboard/GlobalSearch'
 import { SuppliersList } from '@/components/dashboard/SuppliersList'
 import { ArchiveList } from '@/components/dashboard/ArchiveList'
+import { ExportButton } from '@/components/dashboard/ExportButton'
+import { StatCard } from '@/components/dashboard/StatCard'
+import { Tutorial } from '@/components/dashboard/Tutorial'
 
-type ActiveTab = 'overview' | 'parents' | 'tasks' | 'registrations' | 'simulator' | 'bot' | 'assets' | 'suppliers' | 'archive'
+type ActiveTab = 'overview' | 'parents' | 'tasks' | 'registrations' | 'attendance' | 'bot' | 'assets' | 'suppliers' | 'archive'
 
 export default function DashboardPage() {
   const [parents, setParents] = useState<Parent[]>([])
@@ -38,6 +43,20 @@ export default function DashboardPage() {
   const [showMissingChild, setShowMissingChild] = useState(false)
   const [detailParentId, setDetailParentId] = useState<string | null>(null)
   const [showGlobalSearch, setShowGlobalSearch] = useState(false)
+  const [alertsOpen, setAlertsOpen] = useState(false)
+  const [showRecentTasks, setShowRecentTasks] = useState(true)     // אקורדיון "פניות אחרונות" בסקירה
+  const [showRecentParents, setShowRecentParents] = useState(true) // אקורדיון "הורים אחרונים" בסקירה
+  const [taskFilter, setTaskFilter] = useState<string>('הכל')   // סינון לשונית פניות (נשלט גם מכרטיסי הסטטיסטיקה)
+
+  // מעבר ללשונית הורים עם סינון נקי (מאפס את כל הסינונים האחרים כדי שלא יצטברו)
+  const showParents = (opts: { status?: string; missingChild?: boolean } = {}) => {
+    setStatusFilter(opts.status ?? 'הכל')
+    setFrameworkFilter('הכל')
+    setAreaFilter('הכל')
+    setSourceFilter('הכל')
+    setShowMissingChild(opts.missingChild ?? false)
+    setActiveTab('parents')
+  }
 
   const fetchData = useCallback(async () => {
     try {
@@ -118,6 +137,22 @@ export default function DashboardPage() {
   const handleBulkDeleteTasks = async (ids: string[]) => {
     await fetch('/api/tasks', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) })
     setTasks(prev => prev.filter(t => !ids.includes(t.id)))
+  }
+
+  // התראות כשל תשלום: סימון כטופל (סטטוס → בוטל) או מחיקה (ג'אנק בדיקות)
+  const failedPaymentId = (parentId: string) =>
+    parents.find(p => p.id === parentId)?.payments?.find(pay => pay.status === 'נכשל')?.id
+  const handleResolveFailedPayment = async (parentId: string) => {
+    const payId = failedPaymentId(parentId)
+    if (!payId) return
+    await fetch('/api/payments', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: payId, status: 'בוטל' }) })
+    await fetchData()
+  }
+  const handleDeleteFailedPayment = async (parentId: string) => {
+    const payId = failedPaymentId(parentId)
+    if (!payId) return
+    await fetch('/api/payments', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: payId }) })
+    await fetchData()
   }
 
   const handleTaskStatusChange = async (id: string, status: string) => {
@@ -225,7 +260,7 @@ export default function DashboardPage() {
 
   return (
     <div
-      className="min-h-screen"
+      className="min-h-screen overflow-x-hidden"
       style={{ background: 'var(--crm-bg)', color: 'var(--crm-text)' }}
       dir="rtl"
     >
@@ -239,10 +274,10 @@ export default function DashboardPage() {
         {activeTab === 'overview' && (
           <div className="space-y-8">
             {/* Page header */}
-            <div className="flex items-end justify-between">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h1
-                  className="text-5xl font-bold leading-none mb-1"
+                  className="text-3xl md:text-5xl font-bold leading-tight mb-1"
                   style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
                 >
                   סקירה כללית
@@ -253,97 +288,154 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Urgent alerts */}
+            {/* Urgent alerts — accordion (collapsed by default to keep the overview calm) */}
             {(failedPayments.length > 0 || urgentTasks.length > 0) && (
-              <div className="rounded-2xl p-4 shadow-sm border-r-4" style={{ background: '#FAF5EE', borderColor: '#9d3d5e' }}>
-                <h2 className="font-bold text-base mb-3" style={{ color: '#7d2d4a' }}>⚠️ התראות דחופות</h2>
-                <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-crm overflow-hidden border-r-4" style={{ background: 'var(--crm-danger-bg)', borderColor: 'var(--crm-danger)' }}>
+                <button
+                  onClick={() => setAlertsOpen(o => !o)}
+                  className="w-full flex items-center justify-between px-4 py-3 text-right"
+                  aria-expanded={alertsOpen}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="font-bold text-base" style={{ color: 'var(--crm-danger)' }}>⚠️ התראות דחופות</span>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: 'var(--crm-danger)', color: '#fff' }}>
+                      {failedPayments.length + urgentTasks.filter(t => !failedPayments.find(p => p.id === t.parent_id)).length}
+                    </span>
+                  </span>
+                  <ChevronDown size={20} style={{ color: 'var(--crm-danger)', transform: alertsOpen ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+                </button>
+                {alertsOpen && (
+                <div className="grid gap-3 md:grid-cols-2 px-4 pb-4">
                   {failedPayments.map(parent => (
-                    <button
+                    <div
                       key={parent.id}
-                      className="bg-white rounded-xl p-3 flex items-center justify-between shadow-sm border w-full text-right hover:shadow-md transition-shadow"
+                      className="bg-white rounded-xl p-3 flex items-center justify-between gap-2 shadow-sm border"
                       style={{ borderColor: '#e8c4d0' }}
-                      onClick={() => setDetailParentId(parent.id)}
                     >
-                      <div>
-                        <p className="font-semibold" style={{ color: 'var(--crm-text)' }}>
+                      <button
+                        onClick={() => setDetailParentId(parent.id)}
+                        className="flex-1 min-w-0 text-right hover:opacity-80 transition-opacity"
+                        title="פתח כרטיס הורה"
+                      >
+                        <p className="font-semibold truncate" style={{ color: 'var(--crm-text)' }}>
                           {parent.name || parent.phone}
                         </p>
-                        <p className="text-sm" style={{ color: '#9d3d5e' }}>💳 כשל בתשלום — לחץ לפרטים</p>
+                        <p className="text-sm truncate" style={{ color: '#9d3d5e' }}>💳 כשל בתשלום — לחץ לפרטים</p>
+                      </button>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button onClick={() => handleResolveFailedPayment(parent.id)} title="סמן כטופל"
+                          className="w-7 h-7 rounded-full flex items-center justify-center transition-colors hover:bg-crm-surface-soft"
+                          style={{ color: 'var(--crm-success)' }}>
+                          <Check size={16} />
+                        </button>
+                        <button onClick={() => { if (confirm('למחוק התראת כשל תשלום זו? (רשומת התשלום תימחק)')) handleDeleteFailedPayment(parent.id) }} title="מחק התראה"
+                          className="w-7 h-7 rounded-full flex items-center justify-center transition-colors hover:bg-crm-surface-soft"
+                          style={{ color: 'var(--crm-danger)' }}>
+                          <Trash2 size={14} />
+                        </button>
                       </div>
-                      <StatusBadge status="נכשל" size="sm" />
-                    </button>
+                    </div>
                   ))}
                   {urgentTasks
                     .filter(t => !failedPayments.find(p => p.id === t.parent_id))
                     .map(task => (
                       <div
                         key={task.id}
-                        className="bg-white rounded-xl p-3 flex items-center justify-between shadow-sm border"
+                        className="bg-white rounded-xl p-3 flex items-center justify-between gap-2 shadow-sm border"
                         style={{ borderColor: '#e8c4d0' }}
                       >
-                        <div>
-                          <p className="font-semibold" style={{ color: 'var(--crm-text)' }}>
+                        <button
+                          onClick={() => { if (task.parent_id) setDetailParentId(task.parent_id) }}
+                          className="flex-1 min-w-0 text-right hover:opacity-80 transition-opacity"
+                          title={task.parent_id ? 'פתח כרטיס הורה' : undefined}
+                        >
+                          <p className="font-semibold truncate" style={{ color: 'var(--crm-text)' }}>
                             {task.parent?.name || 'פנייה'}
                           </p>
-                          <p className="text-sm" style={{ color: '#a05a4f' }}>
+                          <p className="text-sm truncate" style={{ color: '#a05a4f' }}>
                             ⚠️ {task.description.slice(0, 60)}...
                           </p>
+                        </button>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <button onClick={() => handleTaskStatusChange(task.id, 'טופל')} title="סמן כטופל"
+                            className="w-7 h-7 rounded-full flex items-center justify-center transition-colors hover:bg-crm-surface-soft"
+                            style={{ color: 'var(--crm-success)' }}>
+                            <Check size={16} />
+                          </button>
+                          <button onClick={() => { if (confirm('למחוק התראה זו? (הפנייה תימחק לצמיתות)')) handleDeleteTask(task.id) }} title="מחק התראה"
+                            className="w-7 h-7 rounded-full flex items-center justify-center transition-colors hover:bg-crm-surface-soft"
+                            style={{ color: 'var(--crm-danger)' }}>
+                            <Trash2 size={14} />
+                          </button>
                         </div>
-                        <StatusBadge status="דחוף" size="sm" />
                       </div>
                     ))}
                 </div>
+                )}
               </div>
             )}
 
             {/* Stat cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <StatCard icon={<Users size={22} color="#fff" />} label="הורים במערכת" value={parents.length} accent="primary" />
-              <StatCard icon={<ClipboardList size={22} color="#fff" />} label="פניות פתוחות" value={openTasks.length} accent="accent" />
-              <StatCard icon={<AlertCircle size={22} color="#fff" />} label="כשלי תשלום" value={failedPayments.length} accent="red" />
-              <StatCard icon={<MessageSquare size={22} color="#5E4B35" />} label="שיחות היום" value={todayConversations} accent="action" />
+              <StatCard icon={<Users size={22} color="#fff" />} label="הורים במערכת" value={parents.length} accent="primary" onClick={() => showParents()} />
+              <StatCard icon={<ClipboardList size={22} color="#fff" />} label="פניות פתוחות" value={openTasks.length} accent="accent" onClick={() => { setTaskFilter('פתוח'); setActiveTab('tasks') }} />
+              <StatCard icon={<AlertCircle size={22} color="#fff" />} label="כשלי תשלום" value={failedPayments.length} accent="danger" onClick={() => showParents({ status: 'נכשל' })} />
+              <StatCard icon={<MessageSquare size={22} color="#5E4B35" />} label="שיחות היום" value={todayConversations} accent="action" onClick={() => setActiveTab('tasks')} />
             </div>
 
             {/* Two-column: tasks + parents preview */}
-            <div className="grid md:grid-cols-2 gap-6">
-              <div>
-                <h2
-                  className="text-3xl font-bold mb-4"
-                  style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
-                >
-                  📋 פניות אחרונות
-                </h2>
-                <TaskList tasks={openTasks.slice(0, 5)} onStatusChange={handleTaskStatusChange} />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <h2
-                    className="text-3xl font-bold"
-                    style={{
-                      fontFamily: 'var(--font-rubik), Rubik, sans-serif',
-                      color: 'var(--crm-primary)',
-                    }}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <section className="bg-crm-surface border border-crm-border rounded-crm shadow-crm p-5">
+                <div className="flex items-center justify-between gap-2 mb-4">
+                  <button
+                    onClick={() => setShowRecentTasks(v => !v)}
+                    className="flex items-center gap-2 text-right"
+                    aria-expanded={showRecentTasks}
                   >
-                    👥 הורים אחרונים
-                  </h2>
+                    <ChevronDown size={20} style={{ color: 'var(--crm-text-muted)', transform: showRecentTasks ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+                    <h2 className="text-xl font-bold" style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}>
+                      📋 פניות אחרונות
+                    </h2>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('tasks')}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-full transition-colors hover:bg-crm-surface-soft text-crm-text-muted flex-shrink-0"
+                  >
+                    כל הפניות ←
+                  </button>
+                </div>
+                {showRecentTasks && <TaskList tasks={openTasks.slice(0, 5)} onStatusChange={handleTaskStatusChange} compact />}
+              </section>
+              <section className="bg-crm-surface border border-crm-border rounded-crm shadow-crm p-5">
+                <div className="flex items-center justify-between gap-2 mb-4">
+                  <button
+                    onClick={() => setShowRecentParents(v => !v)}
+                    className="flex items-center gap-2 text-right"
+                    aria-expanded={showRecentParents}
+                  >
+                    <ChevronDown size={20} style={{ color: 'var(--crm-text-muted)', transform: showRecentParents ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+                    <h2 className="text-xl font-bold" style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}>
+                      👥 הורים אחרונים
+                    </h2>
+                  </button>
                   <button
                     onClick={() => setShowAddParent(true)}
-                    className="text-sm font-semibold px-4 py-2 rounded-full transition-colors hover:opacity-90"
+                    className="text-xs font-semibold px-3 py-1.5 rounded-full transition-colors hover:opacity-90 flex-shrink-0"
                     style={{ background: 'var(--crm-action)', color: 'var(--crm-text)' }}
                   >
                     ➕ הוסף
                   </button>
                 </div>
                 {/* List view for the overview sidebar */}
-                <ParentsList
-                  parents={parents.slice(0, 8)}
-                  searchQuery=""
-                  onEdit={setEditingParent}
-                  onDelete={handleDeleteParent}
-                  viewMode="list"
-                />
-              </div>
+                {showRecentParents && (
+                  <ParentsList
+                    parents={parents.slice(0, 8)}
+                    searchQuery=""
+                    viewMode="list"
+                    preview
+                  />
+                )}
+              </section>
             </div>
           </div>
         )}
@@ -352,10 +444,10 @@ export default function DashboardPage() {
         {activeTab === 'parents' && (
           <div className="space-y-6">
             {/* Page header row */}
-            <div className="flex items-end justify-between">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h1
-                  className="text-5xl font-bold leading-none mb-1"
+                  className="text-3xl md:text-5xl font-bold leading-tight mb-1"
                   style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
                 >
                   הורים
@@ -366,74 +458,71 @@ export default function DashboardPage() {
                     : `מציג ${filteredParents.length} מתוך ${parents.length} הורים`}
                 </p>
               </div>
-              <button
-                onClick={() => setShowAddParent(true)}
-                className="font-bold px-5 py-2.5 rounded-full text-sm transition-colors hover:opacity-90 flex items-center gap-2"
-                style={{ background: 'var(--crm-action)', color: 'var(--crm-text)' }}
-              >
-                הורה חדש +
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <ExportButton type="parents" label="ייצוא הורים" />
+                <ExportButton type="payments" label="ייצוא תשלומים" />
+                <button
+                  onClick={() => setShowAddParent(true)}
+                  className="font-bold px-5 py-2.5 rounded-full text-sm transition-colors hover:opacity-90 flex items-center gap-2"
+                  style={{ background: 'var(--crm-action)', color: 'var(--crm-text)' }}
+                >
+                  הורה חדש +
+                </button>
+              </div>
             </div>
 
-            {/* Filters row */}
-            <div className="flex flex-wrap gap-4">
+            {/* Stat cards — אחיד עם הדשבורד */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <StatCard icon={<Users size={22} />} label="סה״כ הורים" value={parents.length} accent="primary" onClick={() => showParents()} />
+              <StatCard icon={<Filter size={22} />} label="מוצגים כעת" value={filteredParents.length} accent="neutral" onClick={() => showParents()} />
+              <StatCard icon={<AlertCircle size={22} />} label="כשלי תשלום" value={failedPayments.length} accent="danger" onClick={() => showParents({ status: 'נכשל' })} />
+              <StatCard icon={<UserPlus size={22} />} label="חסרי פרטי ילד" value={missingChildCount} accent="action" onClick={() => showParents({ missingChild: true })} />
+            </div>
+
+            {/* Filters row — clean dropdowns (פחות עומס מ-pills) */}
+            <div className="flex flex-wrap items-center gap-2">
               {/* Payment status */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold opacity-50 ml-1">תשלום:</span>
-                {statusFilters.map(filter => (
-                  <button
-                    key={filter}
-                    onClick={() => setStatusFilter(filter)}
-                    className="px-3 py-1.5 rounded-full text-xs font-medium transition-all"
-                    style={
-                      statusFilter === filter
-                        ? { background: 'var(--crm-primary)', color: '#fff' }
-                        : { background: '#fff', color: 'var(--crm-text)', opacity: 0.65, border: '1px solid #e5e7eb' }
-                    }
-                  >
-                    {filter}
-                  </button>
+              <select
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+                className="rounded-full border bg-crm-surface px-4 py-2 text-sm cursor-pointer focus:outline-none transition-colors"
+                style={statusFilter !== 'הכל'
+                  ? { borderColor: 'var(--crm-primary)', color: 'var(--crm-primary)', fontWeight: 600 }
+                  : { borderColor: 'var(--crm-border)', color: 'var(--crm-text)' }}
+              >
+                {statusFilters.map(f => (
+                  <option key={f} value={f}>{f === 'הכל' ? 'כל התשלומים' : `תשלום: ${f}`}</option>
                 ))}
-              </div>
+              </select>
 
               {/* Framework filter */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold opacity-50 ml-1">מסגרת:</span>
+              <select
+                value={frameworkFilter}
+                onChange={e => setFrameworkFilter(e.target.value)}
+                className="rounded-full border bg-crm-surface px-4 py-2 text-sm cursor-pointer focus:outline-none transition-colors"
+                style={frameworkFilter !== 'הכל'
+                  ? { borderColor: 'var(--crm-primary)', color: 'var(--crm-primary)', fontWeight: 600 }
+                  : { borderColor: 'var(--crm-border)', color: 'var(--crm-text)' }}
+              >
                 {frameworkFilters.map(f => (
-                  <button
-                    key={f}
-                    onClick={() => setFrameworkFilter(f)}
-                    className="px-3 py-1.5 rounded-full text-xs font-medium transition-all"
-                    style={
-                      frameworkFilter === f
-                        ? { background: 'var(--crm-action)', color: 'var(--crm-text)' }
-                        : { background: '#fff', color: 'var(--crm-text)', opacity: 0.65, border: '1px solid #e5e7eb' }
-                    }
-                  >
-                    {f}
-                  </button>
+                  <option key={f} value={f}>{f === 'הכל' ? 'כל המסגרות' : f}</option>
                 ))}
-              </div>
+              </select>
 
               {/* Area filter (dynamic) */}
               {areaOptions.length > 1 && (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold opacity-50 ml-1">אזור:</span>
+                <select
+                  value={areaFilter}
+                  onChange={e => setAreaFilter(e.target.value)}
+                  className="rounded-full border bg-crm-surface px-4 py-2 text-sm cursor-pointer focus:outline-none transition-colors"
+                  style={areaFilter !== 'הכל'
+                    ? { borderColor: 'var(--crm-primary)', color: 'var(--crm-primary)', fontWeight: 600 }
+                    : { borderColor: 'var(--crm-border)', color: 'var(--crm-text)' }}
+                >
                   {areaOptions.map(a => (
-                    <button
-                      key={a}
-                      onClick={() => setAreaFilter(a)}
-                      className="px-3 py-1.5 rounded-full text-xs font-medium transition-all"
-                      style={
-                        areaFilter === a
-                          ? { background: 'var(--crm-action)', color: 'var(--crm-text)' }
-                          : { background: '#fff', color: 'var(--crm-text)', opacity: 0.65, border: '1px solid #e5e7eb' }
-                      }
-                    >
-                      {a === 'הכל' ? 'הכל' : (areaLabels[a] ?? a)}
-                    </button>
+                    <option key={a} value={a}>{a === 'הכל' ? 'כל האזורים' : (areaLabels[a] ?? a)}</option>
                   ))}
-                </div>
+                </select>
               )}
 
               {/* Missing child name — נראה רק אם יש כאלה */}
@@ -456,23 +545,18 @@ export default function DashboardPage() {
 
               {/* Source filter */}
               {sourceOptions.length > 1 && (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold opacity-50 ml-1">מקור:</span>
+                <select
+                  value={sourceFilter}
+                  onChange={e => setSourceFilter(e.target.value)}
+                  className="rounded-full border bg-crm-surface px-4 py-2 text-sm cursor-pointer focus:outline-none transition-colors"
+                  style={sourceFilter !== 'הכל'
+                    ? { borderColor: 'var(--crm-primary)', color: 'var(--crm-primary)', fontWeight: 600 }
+                    : { borderColor: 'var(--crm-border)', color: 'var(--crm-text)' }}
+                >
                   {sourceOptions.map(s => (
-                    <button
-                      key={s}
-                      onClick={() => setSourceFilter(s)}
-                      className="px-3 py-1.5 rounded-full text-xs font-medium transition-all"
-                      style={
-                        sourceFilter === s
-                          ? { background: 'var(--crm-primary)', color: '#fff' }
-                          : { background: '#fff', color: 'var(--crm-text)', opacity: 0.65, border: '1px solid #e5e7eb' }
-                      }
-                    >
-                      {s === 'הכל' ? 'הכל' : (sourceLabels[s] ?? s)}
-                    </button>
+                    <option key={s} value={s}>{s === 'הכל' ? 'כל המקורות' : (sourceLabels[s] ?? s)}</option>
                   ))}
-                </div>
+                </select>
               )}
 
               {/* Active filter count + clear */}
@@ -494,13 +578,13 @@ export default function DashboardPage() {
                 placeholder="🔍  חיפוש לפי שם הורה, שם ילד, או טלפון..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full border-2 border-gray-200 rounded-full px-5 py-3 text-base focus:outline-none bg-white text-right placeholder:text-gray-400 transition-colors"
+                className="w-full border-2 border-crm-border rounded-full px-5 py-3 text-base focus:outline-none bg-white text-right placeholder:text-crm-text-muted transition-colors"
                 onFocus={e => (e.target.style.borderColor = 'var(--crm-primary)')}
-                onBlur={e => (e.target.style.borderColor = '#e5e7eb')}
+                onBlur={e => (e.target.style.borderColor = 'var(--crm-border)')}
               />
               {searchQuery && (
                 <button onClick={() => setSearchQuery('')}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg">
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-crm-text-muted hover:text-crm-text-muted text-lg">
                   ✕
                 </button>
               )}
@@ -522,10 +606,10 @@ export default function DashboardPage() {
         {/* ── פניות ─────────────────────────────────────────────── */}
         {activeTab === 'tasks' && (
           <div className="space-y-6">
-            <div className="flex items-end justify-between">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h1
-                  className="text-5xl font-bold leading-none mb-1"
+                  className="text-3xl md:text-5xl font-bold leading-tight mb-1"
                   style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
                 >
                   פניות
@@ -534,13 +618,23 @@ export default function DashboardPage() {
                   {openTasks.length} פתוחות · {tasks.filter(t => t.status === 'טופל').length} טופלו
                 </p>
               </div>
+              <ExportButton type="tasks" label="ייצוא פניות" />
             </div>
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            {/* Stat cards — אחיד עם הדשבורד */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <StatCard icon={<ClipboardList size={22} />} label="סה״כ פניות" value={tasks.length} accent="primary" onClick={() => setTaskFilter('הכל')} />
+              <StatCard icon={<AlertCircle size={22} />} label="פתוחות" value={tasks.filter(t => t.status === 'פתוח').length} accent="accent" onClick={() => setTaskFilter('פתוח')} />
+              <StatCard icon={<Clock size={22} />} label="בטיפול" value={tasks.filter(t => t.status === 'בטיפול').length} accent="action" onClick={() => setTaskFilter('בטיפול')} />
+              <StatCard icon={<CheckCircle2 size={22} />} label="טופלו" value={tasks.filter(t => t.status === 'טופל').length} accent="success" onClick={() => setTaskFilter('טופל')} />
+            </div>
+            <div className="bg-crm-surface rounded-crm shadow-crm border border-crm-border p-6">
               <TaskList
                 tasks={tasks}
                 onStatusChange={handleTaskStatusChange}
                 onDelete={handleDeleteTask}
                 onBulkDelete={handleBulkDeleteTasks}
+                filter={taskFilter}
+                onFilterChange={setTaskFilter}
               />
             </div>
           </div>
@@ -549,9 +643,9 @@ export default function DashboardPage() {
         {/* ── ספקים ─────────────────────────────────────────────── */}
         {activeTab === 'suppliers' && (
           <div className="space-y-6">
-            <div className="flex items-end justify-between">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h1 className="text-5xl font-bold leading-none mb-1"
+                <h1 className="text-3xl md:text-5xl font-bold leading-tight mb-1"
                   style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}>
                   ספקים ושותפים
                 </h1>
@@ -574,10 +668,10 @@ export default function DashboardPage() {
         {/* ── רישומים ───────────────────────────────────────────── */}
         {activeTab === 'registrations' && (
           <div className="space-y-6">
-            <div className="flex items-end justify-between">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h1
-                  className="text-5xl font-bold leading-none mb-1"
+                  className="text-3xl md:text-5xl font-bold leading-tight mb-1"
                   style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
                 >
                   רישומים
@@ -586,11 +680,20 @@ export default function DashboardPage() {
                   ניהול רישומים לצהרון ולקייטנה — שינוי סטטוס, אישור והכנסה לתור המתנה
                 </p>
               </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <ExportButton type="registrations" label="ייצוא רישומים" />
+                <ExportButton type="waiting" label="ייצוא רשימת המתנה" />
+              </div>
             </div>
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <div className="bg-white rounded-2xl shadow-sm border border-crm-border p-6">
               <RegistrationsList onOpenParent={id => setDetailParentId(id)} />
             </div>
           </div>
+        )}
+
+        {/* ── נוכחות ────────────────────────────────────────────── */}
+        {activeTab === 'attendance' && (
+          <AttendanceList />
         )}
 
         {/* ── ניהול בוט ─────────────────────────────────────────── */}
@@ -603,7 +706,7 @@ export default function DashboardPage() {
           <div className="space-y-6">
             <div>
               <h1
-                className="text-5xl font-bold leading-none mb-1"
+                className="text-3xl md:text-5xl font-bold leading-tight mb-1"
                 style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
               >
                 קבצים וקישורים
@@ -616,26 +719,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ── סימולטור ──────────────────────────────────────────── */}
-        {activeTab === 'simulator' && (
-          <div className="space-y-6">
-            <div>
-              <h1
-                className="text-5xl font-bold leading-none mb-1"
-                style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
-              >
-                סימולטור בוט
-              </h1>
-              <p className="text-sm" style={{ color: 'var(--crm-text)', opacity: 0.6 }}>
-                בדקי את הבוט לפני חיבור WhatsApp
-              </p>
-            </div>
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-              <BotSimulator />
-            </div>
-            <TesterReset />
-          </div>
-        )}
       </main>
 
       {/* Modals */}
@@ -676,6 +759,9 @@ export default function DashboardPage() {
           }}
         />
       )}
+
+      {/* מדריך אינטראקטיבי — כפתור ? צף + סיור מודרך */}
+      <Tutorial onGoToTab={(t) => setActiveTab(t as ActiveTab)} />
     </div>
   )
 }
@@ -684,15 +770,15 @@ export default function DashboardPage() {
 // BotManagementTab
 // =========================================
 function BotManagementTab() {
-  const [subTab, setSubTab] = useState<'content' | 'faq' | 'settings'>('content')
+  const [subTab, setSubTab] = useState<'kanban' | 'content' | 'faq' | 'settings'>('kanban')
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-end justify-between">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1
-            className="text-5xl font-bold leading-none mb-1"
+            className="text-3xl md:text-5xl font-bold leading-tight mb-1"
             style={{ fontFamily: 'var(--font-rubik), Rubik, sans-serif', color: 'var(--crm-primary)' }}
           >
             ניהול בוט
@@ -704,14 +790,25 @@ function BotManagementTab() {
       </div>
 
       {/* Sub-tabs */}
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap">
+        <button
+          onClick={() => setSubTab('kanban')}
+          className="px-5 py-2 rounded-full text-sm font-semibold transition-all"
+          style={
+            subTab === 'kanban'
+              ? { background: 'var(--crm-primary)', color: '#fff' }
+              : { background: '#fff', color: 'var(--crm-text)', border: '1px solid var(--crm-border)', opacity: 0.7 }
+          }
+        >
+          🗺️ מסלולים (קנבן)
+        </button>
         <button
           onClick={() => setSubTab('content')}
           className="px-5 py-2 rounded-full text-sm font-semibold transition-all"
           style={
             subTab === 'content'
               ? { background: 'var(--crm-primary)', color: '#fff' }
-              : { background: '#fff', color: 'var(--crm-text)', border: '1px solid #e5e7eb', opacity: 0.7 }
+              : { background: '#fff', color: 'var(--crm-text)', border: '1px solid var(--crm-border)', opacity: 0.7 }
           }
         >
           💬 תכני הודעות
@@ -722,7 +819,7 @@ function BotManagementTab() {
           style={
             subTab === 'faq'
               ? { background: 'var(--crm-primary)', color: '#fff' }
-              : { background: '#fff', color: 'var(--crm-text)', border: '1px solid #e5e7eb', opacity: 0.7 }
+              : { background: '#fff', color: 'var(--crm-text)', border: '1px solid var(--crm-border)', opacity: 0.7 }
           }
         >
           ❓ שאלות ותשובות
@@ -733,7 +830,7 @@ function BotManagementTab() {
           style={
             subTab === 'settings'
               ? { background: 'var(--crm-primary)', color: '#fff' }
-              : { background: '#fff', color: 'var(--crm-text)', border: '1px solid #e5e7eb', opacity: 0.7 }
+              : { background: '#fff', color: 'var(--crm-text)', border: '1px solid var(--crm-border)', opacity: 0.7 }
           }
         >
           ⚙️ הגדרות מערכת
@@ -741,7 +838,8 @@ function BotManagementTab() {
       </div>
 
       {/* Content */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <div className="bg-white rounded-2xl shadow-sm border border-crm-border p-6">
+        {subTab === 'kanban' && <BotFlowKanban />}
         {subTab === 'content' && <BotContentManager />}
         {subTab === 'faq' && <BotFAQManager />}
         {subTab === 'settings' && <SystemSettings />}
@@ -750,513 +848,4 @@ function BotManagementTab() {
   )
 }
 
-// =========================================
-// StatCard
-// =========================================
-function StatCard({
-  icon,
-  label,
-  value,
-  accent,
-}: {
-  icon: React.ReactNode
-  label: string
-  value: number
-  accent: 'primary' | 'accent' | 'red' | 'action'
-}) {
-  const iconBg = {
-    primary: '#6D436D',
-    accent: '#D29486',
-    red: '#ef4444',
-    action: '#FAD980',
-  }[accent]
 
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm hover:shadow-md transition-shadow">
-      <div
-        className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4"
-        style={{ backgroundColor: iconBg }}
-      >
-        {icon}
-      </div>
-      <div className="text-3xl font-bold mb-1" style={{ color: 'var(--crm-text)' }}>
-        {value}
-      </div>
-      <div className="text-sm font-medium" style={{ color: 'var(--crm-text)', opacity: 0.6 }}>
-        {label}
-      </div>
-    </div>
-  )
-}
-
-// =========================================
-// TesterReset — איפוס פונה לבדיקה (לבודק, דרך הפרונטהנד)
-// =========================================
-function TesterReset() {
-  const TEST_NUMBERS = [
-    { phone: '0544535688', label: 'מספר בדיקה 1' },
-    { phone: '0546603344', label: 'מספר בדיקה 2' },
-    { phone: '0546888587', label: 'מספר בדיקה 3' },
-  ]
-  const [busy, setBusy] = useState<string | null>(null)
-  const [done, setDone] = useState<string | null>(null)
-
-  const reset = async (phone: string, label: string) => {
-    if (!confirm(`להתחיל בדיקה חדשה מ-${label}?\n\nזה ימחק את כל הרשומות של המספר הזה (הורה, רישום, פניות, שיחה), כדי שהבוט יתייחס אליו כהורה חדש לגמרי.`)) return
-    setBusy(phone); setDone(null)
-    try {
-      const res = await fetch('/api/admin/reset-tester', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone }),
-      })
-      const data = await res.json()
-      setDone(data.success
-        ? `✅ ${label} אופס! אפשר להתחיל בדיקה חדשה מהוואטסאפ.`
-        : `❌ לא הצלחתי: ${data.error || 'שגיאה'}`)
-    } catch {
-      setDone('❌ שגיאת תקשורת — נסי שוב')
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border-2 p-6" style={{ borderColor: '#FDE047' }}>
-      <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--crm-primary)' }}>🧪 איפוס פונה לבדיקה</h2>
-      <p className="text-sm mb-4" style={{ color: 'var(--crm-text)', opacity: 0.7 }}>
-        אחרי כל בדיקה — לחצי כאן כדי "לנקות" את מספר הבדיקה. כך הבוט יתייחס אליו כהורה חדש לגמרי בפעם הבאה.
-      </p>
-      <div className="flex flex-wrap gap-3">
-        {TEST_NUMBERS.map(n => (
-          <button
-            key={n.phone}
-            onClick={() => reset(n.phone, n.label)}
-            disabled={busy === n.phone}
-            className="px-4 py-2.5 rounded-xl font-semibold text-sm transition-opacity hover:opacity-80 disabled:opacity-40"
-            style={{ background: '#FEF9C3', color: '#7B6010' }}
-          >
-            {busy === n.phone ? 'מאפס…' : `🔄 ${n.label} (${n.phone})`}
-          </button>
-        ))}
-      </div>
-      {done && <p className="mt-4 text-sm font-medium" style={{ color: 'var(--crm-text)' }}>{done}</p>}
-    </div>
-  )
-}
-
-// =========================================
-// BotSimulator (inline)
-// =========================================
-const FLOW_LABELS: Record<string, { label: string; emoji: string; steps: string[] }> = {
-  // ── רישום לצהרון ──
-  register_child_name:    { label: 'רישום לצהרון',     emoji: '🎒', steps: ['שם ילד/ה', 'כיתה', 'מסגרת'] },
-  register_class:         { label: 'רישום לצהרון',     emoji: '🎒', steps: ['שם ✓', 'כיתה', 'מסגרת'] },
-  register_framework:     { label: 'רישום לצהרון',     emoji: '🎒', steps: ['שם ✓', 'כיתה ✓', 'מסגרת'] },
-  register_waiting_confirm: { label: 'רשימת המתנה',   emoji: '⏳', steps: ['אישור המתנה'] },
-  // ── ביטול ──
-  cancel_child:              { label: 'ביטול',          emoji: '❌', steps: ['שם ילד/ה', 'אישור'] },
-  cancel_confirm_before15:   { label: 'ביטול (לפני 15)', emoji: '❌', steps: ['אישור'] },
-  cancel_confirm_after15:    { label: 'ביטול (אחרי 15)', emoji: '❌', steps: ['אישור תקנון'] },
-  // ── קייטנה ──
-  camp_menu:             { label: 'קייטנה',             emoji: '🏕️', steps: ['בחירת תרחיש'] },
-  camp_check_name:       { label: 'בדיקת רישום קייטנה', emoji: '🔍', steps: ['שם ילד/ה', 'ת"ז'] },
-  camp_check_id:         { label: 'בדיקת רישום קייטנה', emoji: '🔍', steps: ['שם ✓', 'ת"ז'] },
-  camp_problem_desc:     { label: 'בעיה בהרשמה',        emoji: '⚠️', steps: ['תיאור הבעיה'] },
-  camp_late_name:        { label: 'קייטנה (אחרי סגירה)', emoji: '🏕️', steps: ['שם ילד/ה', 'כיתה'] },
-  camp_late_class:       { label: 'קייטנה (אחרי סגירה)', emoji: '🏕️', steps: ['שם ✓', 'כיתה'] },
-  // ── איסוף מוקדם ──
-  pickup_child:          { label: 'איסוף מוקדם',        emoji: '🚗', steps: ['שם ילד/ה', 'שעה', 'אוסף/ת'] },
-  pickup_time:           { label: 'איסוף מוקדם',        emoji: '🚗', steps: ['שם ✓', 'שעה', 'אוסף/ת'] },
-  pickup_collector:      { label: 'איסוף מוקדם',        emoji: '🚗', steps: ['שם ✓', 'שעה ✓', 'אוסף/ת'] },
-  // ── כשל תשלום ──
-  payment_fail_type:          { label: 'כשל תשלום',        emoji: '💳', steps: ['בחירת סוג', 'פרטים'] },
-  payment_fail_schedule_call: { label: 'תיאום שיחה',        emoji: '📞', steps: ['זמן מועדף'] },
-  payment_fail_method_choice: { label: 'שינוי אמצעי תשלום', emoji: '💳', steps: ['בחירת אמצעי'] },
-  payment_fail_new_date:      { label: 'שינוי תאריך חיוב',  emoji: '📅', steps: ['תאריך חדש'] },
-  payment_fail_remind_when:   { label: 'תזכורת לחזרה',      emoji: '🔔', steps: ['מתי לחזור'] },
-  payment_fail_describe:      { label: 'בעיית תשלום',        emoji: '💳', steps: ['תיאור הבעיה'] },
-}
-
-const INTENT_LABELS: Record<string, { label: string; color: string; bg: string }> = {
-  'רישום_צהרון':    { label: 'רישום צהרון',    color: '#6D436D', bg: '#e8d5e8' },
-  'רישום_קייטנה':  { label: 'רישום קייטנה',   color: '#2A6B6B', bg: '#d5e8e8' },
-  'ביטול':          { label: 'ביטול',           color: '#7d2d4a', bg: '#f5dde5' },
-  'שאלת_לוז':       { label: 'שאלת לו"ז',       color: '#b45309', bg: '#fef3c7' },
-  'בדיקת_תשלום':   { label: 'תשלום',            color: '#a05a4f', bg: '#fce9e6' },
-  'כשל_תשלום':     { label: 'כשל תשלום',        color: '#7d2d4a', bg: '#f5dde5' },
-  'כשל_תשלום_יזום':{ label: 'כשל תשלום (יזום)', color: '#7d2d4a', bg: '#f5dde5' },
-  'איסוף_מוקדם':   { label: 'איסוף מוקדם',      color: '#854d0e', bg: '#fef9c3' },
-  'בקשת_נציג':     { label: 'בקשת נציגה',       color: '#1d4ed8', bg: '#dbeafe' },
-  'רשימת_המתנה':   { label: 'רשימת המתנה',       color: '#6b7280', bg: '#f3f4f6' },
-  'שאלה_כללית':    { label: 'ברכה כללית',        color: '#78716c', bg: '#f5f5f4' },
-  'לא_ידוע':       { label: 'לא זוהה',           color: '#9ca3af', bg: '#f9fafb' },
-}
-
-const QUICK_TESTS = [
-  { label: '1 — רישום צהרון',  msg: '1' },
-  { label: '2 — קייטנה',       msg: '2' },
-  { label: '3 — ביטול',        msg: '3' },
-  { label: '4 — שעות',         msg: '4' },
-  { label: '5 — תשלום',        msg: '5' },
-  { label: '6 — איסוף מוקדם', msg: '6' },
-  { label: 'כשל תשלום',        msg: 'יש לי בעיה עם התשלום' },
-  { label: 'כרטיס נכשל',       msg: 'הכרטיס שלי לא עבר' },
-  { label: 'שאלת חגים',        msg: 'אילו חגים יש השנה?' },
-  { label: 'לדבר עם נציגה',   msg: 'אני רוצה לדבר עם נציגה' },
-]
-
-interface SimMessage {
-  role: 'user' | 'bot'
-  text: string
-  intent?: string
-  isComplete?: boolean
-  createdTask?: boolean
-}
-
-const WELCOME_MSG: SimMessage = {
-  role: 'bot',
-  text: 'שלום! 😊 כאן Kids & Fun!\n\n*1* — רישום לצהרון\n*2* — רישום לקייטנה\n*3* — ביטול\n*4* — שעות ולוח זמנים\n*5* — תשלומים\n*6* — איסוף מוקדם\n\nאו פשוט כתוב/י מה צריך 💬',
-}
-const SIM_STORAGE_KEY = 'kf_sim_state'
-
-function loadSimState() {
-  try {
-    const raw = localStorage.getItem(SIM_STORAGE_KEY)
-    if (!raw) return null
-    return JSON.parse(raw) as {
-      messages: SimMessage[]
-      currentFlow: string | null
-      collectedData: Record<string, string>
-      lastIntent: string | null
-      msgCount: number
-      sessionId: string
-      testPhone?: string
-    }
-  } catch { return null }
-}
-
-function BotSimulator() {
-  const saved = typeof window !== 'undefined' ? loadSimState() : null
-
-  const [messages, setMessages] = useState<SimMessage[]>(saved?.messages ?? [WELCOME_MSG])
-  const [input, setInput] = useState('')
-  const [botLoading, setBotLoading] = useState(false)
-  const [currentFlow, setCurrentFlow] = useState<string | null>(saved?.currentFlow ?? null)
-  const [collectedData, setCollectedData] = useState<Record<string, string>>(saved?.collectedData ?? {})
-  const [lastIntent, setLastIntent] = useState<string | null>(saved?.lastIntent ?? null)
-  const [msgCount, setMsgCount] = useState(saved?.msgCount ?? 0)
-  const chatRef = useRef<HTMLDivElement>(null)
-  const sessionIdRef = useRef(saved?.sessionId ?? ('sim_' + Date.now()))
-  // טלפון לבדיקה — מאפשר לדמות זיהוי הורה אמיתי בסימולטור (כמו בוואטסאפ)
-  const [testPhone, setTestPhone] = useState<string>(saved?.testPhone ?? '')
-
-  // persist state to localStorage on every change
-  useEffect(() => {
-    try {
-      localStorage.setItem(SIM_STORAGE_KEY, JSON.stringify({
-        messages, currentFlow, collectedData, lastIntent, msgCount,
-        sessionId: sessionIdRef.current,
-        testPhone,
-      }))
-    } catch { /* storage full or private mode */ }
-  }, [messages, currentFlow, collectedData, lastIntent, msgCount])
-
-  // auto-scroll chat
-  useEffect(() => {
-    if (chatRef.current) {
-      chatRef.current.scrollTop = chatRef.current.scrollHeight
-    }
-  }, [messages, botLoading])
-
-  const reset = () => {
-    setMessages([WELCOME_MSG])
-    setCurrentFlow(null)
-    setCollectedData({})
-    setLastIntent(null)
-    setMsgCount(0)
-    sessionIdRef.current = 'sim_' + Date.now()
-    try { localStorage.removeItem(SIM_STORAGE_KEY) } catch { /* ignore */ }
-    fetch('/api/bot/simulate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: '__reset__', sessionId: sessionIdRef.current, reset: true }),
-    }).catch(() => {})
-  }
-
-  const sendMessage = async (text?: string) => {
-    const userMsg = (text ?? input).trim()
-    if (!userMsg || botLoading) return
-    setInput('')
-    setMessages(prev => [...prev, { role: 'user', text: userMsg }])
-    setMsgCount(n => n + 1)
-    setBotLoading(true)
-
-    try {
-      const res = await fetch('/api/bot/simulate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: userMsg,
-          sessionId: sessionIdRef.current,
-          // טלפון לבדיקה — מאפשר זיהוי הורה אמיתי בסימולטור (כמו בוואטסאפ)
-          testPhone: testPhone || undefined,
-          // מצב מהדפדפן — מאפשר לשרת לשחזר את ה-session אחרי רענון
-          // (ב-Vercel הזיכרון של השרת מתאפס בין קריאות)
-          clientState: {
-            currentFlow,
-            collectedData,
-            messages: messages.slice(-10).map(m => ({ role: m.role, text: m.text })),
-          },
-        }),
-      })
-      const data = await res.json() as {
-        reply?: string
-        intent?: string
-        currentFlow?: string | null
-        collectedData?: Record<string, string>
-        isComplete?: boolean
-        createTask?: object | null
-        escalate?: boolean
-      }
-      setMessages(prev => [...prev, {
-        role: 'bot',
-        text: data.reply || 'שגיאה בתשובה',
-        intent: data.intent,
-        isComplete: data.isComplete,
-        createdTask: !!data.createTask,
-      }])
-      setCurrentFlow(data.currentFlow ?? null)
-      setCollectedData(data.collectedData ?? {})
-      if (data.intent) setLastIntent(data.intent)
-    } catch {
-      setMessages(prev => [...prev, { role: 'bot', text: 'שגיאה בחיבור לשרת' }])
-    } finally {
-      setBotLoading(false)
-    }
-  }
-
-  const flowInfo = currentFlow ? FLOW_LABELS[currentFlow] : null
-  const intentInfo = lastIntent ? INTENT_LABELS[lastIntent] : null
-  const collectedEntries = Object.entries(collectedData).filter(([, v]) => v)
-
-  return (
-    <div className="flex gap-6 min-h-[580px]" dir="rtl">
-
-      {/* ── Chat window ── */}
-      <div className="flex-1 min-w-0 flex flex-col">
-
-        {/* Header row */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
-            <span className="text-sm font-semibold" style={{ color: 'var(--crm-text)' }}>בוט פעיל</span>
-            {msgCount > 0 && (
-              <span className="text-xs rounded-full px-2 py-0.5" style={{ background: '#f5f5f4', color: '#78716c' }}>
-                {msgCount} הודעות
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={testPhone}
-              onChange={e => setTestPhone(e.target.value)}
-              placeholder="טלפון לבדיקה (אופציונלי)"
-              className="text-xs px-3 py-1.5 rounded-full border border-gray-200 w-44 focus:outline-none focus:border-[var(--crm-primary)]"
-              title="הקלידי טלפון של הורה אמיתי כדי לדמות זיהוי בוואטסאפ (למשל 0546164546)"
-            />
-            <button
-              onClick={reset}
-              className="text-xs px-3 py-1.5 rounded-full font-medium hover:opacity-80 transition-opacity"
-              style={{ background: '#f5f5f4', color: '#78716c' }}
-            >
-              🔄 התחל שיחה חדשה
-            </button>
-          </div>
-        </div>
-
-        {/* WhatsApp chat area */}
-        <div className="flex-1 rounded-2xl overflow-hidden flex flex-col bg-[#E5DDD5]"
-          style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none'%3E%3Cg fill='%23C4B9B0' fill-opacity='0.2'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")" }}>
-
-          {/* WA header */}
-          <div className="bg-[#128C7E] text-white px-4 py-3 flex items-center gap-3 flex-shrink-0">
-            <div className="w-9 h-9 rounded-full bg-green-600 flex items-center justify-center">🌟</div>
-            <div>
-              <p className="font-bold text-sm">Kids &amp; Fun</p>
-              <p className="text-green-200 text-xs">{currentFlow ? `מסלול: ${flowInfo?.label ?? currentFlow}` : 'ממתין להודעה'}</p>
-            </div>
-          </div>
-
-          {/* Messages */}
-          <div ref={chatRef} className="flex-1 p-4 overflow-y-auto space-y-3" style={{ minHeight: 0, maxHeight: '420px' }}>
-            {messages.map((msg, i) => (
-              <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                <div
-                  className={`max-w-[78%] rounded-2xl px-4 py-3 shadow-sm text-sm whitespace-pre-line ${
-                    msg.role === 'user'
-                      ? 'bg-[#DCF8C6] text-stone-800 rounded-tl-sm'
-                      : 'bg-white text-stone-800 rounded-tr-sm'
-                  }`}
-                >
-                  {msg.text}
-                </div>
-                {/* Intent tag on bot messages */}
-                {msg.role === 'bot' && msg.intent && INTENT_LABELS[msg.intent] && (
-                  <div className="flex items-center gap-1.5 mt-1 mx-1">
-                    <span
-                      className="text-xs px-2 py-0.5 rounded-full font-medium"
-                      style={{ background: INTENT_LABELS[msg.intent].bg, color: INTENT_LABELS[msg.intent].color }}
-                    >
-                      {INTENT_LABELS[msg.intent].label}
-                    </span>
-                    {msg.isComplete && (
-                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: '#dcfce7', color: '#15803d' }}>
-                        ✓ מסלול הסתיים
-                      </span>
-                    )}
-                    {msg.createdTask && (
-                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: '#fef3c7', color: '#b45309' }}>
-                        📋 נוצרה משימה
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-            {botLoading && (
-              <div className="flex justify-start">
-                <div className="bg-white rounded-2xl px-4 py-3 shadow-sm text-stone-400 text-sm animate-pulse">מקלידה...</div>
-              </div>
-            )}
-          </div>
-
-          {/* Input */}
-          <div className="bg-[#F0F0F0] p-3 flex items-center gap-2 flex-shrink-0">
-            <input
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && sendMessage()}
-              placeholder="כתוב הודעה..."
-              className="flex-1 bg-white rounded-full px-4 py-2.5 text-sm focus:outline-none text-right"
-              dir="rtl"
-            />
-            <button
-              onClick={() => sendMessage()}
-              disabled={botLoading || !input.trim()}
-              className="bg-[#128C7E] hover:bg-[#0e7268] disabled:opacity-50 text-white rounded-full w-10 h-10 flex items-center justify-center transition-colors"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        {/* Quick test chips */}
-        <div className="mt-3">
-          <p className="text-xs font-medium mb-2" style={{ color: 'var(--crm-text)', opacity: 0.5 }}>בדיקות מהירות:</p>
-          <div className="flex flex-wrap gap-2">
-            {QUICK_TESTS.map(t => (
-              <button
-                key={t.label}
-                onClick={() => sendMessage(t.msg)}
-                disabled={botLoading}
-                className="text-xs px-3 py-1.5 rounded-full font-medium border transition-all hover:opacity-80 disabled:opacity-40"
-                style={{ background: '#FAF5EE', color: 'var(--crm-text)', borderColor: '#e8c4d0' }}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Debug / Status panel ── */}
-      <div className="w-64 flex-shrink-0 space-y-4">
-
-        {/* Current flow */}
-        <div className="rounded-2xl border p-4" style={{ background: '#fff', borderColor: '#f0e8e8' }}>
-          <p className="text-xs font-bold mb-3 uppercase tracking-wide" style={{ color: '#a8a29e' }}>מסלול נוכחי</p>
-          {currentFlow && flowInfo ? (
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">{flowInfo.emoji}</span>
-                <span className="text-sm font-bold" style={{ color: 'var(--crm-primary)' }}>{flowInfo.label}</span>
-              </div>
-              <div className="space-y-1.5">
-                {flowInfo.steps.map((step, i) => (
-                  <div key={i} className="flex items-center gap-2 text-xs" style={{ color: step.includes('✓') ? '#15803d' : '#78716c' }}>
-                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${step.includes('✓') ? 'bg-green-100 text-green-700' : 'bg-stone-100 text-stone-500'}`}>
-                      {step.includes('✓') ? '✓' : i + 1}
-                    </span>
-                    {step.replace(' ✓', '')}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="text-center py-3">
-              <div className="text-2xl mb-1">💬</div>
-              <p className="text-xs" style={{ color: '#a8a29e' }}>אין מסלול פעיל</p>
-            </div>
-          )}
-        </div>
-
-        {/* Collected data */}
-        <div className="rounded-2xl border p-4" style={{ background: '#fff', borderColor: '#f0e8e8' }}>
-          <p className="text-xs font-bold mb-3 uppercase tracking-wide" style={{ color: '#a8a29e' }}>נתונים שנאספו</p>
-          {collectedEntries.length > 0 ? (
-            <div className="space-y-2">
-              {collectedEntries.map(([key, val]) => (
-                <div key={key} className="flex flex-col">
-                  <span className="text-xs" style={{ color: '#a8a29e' }}>
-                    {key === 'child_name' ? 'שם ילד/ה' : key === 'class_name' ? 'כיתה' : key === 'parent_phone' ? 'טלפון' : key}
-                  </span>
-                  <span className="text-sm font-semibold" style={{ color: 'var(--crm-text)' }}>{val}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-center py-2" style={{ color: '#a8a29e' }}>עדיין לא נאספו נתונים</p>
-          )}
-        </div>
-
-        {/* Intent */}
-        {intentInfo && (
-          <div className="rounded-2xl border p-4" style={{ background: '#fff', borderColor: '#f0e8e8' }}>
-            <p className="text-xs font-bold mb-2 uppercase tracking-wide" style={{ color: '#a8a29e' }}>כוונה אחרונה</p>
-            <span
-              className="text-xs px-3 py-1 rounded-full font-semibold"
-              style={{ background: intentInfo.bg, color: intentInfo.color }}
-            >
-              {intentInfo.label}
-            </span>
-          </div>
-        )}
-
-        {/* Flow map */}
-        <div className="rounded-2xl border p-4" style={{ background: '#FAF5EE', borderColor: '#e8c4d0' }}>
-          <p className="text-xs font-bold mb-3 uppercase tracking-wide" style={{ color: '#a8a29e' }}>מסלולים זמינים</p>
-          <div className="space-y-1.5 text-xs" style={{ color: '#78716c' }}>
-            {[
-              { e: '🎒', t: 'רישום לצהרון', k: '1' },
-              { e: '🏕️', t: 'רישום לקייטנה', k: '2' },
-              { e: '❌', t: 'ביטול', k: '3' },
-              { e: '📅', t: 'שעות ולו"ז', k: '4' },
-              { e: '💳', t: 'תשלום / כשל', k: '5' },
-              { e: '🚗', t: 'איסוף מוקדם', k: '6' },
-            ].map(f => (
-              <div key={f.k} className="flex items-center gap-2">
-                <span>{f.e}</span>
-                <span>{f.t}</span>
-                <span className="mr-auto font-mono opacity-50">{f.k}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}

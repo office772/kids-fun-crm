@@ -9,6 +9,11 @@ interface Props {
   onStatusChange: (id: string, status: string) => void
   onDelete?: (id: string) => void
   onBulkDelete?: (ids: string[]) => void
+  // תצוגת תקציר (סקירה): מסתיר את סרגל הסינון/חיפוש/תצוגה
+  compact?: boolean
+  // סינון נשלט מבחוץ (למשל מכרטיסי הסטטיסטיקה) — אופציונלי
+  filter?: string
+  onFilterChange?: (f: string) => void
 }
 
 // ─── Style maps ────────────────────────────────────────────────────────────────
@@ -69,11 +74,11 @@ function StatusSelector({ status, taskId, onSelect }: { status: TaskStatus; task
             const os = STATUS_STYLE[opt]
             return (
               <button key={opt} onClick={() => { onSelect(opt); setOpen(false) }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-medium hover:bg-stone-50 transition-colors"
-                style={{ color: os.color }}>
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: os.dot }} />
-                <span>{opt}</span>
-                {opt === status && <Check size={11} className="mr-auto opacity-70" />}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-medium hover:bg-crm-surface-soft transition-colors"
+                style={{ color: 'var(--crm-text)', background: opt === status ? 'var(--crm-surface-soft)' : undefined }}>
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 border" style={{ background: os.dot, borderColor: 'rgba(0,0,0,0.08)' }} />
+                <span className="flex-1 text-right">{opt}</span>
+                {opt === status && <Check size={12} style={{ color: 'var(--crm-primary)' }} />}
               </button>
             )
           })}
@@ -84,13 +89,18 @@ function StatusSelector({ status, taskId, onSelect }: { status: TaskStatus; task
 }
 
 // ─── TaskList ─────────────────────────────────────────────────────────────────
-export function TaskList({ tasks, onStatusChange, onDelete, onBulkDelete }: Props) {
-  const [filter, setFilter] = useState<TaskStatus | 'הכל'>('הכל')
+export function TaskList({ tasks, onStatusChange, onDelete, onBulkDelete, compact = false, filter: filterProp, onFilterChange }: Props) {
+  const [filterState, setFilterState] = useState<TaskStatus | 'הכל'>('הכל')
+  // נשלט מבחוץ אם הועברו filter+onFilterChange, אחרת state פנימי
+  const filter = (filterProp ?? filterState) as TaskStatus | 'הכל'
+  const setFilter = (f: TaskStatus | 'הכל') => { if (onFilterChange) onFilterChange(f); else setFilterState(f) }
   const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState<string>('הכל')   // סינון לפי נושא הפנייה
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards')
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  const afterStatus = filter === 'הכל' ? tasks : tasks.filter(t => t.status === filter)
+  const afterType = typeFilter === 'הכל' ? tasks : tasks.filter(t => t.type === typeFilter)
+  const afterStatus = filter === 'הכל' ? afterType : afterType.filter(t => t.status === filter)
   const filtered = search.trim()
     ? afterStatus.filter(t =>
         t.description?.toLowerCase().includes(search.toLowerCase()) ||
@@ -138,42 +148,56 @@ export function TaskList({ tasks, onStatusChange, onDelete, onBulkDelete }: Prop
   return (
     <div dir="rtl">
       {/* Toolbar: filters + search + view toggle */}
+      {!compact && (
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        {/* Status filter pills */}
-        <div className="flex gap-1.5 flex-wrap">
-          {(['הכל', 'פתוח', 'בטיפול', 'טופל'] as const).map(f => {
-            const isActive = filter === f
-            const baseStyle = f === 'הכל'
-              ? { background: 'var(--crm-primary)', color: '#fff' }
-              : { background: STATUS_STYLE[f as TaskStatus].bg, color: STATUS_STYLE[f as TaskStatus].color }
-            return (
-              <button key={f} onClick={() => setFilter(f)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
-                style={isActive ? baseStyle : { background: '#fff', color: '#78716c', border: '1px solid #e5e7eb' }}>
-                {f}
-                <span className="rounded-full px-1.5 py-px text-xs font-bold"
-                  style={{ background: isActive ? 'rgba(0,0,0,0.12)' : '#f3f4f6', color: isActive ? 'inherit' : '#9ca3af' }}>
-                  {counts[f as keyof typeof counts]}
-                </span>
-              </button>
-            )
-          })}
-        </div>
+        {/* Status filter dropdown */}
+        <select
+          value={filter}
+          onChange={e => setFilter(e.target.value as TaskStatus | 'הכל')}
+          className="rounded-full border bg-crm-surface px-4 py-2 text-sm cursor-pointer focus:outline-none transition-colors"
+          style={filter !== 'הכל'
+            ? { borderColor: 'var(--crm-primary)', color: 'var(--crm-primary)', fontWeight: 600 }
+            : { borderColor: 'var(--crm-border)', color: 'var(--crm-text)' }}
+        >
+          {(['הכל', 'פתוח', 'בטיפול', 'טופל'] as const).map(f => (
+            <option key={f} value={f}>
+              {f === 'הכל' ? `כל הסטטוסים (${counts.הכל})` : `${f} (${counts[f as keyof typeof counts]})`}
+            </option>
+          ))}
+        </select>
+
+        {/* Type (topic) filter dropdown */}
+        <select
+          value={typeFilter}
+          onChange={e => setTypeFilter(e.target.value)}
+          className="rounded-full border bg-crm-surface px-4 py-2 text-sm cursor-pointer focus:outline-none transition-colors"
+          style={typeFilter !== 'הכל'
+            ? { borderColor: 'var(--crm-primary)', color: 'var(--crm-primary)', fontWeight: 600 }
+            : { borderColor: 'var(--crm-border)', color: 'var(--crm-text)' }}
+        >
+          <option value="הכל">כל הנושאים</option>
+          {(Object.keys(TYPE_STYLE) as TaskType[])
+            .filter(t => tasks.some(task => task.type === t))
+            .map(t => {
+              const n = tasks.filter(task => task.type === t).length
+              return <option key={t} value={t}>{TYPE_STYLE[t].emoji} {t} ({n})</option>
+            })}
+        </select>
 
         {/* Search */}
         <div className="relative flex-1 min-w-[160px]">
-          <Search size={13} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: '#a8a29e' }} />
+          <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--crm-text-muted)' }} />
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="חיפוש..."
-            className="w-full pr-8 pl-3 py-1.5 text-xs border border-gray-200 rounded-full focus:outline-none bg-white text-right"
-            style={{ borderColor: '#e5e7eb' }}
+            className="w-full pr-9 pl-3 py-2 text-sm border rounded-full focus:outline-none bg-crm-surface text-right"
+            style={{ borderColor: 'var(--crm-border)' }}
           />
         </div>
 
         {/* View toggle */}
-        <div className="flex items-center gap-0.5 bg-white border border-gray-200 rounded-full px-1 py-1 mr-auto">
+        <div className="flex items-center gap-0.5 bg-crm-surface border border-crm-border rounded-full px-1 py-1 mr-auto">
           <button onClick={() => setViewMode('cards')}
             className="p-1.5 rounded-full transition-colors"
             style={viewMode === 'cards' ? { background: 'var(--crm-primary)', color: '#fff' } : { color: '#78716c', opacity: 0.6 }}
@@ -188,6 +212,7 @@ export function TaskList({ tasks, onStatusChange, onDelete, onBulkDelete }: Prop
           </button>
         </div>
       </div>
+      )}
 
       {/* Bulk action bar */}
       {selected.size > 0 && (
@@ -206,7 +231,7 @@ export function TaskList({ tasks, onStatusChange, onDelete, onBulkDelete }: Prop
       )}
 
       {/* Select all hint */}
-      {selected.size === 0 && filtered.length > 0 && (
+      {!compact && selected.size === 0 && filtered.length > 0 && (
         <div className="flex items-center gap-2 mb-2 px-1">
           <button onClick={toggleAll} className="text-xs flex items-center gap-1.5" style={{ color: '#a8a29e' }}>
             <input type="checkbox" readOnly checked={false} className="w-3.5 h-3.5 accent-[var(--crm-primary)]" />
@@ -238,7 +263,8 @@ export function TaskList({ tasks, onStatusChange, onDelete, onBulkDelete }: Prop
                   opacity: isDone ? 0.75 : 1,
                   boxShadow: isSelected ? '0 0 0 1.5px var(--crm-primary)' : undefined,
                 }}>
-                <div className="flex items-center gap-3 px-4 py-3">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 py-3">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
                   {/* Checkbox */}
                   <div
                     onClick={() => toggleSelect(task.id)}
@@ -274,9 +300,10 @@ export function TaskList({ tasks, onStatusChange, onDelete, onBulkDelete }: Prop
                       </span>
                     </div>
                   </div>
+                  </div>
 
                   {/* Actions */}
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-2 flex-shrink-0 pr-7 sm:pr-0">
                     <StatusSelector status={task.status as TaskStatus} taskId={task.id}
                       onSelect={s => onStatusChange(task.id, s)} />
                     {onDelete && (

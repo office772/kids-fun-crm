@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl"><head><meta charset="utf-8"><title>מפת מסלולי הבוט — Kids & Fun</title>
+<style>
+body{font-family:Arial,'Heebo',sans-serif;color:#3d2f22;background:#FDF8F0;max-width:820px;margin:24px auto;padding:0 16px;line-height:1.55}
+h1{color:#4A2C4A;font-size:25px} h2{color:#6D436D;font-size:18px;margin-top:30px;border-bottom:1px solid #e7ddcf;padding-bottom:4px}
+.sub{font-size:12.5px;color:#8a7460;margin-top:-2px}
+.bx{border:1px solid #e2d7c6;border-radius:10px;padding:9px 13px;margin:0 auto;max-width:660px;background:#fff}
+.bt{font-weight:700;margin-bottom:3px;color:#4A2C4A} .msg{color:#555;font-size:13px;white-space:pre-line}
+.you{color:#1565C0;font-size:13px;font-weight:700} .meta{font-size:12px;color:#9a7fb0;margin-top:4px}
+.ar{text-align:center;color:#c9b8a5;font-size:17px;margin:4px 0}
+.fp{border-right:5px solid #1D9E75} .llm{border-right:5px solid #7F77DD} .man{border-right:5px solid #EF9F27}
+.note{background:#FDF6E3;border:1px solid #E8D9A8;border-radius:10px;padding:12px 15px;margin:10px auto;max-width:660px;font-size:13.5px}
+.tag{font-size:11px;padding:2px 8px;border-radius:7px;background:#fff;border:1px solid #e2d7c6;color:#555;margin-left:4px}
+@media print{body{background:#fff}}
+</style></head><body>
+<h1>מפת מסלולי הבוט — Kids & Fun 🌟</h1>
+<p><span class="tag">🔵 מה שההורה כותב</span><span class="tag">🟢 תגובת בוט אוטומטית (מסלול)</span><span class="tag">🟣 ה-AI החכם</span><span class="tag">🟠 פעולה ידנית / נציגה</span></p>
+<div class="note"><b>איך בודקים 👇</b><br>שולחים הודעה לוואטסאפ של הבוט <b>ממספר בדיקה</b>. הבוט עונה, ומתקדמים שלב-שלב לפי המפה. ההודעות כאן הן <b>הטקסטים האמיתיים</b> שהבוט שולח (חולצו ישירות מהקוד). מקומות עם {סוגריים} = ערך שמשתנה לפי ההורה. שימו לב: הבוט מיועד להורים — שאלות תפעול משרדיות (חשבוניות ספקים, מסמכי עובדים) יועברו לקורלי, זה מכוון.</div>
+<h2>👋 כניסה ובחירת מסלול</h2>
+<p class="sub">איך מגיעים: הודעה ראשונה / לא מזוהה כוונה</p>
+<div class="bx fp"><div class="bt">1. *1* — רישום לצהרון</div><div class="msg"><span class="you">ההורה: בחירה מהתפריט (1-6) או שאלה חופשית</span>
+<b>הבוט:</b> *1* — רישום לצהרון
+*2* — רישום לקייטנה
+*3* — ביטול
+*4* — שעות ולוח זמנים
+*5* — תשלומים
+*6* — איסוף מוקדם</div><div class="meta">🔀 בחירה מנתבת ללא וקט עתידי · ⚙️ session.currentFlow נקבע</div></div>
+<h2>🎒 רישום לצהרון</h2>
+<p class="sub">איך מגיעים: כוונה: רישום_צהרון או בחירה: '1'</p>
+<div class="bx fp"><div class="bt">1. אם הטלפון מזוהה — הצגת רישומים קיימים; אחרת: בחירת אזור</div><div class="msg"><b>הבוט:</b> אם הטלפון מזוהה — הצגת רישומים קיימים; אחרת: בחירת אזור</div><div class="meta">🔀 אם יש רישום קיים → register_existing_parent | אחרת → register_area · ⚙️ טעינת נתוני הורה מטלפון</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">1.5. רואה שיש תשלום פעיל בשמך, אבל חסר שם הילד. מה שם הילד/ה? (שם</div><div class="msg"><span class="you">ההורה: שם פרטי + משפחה של ילד</span>
+<b>הבוט:</b> רואה שיש תשלום פעיל בשמך, אבל חסר שם הילד. מה שם הילד/ה? (שם פרטי + שם משפחה)</div><div class="meta">🔀 אם שם תקין → לשמור בDB ו-register_existing_parent · ⚙️ עדכון שם ילד בDB</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">2. ראיתי שיש לכם כבר רישום אצלנו. *במה אפשר לעזור?* *1* — לרשום</div><div class="msg"><span class="you">ההורה: בחירה 1-4: רישום נוסף / עדכון / סטטוס / שאלה</span>
+<b>הבוט:</b> ראיתי שיש לכם כבר רישום אצלנו. *במה אפשר לעזור?* *1* — לרשום ילד/ה נוסף/ת | *2* — לעדכן פרטים | *3* — לבדוק סטטוס תשלום | *4* — שאלה אחרת</div><div class="meta">🔀 1 → register_area | 2 → register_update_details (task) | 3 → payment_status_menu | 4 → register_existing_question (task) · ⚙️ ניתוב לפי בחירה</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">3. *לאיזה אזור מבקשים רישום לצהרון?* *1* — דרום השרון / חוף השר</div><div class="msg"><span class="you">ההורה: בחירה 1-3: אזור</span>
+<b>הבוט:</b> *לאיזה אזור מבקשים רישום לצהרון?* *1* — דרום השרון / חוף השרון | *2* — חוף הכרמל | *3* — גני ילדים תל אביב</div><div class="meta">🔀 בחירה תקינה → register_child_name · ⚙️ session.collectedData.area_code</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">4. *מה שם הילד/ה?* (שם פרטי + שם משפחה)</div><div class="msg"><span class="you">ההורה: שם פרטי + משפחה של ילד</span>
+<b>הבוט:</b> *מה שם הילד/ה?* (שם פרטי + שם משפחה)</div><div class="meta">🔀 בדיקה אם ילד כבר רשום → register_existing_parent | אחרת → register_class · ⚙️ session.collectedData.child_name | וידוא לפי looksLikeChildName()</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">5. *באיזו כיתה לומד/ת {שם}?* (לדוגמה: א׳, ב׳, גן חובה)</div><div class="msg"><span class="you">ההורה: כיתה או גיל (למשל: א׳, ב׳, גן חובה)</span>
+<b>הבוט:</b> *באיזו כיתה לומד/ת {שם}?* (לדוגמה: א׳, ב׳, גן חובה)</div><div class="meta">🔀 בדיקת קיבולת | אם יש מקום → קישור טופס | אחרת → register_waiting_confirm · ⚙️ task יצור לנציגה | קישור טופס דינמי</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">6. *אין מקום פנוי* לצהרון ב{אזור} אבל אפשר להצטרף לרשימת ההמתנה</div><div class="msg"><span class="you">ההורה: כן / לא</span>
+<b>הבוט:</b> *אין מקום פנוי* לצהרון ב{אזור} אבל אפשר להצטרף לרשימת ההמתנה. *להצטרף?* (כן / לא)</div><div class="meta">🔀 כן → שמור לDB | לא → סיום · ⚙️ רישום לרשימת המתנה | task ליצור</div></div>
+<h2>🏕️ רישום לקייטנה</h2>
+<p class="sub">איך מגיעים: כוונה: רישום_קייטנה או בחירה: '2'</p>
+<div class="bx fp"><div class="bt">1. *🏕️ קייטנות Kids &amp; Fun!* *מה תרצו?* *1* — לרשום ילד/ה לק</div><div class="msg"><span class="you">ההורה: בחירה 1-3</span>
+<b>הבוט:</b> *🏕️ קייטנות Kids &amp; Fun!* *מה תרצו?* *1* — לרשום ילד/ה לקייטנה | *2* — לבדוק אם כבר נרשמתי | *3* — יש לי בעיה בהרשמה</div><div class="meta">🔀 1 → קישור לחנות | 2 → camp_check_name | 3 → camp_problem_desc · ⚙️ session.currentFlow</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">2. *מה שם הילד/ה?*</div><div class="msg"><span class="you">ההורה: שם ילד/ה</span>
+<b>הבוט:</b> *מה שם הילד/ה?*</div><div class="meta">🔀 → camp_check_id · ⚙️ session.collectedData.child_name</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">3. *{שם} — מספר תעודת זהות של הילד/ה?* (3-4 ספרות אחרונות מספיק</div><div class="msg"><span class="you">ההורה: מספר תעודת זהות (3-4 ספרות אחרונות)</span>
+<b>הבוט:</b> *{שם} — מספר תעודת זהות של הילד/ה?* (3-4 ספרות אחרונות מספיקות)</div><div class="meta">🔀 בדיקה אימות זהות | אם אומת ויש רישום → הצגת סטטוס | אחרת → task לנציגה · ⚙️ חיפוש child לפי שם וגם וידוא ת"ז</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">4. *אוי, כמה מבאס 😔* *מה בדיוק קרה?* תפרטו ונעזור!</div><div class="msg"><span class="you">ההורה: תיאור הבעיה</span>
+<b>הבוט:</b> *אוי, כמה מבאס 😔* *מה בדיוק קרה?* תפרטו ונעזור!</div><div class="meta">🔀 → task לנציגה | סיום · ⚙️ task יצור עם התיאור</div></div>
+<h2>⏰ רישום לקייטנה אחרי סגירת המועד</h2>
+<p class="sub">איך מגיעים: כניסה דרך handler כאשר מעבר ממסלול קיימת</p>
+<div class="bx fp"><div class="bt">1. *מה שם הילד/ה?*</div><div class="msg"><span class="you">ההורה: שם ילד/ה</span>
+<b>הבוט:</b> *מה שם הילד/ה?*</div><div class="meta">🔀 → camp_late_class · ⚙️ session.collectedData.child_name</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">2. *{שם} — כיתה/גיל?*</div><div class="msg"><span class="you">ההורה: כיתה / גיל</span>
+<b>הבוט:</b> *{שם} — כיתה/גיל?*</div><div class="meta">🔀 → task יצור | סיום · ⚙️ task בעדיפות גבוהה לנציגה</div></div>
+<h2>❌ ביטול רישום לצהרון</h2>
+<p class="sub">איך מגיעים: כוונה: ביטול או בחירה: '3'</p>
+<div class="bx fp"><div class="bt">1. *📋 מדיניות ביטולים — Kids &amp; Fun* • ביטול *עד ה-15 לחודש*</div><div class="msg"><b>הבוט:</b> *📋 מדיניות ביטולים — Kids &amp; Fun* • ביטול *עד ה-15 לחודש* — המשך עד סוף החודש + זיכוי מלא • ביטול *אחרי ה-15 לחודש* — ממשיכים חודש נוסף, ניתן להפסיק מהחודש שלאחריו. כדי להמשיך — *מה שם הילד/ה* שתרצו לבטל?</div><div class="meta">🔀 → cancel_child · ⚙️ בדיקת יום בחודש (dayOfMonth)</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">2. *מה שם הילד/ה* שתרצו לבטל?</div><div class="msg"><span class="you">ההורה: שם פרטי + משפחה של ילד</span>
+<b>הבוט:</b> *מה שם הילד/ה* שתרצו לבטל?</div><div class="meta">🔀 בדיקת תאריך ביטול | אם לפני ה-15 → cancel_confirm_before15 | אחרת → cancel_confirm_after15 · ⚙️ session.collectedData.child_name</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">3. *📅 היום ה-{יום} לחודש — אתם *בתוך חלון הביטול* ✅* {שם} יכול/</div><div class="msg"><span class="you">ההורה: כן / לא</span>
+<b>הבוט:</b> *📅 היום ה-{יום} לחודש — אתם *בתוך חלון הביטול* ✅* {שם} יכול/ה להמשיך עד סוף החודש הנוכחי. תקבלו זיכוי מלא לחודש הבא. *לאשר את הביטול?* (כן / לא)</div><div class="meta">🔀 כן → ביצוע ביטול + ביטול הוראת קבע אם קיימת | לא → סיום · ⚙️ עדכון registrations status='בוטל' | ביטול הוראת קבע ב-PayPlus אוטומטית</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">4. *📅 היום ה-{יום} לחודש.* לפי תקנון הצהרון, ביטול לאחרי ה-15 —</div><div class="msg"><span class="you">ההורה: כן / לא / בקשת חריג</span>
+<b>הבוט:</b> *📅 היום ה-{יום} לחודש.* לפי תקנון הצהרון, ביטול לאחרי ה-15 — *ממשיכים חודש נוסף* ומפסיקים מהחודש שלאחריו. *לאשר?* (כן / לא) אם יש נסיבות מיוחדות — כתבו ואנחנו נבדוק</div><div class="meta">🔀 כן → ביצוע ביטול | לא → ביטול הביטול | חריג (כמו מחלה) → task לנציגה · ⚙️ עדכון registration + task לנציגה</div></div>
+<h2>📅 שעות, לוח זמנים וחגים</h2>
+<p class="sub">איך מגיעים: כוונה: שאלת_לוז או בחירה: '4'</p>
+<div class="bx llm"><div class="bt">1. חיפוש ב-FAQ לפי fuzzy match או לפי נושא</div><div class="msg"><span class="you">ההורה: שאלה על שעות / חגים / חופש</span>
+<b>הבוט:</b> חיפוש ב-FAQ לפי fuzzy match או לפי נושא</div><div class="meta">🔀 אם נמצא FAQ → תשובה מהFAQ | אחרת → תשובה רכה כללית · ⚙️ חיפוש ב-faqs table</div></div>
+<h2>🏦 הסדרת תשלום</h2>
+<p class="sub">איך מגיעים: כוונה: אפשרויות_תשלום או בחירה מ-payment_status_menu או מהצעת מקום מרשימה</p>
+<div class="bx fp"><div class="bt">1. *הסדרת תשלום — Kids &amp; Fun* 💛 עבור *{שם}* ({אזור}) — *{סכ</div><div class="msg"><span class="you">ההורה: בחירה 1-6: שיטת תשלום</span>
+<b>הבוט:</b> *הסדרת תשלום — Kids &amp; Fun* 💛 עבור *{שם}* ({אזור}) — *{סכום}₪/חודש* *באיזו שיטת תשלום תרצו?* *1* — 💳 כרטיס אשראי | *2* — 🏦 הוראת קבע | *3* — 💵 מזומן | *4* — 📝 צ׳קים | *5* — 🏛️ העברה בנקאית | *6* — 🔗 קישור תשלום מיידי</div><div class="meta">🔀 בחירה 1-2 → payment_setup_child_name (זיהוי כפול) | בחירה 3-6 → תשובה ישירה או task · ⚙️ loadParentRegistrationContext() אם צריך</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">2. *לפני שאשלח את הקישור, לצורך זיהוי:* *מה שם הילד/ה? (שם פרטי</div><div class="msg"><span class="you">ההורה: שם ילד/ה מלא</span>
+<b>הבוט:</b> *לפני שאשלח את הקישור, לצורך זיהוי:* *מה שם הילד/ה? (שם פרטי + שם משפחה)*</div><div class="meta">🔀 → payment_setup_area · ⚙️ session.collectedData.child_name</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">3. *באיזה אזור {שם} בצהרון?* *1* — כרמל (עתלית והסביבה) | *2* —</div><div class="msg"><span class="you">ההורה: בחירה 1-3: אזור</span>
+<b>הבוט:</b> *באיזה אזור {שם} בצהרון?* *1* — כרמל (עתלית והסביבה) | *2* — שרון (רשפון, מתן) | *3* — תל אביב</div><div class="meta">🔀 → resolvePaymentSchool() (מסגרת לתמחור) · ⚙️ session.collectedData.area_code + area_label</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">4. *ובאיזה גן / בית ספר?* רשימה דינמית מתוך schools table</div><div class="msg"><span class="you">ההורה: בחירה 1-N: בחירת גן/בית ספר</span>
+<b>הבוט:</b> *ובאיזה גן / בית ספר?* רשימה דינמית מתוך schools table</div><div class="meta">🔀 → paymentResolveFeeAndContinue() (תמחור) · ⚙️ session.collectedData.child_school | הוצאת המחיר</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">5. *ובאיזו כיתה {שם}?* (למשל: א / ב / ג)</div><div class="msg"><span class="you">ההורה: כיתה</span>
+<b>הבוט:</b> *ובאיזו כיתה {שם}?* (למשל: א / ב / ג)</div><div class="meta">🔀 → paymentResolveFeeAndContinue() (תמחור לפי כיתה) · ⚙️ session.collectedData.child_class</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">6. *📝 צ׳קים — מצוין!* *כמה צ׳קים תרצו לתת?* (למשל: 3, 6, 10)</div><div class="msg"><span class="you">ההורה: מספר צ׳קים (1-12)</span>
+<b>הבוט:</b> *📝 צ׳קים — מצוין!* *כמה צ׳קים תרצו לתת?* (למשל: 3, 6, 10)</div><div class="meta">🔀 תשובה עם פרטים והנחיות + task לנציגה · ⚙️ task לתיאום קבלת צ׳קים</div></div>
+<h2>💳 בדיקת סטטוס תשלום</h2>
+<p class="sub">איך מגיעים: כוונה: בדיקת_תשלום או בחירה '5' או בחירה '3' מ-register_existing_parent</p>
+<div class="bx fp"><div class="bt">1. *💰 תשלומים — Kids &amp; Fun* על מה תרצו לשאול? *1* — סטטוס ה</div><div class="msg"><span class="you">ההורה: בחירה 1-5</span>
+<b>הבוט:</b> *💰 תשלומים — Kids &amp; Fun* על מה תרצו לשאול? *1* — סטטוס התשלום שלי | *2* — לשנות שיטת תשלום | *3* — לא עבר תשלום / בעיה | *4* — מה העלות החודשית? | *5* — 💳 להסדיר תשלום חדש</div><div class="meta">🔀 1 → getPaymentStatusByPhone() או payment_status_child_name אם לא מזוהה | 2 → payment_setup_method | 3 → payment_fail_start | 4 → cost_info_start | 5 → payment_setup_start · ⚙️ session.currentFlow</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">2. *🔍 בדיקת סטטוס תשלום* לא מצאתי את המספר שלך במערכת — בוא/י נ</div><div class="msg"><span class="you">ההורה: שם ילד/ה מלא</span>
+<b>הבוט:</b> *🔍 בדיקת סטטוס תשלום* לא מצאתי את המספר שלך במערכת — בוא/י נזהה אותך: *מה שם הילד/ה? (שם פרטי + שם משפחה)*</div><div class="meta">🔀 getPaymentStatusByChildName() | אם לא נמצא → task לנציגה · ⚙️ חיפוש לפי שם</div></div>
+<h2>💰 שאלות על עלויות</h2>
+<p class="sub">איך מגיעים: בחירה '4' מ-payment_status_menu או כוונה בדיוקית</p>
+<div class="bx fp"><div class="bt">1. *💰 שאלות עלות — Kids &amp; Fun* על מה תרצו לדעת? *1* — 📅 עלו</div><div class="msg"><span class="you">ההורה: בחירה 1-4</span>
+<b>הבוט:</b> *💰 שאלות עלות — Kids &amp; Fun* על מה תרצו לדעת? *1* — 📅 עלות חודשית צהרון | *2* — ☀️ תשלום מראש לקייטנה | *3* — 👨‍👩‍👧‍👦 הנחת אחים / אחיות | *4* — 💬 שאלה אחרת על עלות</div><div class="meta">🔀 1 → תשובה קבועה | 2 → תשובה קבועה | 3 → תשובה קבועה | 4 → cost_info_freetext · ⚙️ none</div></div>
+<div class="ar">↓</div>
+<div class="bx llm"><div class="bt">2. *💬 שאלות נוספות על עלות* כתבו את שאלתכם בחופשיות — אנסה לענו</div><div class="msg"><span class="you">ההורה: שאלה חופשית</span>
+<b>הבוט:</b> *💬 שאלות נוספות על עלות* כתבו את שאלתכם בחופשיות — אנסה לענות! 😊</div><div class="meta">🔀 → LLM fallback · ⚙️ none</div></div>
+<h2>🔴 טיפול בכשל תשלום</h2>
+<p class="sub">איך מגיעים: כוונה: כשל_תשלום או בחירה '3' מ-payment_status_menu</p>
+<div class="bx fp"><div class="bt">1. *היי {שם}! 😊* שם לב שהיתה בעיה בתשלום — אין מה לדאוג, מטפלים</div><div class="msg"><span class="you">ההורה: בחירה 1-5</span>
+<b>הבוט:</b> *היי {שם}! 😊* שם לב שהיתה בעיה בתשלום — אין מה לדאוג, מטפלים ביחד 💛 *מה המצב?* *1* — החלפתי כרטיס, יש לי פרטים חדשים | *2* — רוצה לעבור לאמצעי תשלום אחר | *3* — רוצה לשנות את תאריך החיוב | *4* — עוד לא מסודר, תחזרו אלי בעוד כמה ימים | *5* — אחר</div><div class="meta">🔀 בחירה 1-4 → payment_fail_child_name (זיהוי כפול) | בחירה 5 → payment_fail_describe (task לנציגה) · ⚙️ session.collectedData.payment_fail_branch</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">2. *לפני שנמשיך, לזיהוי:* *מה שם הילד/ה? (שם פרטי + שם משפחה)*</div><div class="msg"><span class="you">ההורה: שם ילד/ה מלא</span>
+<b>הבוט:</b> *לפני שנמשיך, לזיהוי:* *מה שם הילד/ה? (שם פרטי + שם משפחה)*</div><div class="meta">🔀 → routePaymentFailBranch() · ⚙️ session.collectedData.child_name</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">3. *כשתסיימי את התשלום בקישור* — הוראת הקבע הישנה תבוטל אוטומטי</div><div class="msg"><span class="you">ההורה: שום דבר / שאלה נוספת</span>
+<b>הבוט:</b> *כשתסיימי את התשלום בקישור* — הוראת הקבע הישנה תבוטל אוטומטית 💛</div><div class="meta">🔀 סיום · ⚙️ none</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">4. *באיזה אמצעי תשלום תרצי להמשיך?* *1* — 🏦 הוראת קבע (אשראי) |</div><div class="msg"><span class="you">ההורה: בחירה 1-5: אמצעי תשלום חדש</span>
+<b>הבוט:</b> *באיזה אמצעי תשלום תרצי להמשיך?* *1* — 🏦 הוראת קבע (אשראי) | *2* — 💳 כרטיס אשראי חודשי | *3* — 💵 מזומן | *4* — 📝 צ׳קים | *5* — 🏛️ העברה בנקאית</div><div class="meta">🔀 בחירה חדשה ניתוב לתשובה מתאימה · ⚙️ הנחיות תשלום או task לנציגה</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">5. *בטח!* *באיזה יום בחודש* יתאים לך החיוב? (1-28)</div><div class="msg"><span class="you">ההורה: יום בחודש (1-28)</span>
+<b>הבוט:</b> *בטח!* *באיזה יום בחודש* יתאים לך החיוב? (1-28)</div><div class="meta">🔀 בדיקת תקינות | עדכון ב-PayPlus API · ⚙️ updateRecurringBillingDate() ב-PayPlus</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">6. *בסדר גמור 😊* *מתי לחזור אליך?* (לדוגמה: עוד 3 ימים, ב-25 לח</div><div class="msg"><span class="you">ההורה: תאריך טקסט חופשי (למשל: עוד 3 ימים)</span>
+<b>הבוט:</b> *בסדר גמור 😊* *מתי לחזור אליך?* (לדוגמה: עוד 3 ימים, ב-25 לחודש, בעוד שבוע)</div><div class="meta">🔀 parseRemindWhen() | שמור ב-followup_reminders + task · ⚙️ תזכורת אוטומטית ב-DB</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">7. *מבינים 💛* ספר/י לי מה קורה ואנחנו נמצא פתרון ביחד</div><div class="msg"><span class="you">ההורה: תיאור חופשי של הבעיה</span>
+<b>הבוט:</b> *מבינים 💛* ספר/י לי מה קורה ואנחנו נמצא פתרון ביחד</div><div class="meta">🔀 → task לנציגה · ⚙️ task בעדיפות דחוף</div></div>
+<h2>⏳ הצעת מקום מרשימת המתנה</h2>
+<p class="sub">איך מגיעים: מסלול יזום מהנציגה — המערכת שולחת הודעה וההורה מגיב</p>
+<div class="bx fp"><div class="bt">1. *🎉 מעולה! נפתח מקום עבור {שם}* ב{אזור}! *האם אתם רוצים להמשי</div><div class="msg"><span class="you">ההורה: כן / לא</span>
+<b>הבוט:</b> *🎉 מעולה! נפתח מקום עבור {שם}* ב{אזור}! *האם אתם רוצים להמשיך?* (כן / לא)</div><div class="meta">🔀 כן → from_spot_offer=true ו-payment_setup_start | לא → task לנציגה ועבור למועמד הבא · ⚙️ session.collectedData.from_spot_offer</div></div>
+<h2>🚗 בקשת איסוף מוקדם</h2>
+<p class="sub">איך מגיעים: כוונה: איסוף_מוקדם או בחירה: '6'</p>
+<div class="bx fp"><div class="bt">1. *👋 בקשת איסוף מוקדם* *מה שם הילד/ה* שתרצו לאסוף?</div><div class="msg"><b>הבוט:</b> *👋 בקשת איסוף מוקדם* *מה שם הילד/ה* שתרצו לאסוף?</div><div class="meta">🔀 → pickup_child · ⚙️ none</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">2. *{שם} — באיזו שעה* תרצו לאסוף?</div><div class="msg"><span class="you">ההורה: שם ילד/ה</span>
+<b>הבוט:</b> *{שם} — באיזו שעה* תרצו לאסוף?</div><div class="meta">🔀 → pickup_time · ⚙️ session.collectedData.child_name</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">3. *שעה {שעה} ✅* *מי יאסוף?* (שם + קרבה, למשל: אבא דני)</div><div class="msg"><span class="you">ההורה: שעה</span>
+<b>הבוט:</b> *שעה {שעה} ✅* *מי יאסוף?* (שם + קרבה, למשל: אבא דני)</div><div class="meta">🔀 → pickup_collector · ⚙️ session.collectedData.pickup_time</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">4. *✅ בקשת האיסוף התקבלה!* 👧 ילד/ה: *{שם}* | ⏰ שעה: *{שעה}* | 🚗</div><div class="msg"><span class="you">ההורה: שם + קרבה של המאסף</span>
+<b>הבוט:</b> *✅ בקשת האיסוף התקבלה!* 👧 ילד/ה: *{שם}* | ⏰ שעה: *{שעה}* | 🚗 אוסף/ת: *{שם}* | הצוות עודכן ויהיה מוכן 😊</div><div class="meta">🔀 → סיום + task + notifyFramework · ⚙️ task יצור בעדיפות גבוהה | notifyFramework byChildName</div></div>
+<h2>🤖 LLM Fallback — Claude כשום FP לא עונה</h2>
+<p class="sub">איך מגיעים: כשלי FP או בחירה לא ידועה</p>
+<div class="bx llm"><div class="bt">1. תשובה מ-Claude עם הקשר השיחה וההודעות הקודמות</div><div class="msg"><span class="you">ההורה: כל קלט שלא זוהה</span>
+<b>הבוט:</b> תשובה מ-Claude עם הקשר השיחה וההודעות הקודמות</div><div class="meta">🔀 אם Claude מציע מסלול (suggestFlow) → session.currentFlow = suggestFlow · ⚙️ callLLMFallback() + אפשרי task לנציגה</div></div>
+<h2>📎 טיפול בקבצים ותמונות</h2>
+<p class="sub">איך מגיעים: זיהוי קובץ / תמונה ממשתמש</p>
+<div class="bx fp"><div class="bt">1. זיהוי סוג המדיה — ניתוח דינמי</div><div class="msg"><span class="you">ההורה: קובץ URL או תמונה</span>
+<b>הבוט:</b> זיהוי סוג המדיה — ניתוח דינמי</div><div class="meta">🔀 → handleMediaMessage() · ⚙️ תשובה או task לנציגה</div></div>
+<h2>👩‍💼 מסלול ניהול לנציגה</h2>
+<p class="sub">איך מגיעים: כתיבת 'ניהול' או 'אדמין' או 'תפריט ניהול' — רק לנציגה (קורלי)</p>
+<div class="bx fp"><div class="bt">1. *👩‍💼 מסלול ניהול — Kids &amp; Fun* *1* — 📋 פניות פתוחות | *2</div><div class="msg"><span class="you">ההורה: בחירה 1-5 או 'יציאה' או שאלה חופשית</span>
+<b>הבוט:</b> *👩‍💼 מסלול ניהול — Kids &amp; Fun* *1* — 📋 פניות פתוחות | *2* — 🔍 מצב הורה (טלפון או שם) | *3* — 📊 סיכום היום | *4* — 🔇 השתקת בוט לפונה | *5* — ▶️ החזרת בוט לפונה | *יציאה* — חזרה למצב הורה-בודקת 🧪</div><div class="meta">🔀 1 → admin_tasks (רשימת פניות) | 2 → admin_status_wait | 3 → סיכום | 4-5 → שתק/חזר | יציאה → חזרה למצב הורה · ⚙️ saveAdminState() ב-bot_sessions</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">2. *👩‍💼 פניות פתוחות* (עד 8) רשימה ממוינת לפי עדיפות עם מספרים </div><div class="msg"><span class="you">ההורה: בחירה 1-8 (מספר פנייה) או 'סגור N' או 'תפריט'</span>
+<b>הבוט:</b> *👩‍💼 פניות פתוחות* (עד 8) רשימה ממוינת לפי עדיפות עם מספרים ודוט צבעוני (🔴 דחוף, 🟠 גבוה, 🔵 רגיל)</div><div class="meta">🔀 סגור N → סגירת פנייה | מספר בחר פנייה → פרטים | תפריט → admin_menu · ⚙️ עדכון tasks.status='טופל'</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">3. *👩‍💼 שלחי טלפון או שם של ההורה 🔍*</div><div class="msg"><span class="you">ההורה: טלפון או שם הורה</span>
+<b>הבוט:</b> *👩‍💼 שלחי טלפון או שם של ההורה 🔍*</div><div class="meta">🔀 חיפוש בDB | הצגת סטטוס הורה (ילדים, רישומים, תשלום, הוראת קבע, פניות) · ⚙️ אחזור נתונים מפרנטס, צילדרן, ריג'סטריישנס, פיימנטס</div></div>
+<div class="ar">↓</div>
+<div class="bx llm"><div class="bt">4. שאלה מענה ב-Claude Haiku עם הקשר חי של המערכת</div><div class="msg"><span class="you">ההורה: שאלה חופשית בעברית</span>
+<b>הבוט:</b> שאלה מענה ב-Claude Haiku עם הקשר חי של המערכת</div><div class="meta">🔀 → buildAdminContext() + adminLLM() · ⚙️ קריאה ל-Claude API עם system prompt ונתוני המערכת החיים</div></div>
+<div class="ar">↓</div>
+<div class="bx fp"><div class="bt">5. פקודה בזק — עובדת מכל מצב</div><div class="msg"><span class="you">ההורה: 'השתק 0541234567' או 'החזר 0541234567'</span>
+<b>הבוט:</b> פקודה בזק — עובדת מכל מצב</div><div class="meta">🔀 השתק/החזר via uChat API · ⚙️ pauseBot() / resumeBot() ב-uChat</div></div>
+</body></html>

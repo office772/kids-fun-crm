@@ -68,6 +68,7 @@ function RegisterForm() {
   const searchParams = useSearchParams()
   const router       = useRouter()
 
+  const fromApp      = searchParams.get('from')  === 'app'   // הגענו מהאפליקציה → להציג "חזרה" (לא מוצג להורים מוואטסאפ)
   const areaFromUrl  = searchParams.get('area')  || ''
   const childFromUrl = searchParams.get('child') || ''
   const classFromUrl = searchParams.get('class') || ''
@@ -182,9 +183,19 @@ function RegisterForm() {
 
   // ─── render ───────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-[#fdf6ef]" dir="rtl">
+    <div className="min-h-screen bg-crm-bg" dir="rtl">
       {/* כותרת */}
-      <div className="bg-[#5c3d2e] text-white py-8 px-4 text-center">
+      <div className="relative bg-crm-primary text-white py-9 px-4 text-center">
+        {fromApp && (
+          <button
+            type="button"
+            onClick={() => { if (window.history.length > 1) router.back(); else router.push('/dashboard') }}
+            className="absolute right-4 top-4 flex items-center gap-1 text-sm text-white/90 hover:text-white transition-colors"
+            aria-label="חזרה לאפליקציה"
+          >
+            <span aria-hidden>→</span> חזרה
+          </button>
+        )}
         <div className="text-3xl font-bold mb-1">Kids &amp; Fun 🌟</div>
         <div className="text-lg opacity-90">טופס רישום לצהרון</div>
       </div>
@@ -196,8 +207,8 @@ function RegisterForm() {
           <div
             className="rounded-2xl p-4 mb-6 text-center font-medium"
             style={capacityInfo.hasSpots
-              ? { background: '#E6F4EF', color: '#297058' }
-              : { background: '#FCEAEA', color: '#EF4444' }}
+              ? { background: 'var(--crm-success-bg)', color: 'var(--crm-success)' }
+              : { background: 'var(--crm-danger-bg)', color: 'var(--crm-danger)' }}
           >
             {capacityInfo.hasSpots
               ? `✅ יש מקום! נותרו ${capacityInfo.available} מקומות ב${AREAS[area]}`
@@ -212,11 +223,11 @@ function RegisterForm() {
             <div className="grid grid-cols-1 gap-3">
               {Object.entries(AREAS).map(([code, label]) => (
                 <label key={code} className={`flex items-center gap-3 p-4 rounded-2xl border-2 cursor-pointer transition-all ${
-                  area === code ? 'border-[#5c3d2e] bg-[#f5e6d8]' : 'border-gray-200 bg-white hover:border-[#c49a6c]'
+                  area === code ? 'border-crm-primary bg-crm-surface-soft' : 'border-crm-border bg-crm-surface hover:border-crm-accent'
                 }`}>
                   <input type="radio" name="area" value={code} checked={area === code}
-                    onChange={() => setArea(code)} className="w-5 h-5 accent-[#5c3d2e]" />
-                  <span className="font-medium text-[#3d2b1f]">{label}</span>
+                    onChange={() => setArea(code)} className="w-5 h-5 accent-crm-primary" />
+                  <span className="font-medium text-crm-text">{label}</span>
                 </label>
               ))}
             </div>
@@ -299,7 +310,7 @@ function RegisterForm() {
             {/* בית חינוכי — דינמי לפי אזור */}
             <Field label="בית חינוכי" required>
               {!area ? (
-                <div className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl bg-gray-50 text-gray-400 text-right">
+                <div className="w-full px-3 py-2.5 text-sm border border-crm-border rounded-xl bg-crm-surface-soft text-crm-text-muted text-right">
                   ← בחרו אזור בתחילת הטופס כדי לראות את הרשימה
                 </div>
               ) : schools.length > 0 ? (
@@ -376,11 +387,11 @@ function RegisterForm() {
 
             {/* אישור הצהרת בריאות */}
             <label className={`flex items-start gap-3 p-4 rounded-2xl border-2 cursor-pointer transition-all ${
-              healthConfirmed ? 'border-[#5c3d2e] bg-[#f5e6d8]' : 'border-gray-200 bg-gray-50'
+              healthConfirmed ? 'border-crm-primary bg-crm-surface-soft' : 'border-crm-border bg-crm-surface-soft/50'
             }`}>
               <input type="checkbox" checked={healthConfirmed} onChange={e => setHealthConfirmed(e.target.checked)}
-                className="w-5 h-5 mt-0.5 accent-[#5c3d2e] flex-shrink-0" />
-              <span className="text-sm text-[#3d2b1f] leading-relaxed">
+                className="w-5 h-5 mt-0.5 accent-crm-primary flex-shrink-0" />
+              <span className="text-sm text-crm-text leading-relaxed">
                 אני מאשר/ת שהמידע הרפואי שמסרתי נכון ומלא, וכי הילד/ה בריא/ה ומסוגל/ת להשתתף בפעילויות הצהרון
               </span>
             </label>
@@ -396,18 +407,18 @@ function RegisterForm() {
 
           {/* שגיאה */}
           {error && (
-            <div className="rounded-2xl p-4 text-center text-sm" style={{ background: '#FCEAEA', border: '1px solid #EF444433', color: '#EF4444' }}>
+            <div className="rounded-2xl p-4 text-center text-sm" style={{ background: 'var(--crm-danger-bg)', border: '1px solid var(--crm-danger)', color: 'var(--crm-danger)' }}>
               {error}
             </div>
           )}
 
           {/* שליחה */}
           <button type="submit" disabled={loading || !area}
-            className="w-full py-4 rounded-2xl font-bold text-lg transition-all bg-[#5c3d2e] text-white hover:bg-[#3d2b1f] disabled:opacity-50 disabled:cursor-not-allowed">
+            className="w-full py-4 rounded-crm font-bold text-lg transition-opacity bg-crm-primary text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed">
             {loading ? 'שולח...' : '✅ שלח טופס רישום'}
           </button>
 
-          <p className="text-center text-sm text-gray-500">
+          <p className="text-center text-sm text-crm-text-muted">
             לאחר השליחה תקבלו אישור ופרטי תשלום ב-WhatsApp
           </p>
         </form>
@@ -418,8 +429,8 @@ function RegisterForm() {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
-      <h2 className="font-bold text-[#5c3d2e] text-lg border-b border-[#f0e0d0] pb-2">{title}</h2>
+    <div className="bg-crm-surface rounded-crm p-5 shadow-crm border border-crm-border space-y-4">
+      <h2 className="font-bold text-crm-primary text-lg border-b border-crm-border pb-2">{title}</h2>
       {children}
     </div>
   )
@@ -428,10 +439,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-sm font-medium text-[#3d2b1f]">
-        {label}{required && <span className="text-red-500 mr-1">*</span>}
+      <label className="text-sm font-medium text-crm-text">
+        {label}{required && <span className="text-crm-accent mr-1">*</span>}
       </label>
-      <div className="[&_input]:w-full [&_input]:border [&_input]:border-gray-200 [&_input]:rounded-xl [&_input]:p-3 [&_input]:text-base [&_input]:outline-none [&_input]:focus:border-[#5c3d2e] [&_input]:disabled:bg-gray-100 [&_select]:w-full [&_select]:border [&_select]:border-gray-200 [&_select]:rounded-xl [&_select]:p-3 [&_select]:text-base [&_select]:outline-none [&_select]:focus:border-[#5c3d2e] [&_textarea]:w-full [&_textarea]:border [&_textarea]:border-gray-200 [&_textarea]:rounded-xl [&_textarea]:p-3 [&_textarea]:text-base [&_textarea]:outline-none [&_textarea]:focus:border-[#5c3d2e] [&_textarea]:resize-none">
+      <div className="[&_input]:w-full [&_input]:border [&_input]:border-crm-border [&_input]:rounded-xl [&_input]:p-3 [&_input]:text-base [&_input]:outline-none [&_input]:focus:border-crm-primary [&_input]:disabled:bg-gray-100 [&_select]:w-full [&_select]:border [&_select]:border-crm-border [&_select]:rounded-xl [&_select]:p-3 [&_select]:text-base [&_select]:outline-none [&_select]:focus:border-crm-primary [&_textarea]:w-full [&_textarea]:border [&_textarea]:border-crm-border [&_textarea]:rounded-xl [&_textarea]:p-3 [&_textarea]:text-base [&_textarea]:outline-none [&_textarea]:focus:border-crm-primary [&_textarea]:resize-none">
         {children}
       </div>
     </div>
@@ -441,8 +452,8 @@ function Field({ label, required, children }: { label: string; required?: boolea
 export default function RegisterPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-[#fdf6ef] flex items-center justify-center">
-        <div className="text-[#5c3d2e] text-xl">טוען...</div>
+      <div className="min-h-screen bg-crm-bg flex items-center justify-center">
+        <div className="text-crm-primary text-xl">טוען...</div>
       </div>
     }>
       <RegisterForm />

@@ -1,9 +1,11 @@
 // ─── איפוס פונה לבדיקה ────────────────────────────────────────────────────────
-// מוחק את כל הרשומות של מספר טלפון (הורה, ילדים, רישומים, תשלומים, פניות,
-// שיחות, session) כדי שאפשר להתחיל בדיקה "כאילו מהורה חדש".
+// POST { phone, scope?: 'conversations' | 'full' }
+//   scope='conversations' — מוחק רק שיחות בוט + session (שומר הורה/ילד/רישום/טופס).
+//                           הבוט "שוכח" את השיחה אך מה שמולא בטופס נשאר.
+//   scope='full' (ברירת מחדל) — מוחק הכל: הורה, ילדים, רישומים, תשלומים, פניות,
+//                           שיחות, session — כאילו הורה חדש לגמרי.
 // ⚠️ בטיחות: עובד רק על מספרי בדיקה (src/lib/bot/test-phones.ts) — אי אפשר
 //    למחוק בטעות הורה אמיתי.
-// POST { phone }
 
 export const dynamic = 'force-dynamic'
 
@@ -13,10 +15,11 @@ import { isTestPhone, normIntl } from '@/lib/bot/test-phones'
 
 export async function POST(req: NextRequest) {
   try {
-    const { phone } = await req.json()
+    const { phone, scope } = await req.json()
     if (!phone || typeof phone !== 'string') {
       return NextResponse.json({ success: false, error: 'חסר מספר טלפון' }, { status: 400 })
     }
+    const convOnly = scope === 'conversations'
 
     // בטיחות — רק מספרי בדיקה
     if (!isTestPhone(phone)) {
@@ -29,12 +32,24 @@ export async function POST(req: NextRequest) {
     const supabase = createServiceClient()
     const intl  = normIntl(phone)                 // 972...
     const local = '0' + intl.replace(/^972/, '')  // 0...
-    const variants = [intl, local, phone]
+    // ⚠️ בפרודקשן uChat/וואטסאפ שומרים את המספר בפורמט E.164 עם + מוביל
+    //    (למשל +972544535688) — חובה לכלול גם אותו, אחרת המחיקה לא מוצאת כלום.
+    const variants = Array.from(new Set([intl, '+' + intl, local, phone]))
     const orPhones = variants.map(p => `phone.eq.${p}`).join(',')
 
     const deleted: Record<string, number> = {}
 
-    // מצא את ההורים לפי שני הפורמטים
+    // ── איפוס שיחות בלבד — מוחק רק שיחות + session, שומר הורה/ילד/רישום/טופס ──
+    if (convOnly) {
+      const conv = await supabase.from('conversations').delete({ count: 'exact' }).or(orPhones)
+      deleted['conversations'] = conv.count ?? 0
+      const sess = await supabase.from('bot_sessions').delete({ count: 'exact' }).or(orPhones)
+      deleted['bot_sessions'] = sess.count ?? 0
+      return NextResponse.json({ success: true, phone: intl, scope: 'conversations', deleted })
+    }
+
+    // ── איפוס מלא — הורה + כל התלויות ──
+    // מצא את ההורים לפי כל הפורמטים
     const { data: parents } = await supabase
       .from('parents').select('id').or(orPhones)
     const parentIds = ((parents ?? []) as Array<{ id: string }>).map(p => p.id)
@@ -56,7 +71,7 @@ export async function POST(req: NextRequest) {
     const par = await supabase.from('parents').delete({ count: 'exact' }).or(orPhones)
     deleted['parents'] = par.count ?? 0
 
-    return NextResponse.json({ success: true, phone: intl, deleted })
+    return NextResponse.json({ success: true, phone: intl, scope: 'full', deleted })
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'שגיאה'
     return NextResponse.json({ success: false, error: msg }, { status: 500 })

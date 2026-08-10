@@ -4,13 +4,42 @@
 
 @layer base {
   :root {
-    --crm-bg: #FDF8F0;
-    --crm-primary: #6D436D;
-    --crm-accent: #D29486;
-    --crm-action: #FAD980;
-    --crm-text: #5E4B35;
-    --crm-border-radius: 12px;
+    /* ── Kids & Fun design tokens (warm, refreshed) ───────────────────── */
+    /* Brand */
+    --crm-primary: #6D436D;        /* סגול ראשי */
+    --crm-primary-deep: #4A2C4A;   /* סגול עמוק — כותרות, ניגודיות טובה על קרם */
+    --crm-accent: #D29486;         /* סלמון — הדגשה */
+    --crm-action: #FAD980;         /* צהוב — כפתורי פעולה */
+
+    /* Surfaces */
+    --crm-bg: #FDF8F0;             /* קרם — רקע עמוד */
+    --crm-surface: #FFFFFF;        /* כרטיסים */
+    --crm-surface-soft: #FAF3EA;   /* רקע משני רך */
+
+    /* Text */
+    --crm-text: #5E4B35;           /* גוף */
+    --crm-text-muted: #9A7B6B;     /* משני / רמזים */
+
+    /* Lines */
+    --crm-border: #E0CCB3;         /* מסגרות רכות — קונטור מעט חזק יותר לקונטרסט */
+
+    /* Semantic (גוונים חמים, לא בוטסטרפ) */
+    --crm-success: #5C8A4E;
+    --crm-success-bg: #EEF4E9;
+    --crm-danger: #B0455E;
+    --crm-danger-bg: #FAECF0;
+    --crm-warning: #C98A2B;
+    --crm-warning-bg: #FBF1DE;
+
+    /* Radii / shadow */
+    --crm-radius-sm: 12px;
+    --crm-radius: 16px;            /* כרטיסים */
+    --crm-radius-lg: 24px;
     --crm-button-radius: 50px;
+    --crm-border-radius: 12px;     /* תאימות לאחור */
+    --crm-shadow: 0 4px 16px -6px rgba(109, 67, 109, 0.14);
+    --crm-shadow-lg: 0 10px 30px -10px rgba(109, 67, 109, 0.22);
+
     --border: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);
     --radius: 0.625rem;

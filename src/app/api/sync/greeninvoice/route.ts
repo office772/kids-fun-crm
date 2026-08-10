@@ -5,7 +5,8 @@ export const dynamic = 'force-dynamic'
 // כותב רק ל-Supabase שלנו
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { isAuthorizedWebhook, unauthorized } from '@/lib/api-auth'
 
 const GI_BASE = 'https://api.greeninvoice.co.il/api/v1'
 
@@ -53,7 +54,8 @@ function array4words(name: string): boolean {
   return words.length >= 4
 }
 
-export async function POST() {
+export async function POST(req: NextRequest) {
+  if (!isAuthorizedWebhook(req, 'INTERNAL_SYNC_SECRET')) return unauthorized()
   if (!process.env.GREENINVOICE_API_KEY_ID || !process.env.GREENINVOICE_SECRET) {
     return NextResponse.json({ error: 'Green Invoice keys missing' }, { status: 500 })
   }

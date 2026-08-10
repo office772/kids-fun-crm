@@ -3,13 +3,7 @@
 
 export const dynamic = 'force-dynamic'
 
-export default function PaymentSuccessPage({
-  searchParams,
-}: {
-  searchParams: { test?: string; reg?: string }
-}) {
-  const isTest = searchParams.test === '1'
-
+export default function PaymentSuccessPage() {
   return (
     <main
       dir="rtl"
@@ -18,8 +12,7 @@ export default function PaymentSuccessPage({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'linear-gradient(135deg,#f0fdf4 0%,#f6f7fb 100%)',
-        fontFamily: '-apple-system, "Segoe UI", Arial, sans-serif',
+        background: 'var(--crm-bg)',
         padding: '24px',
       }}
     >
@@ -27,10 +20,11 @@ export default function PaymentSuccessPage({
         style={{
           maxWidth: 480,
           width: '100%',
-          background: '#fff',
-          borderRadius: 20,
+          background: 'var(--crm-surface)',
+          borderRadius: 'var(--crm-radius-lg)',
+          border: '1px solid var(--crm-border)',
           padding: '40px 32px',
-          boxShadow: '0 8px 32px rgba(0,0,0,.1)',
+          boxShadow: 'var(--crm-shadow-lg)',
           textAlign: 'center',
         }}
       >
@@ -40,43 +34,28 @@ export default function PaymentSuccessPage({
             height: 88,
             margin: '0 auto 20px',
             borderRadius: '50%',
-            background: '#16a34a',
+            background: 'var(--crm-success-bg)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: 48,
-            color: '#fff',
+            fontSize: 44,
+            color: 'var(--crm-success)',
           }}
         >
           ✓
         </div>
-        <h1 style={{ fontSize: 26, margin: '0 0 12px', color: '#15803d' }}>
+        <h1 style={{ fontSize: 28, fontWeight: 700, margin: '0 0 12px', color: 'var(--crm-primary)' }}>
           התשלום התקבל בהצלחה! 🎉
         </h1>
-        <p style={{ fontSize: 17, lineHeight: 1.6, color: '#374151', margin: '0 0 8px' }}>
+        <p style={{ fontSize: 17, lineHeight: 1.6, color: 'var(--crm-text)', margin: '0 0 8px' }}>
           תודה רבה! קיבלנו את התשלום שלך.
           <br />
           אישור נשלח אליך גם במייל.
         </p>
-        {isTest && (
-          <p
-            style={{
-              fontSize: 14,
-              color: '#92400e',
-              background: '#fef9c3',
-              border: '1px solid #fde047',
-              borderRadius: 10,
-              padding: '10px 14px',
-              margin: '16px 0 0',
-            }}
-          >
-            🧪 זו הייתה עסקת בדיקה (סנדבוקס) — לא חויב כסף אמיתי.
-          </p>
-        )}
-        <p style={{ fontSize: 15, color: '#6b7280', margin: '24px 0 0' }}>
+        <p style={{ fontSize: 15, color: 'var(--crm-text-muted)', margin: '24px 0 0' }}>
           יש שאלה? אנחנו כאן 💛
           <br />
-          <strong>Kids &amp; Fun</strong>
+          <strong style={{ color: 'var(--crm-primary)' }}>Kids &amp; Fun</strong>
         </p>
       </div>
     </main>

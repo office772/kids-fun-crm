@@ -71,8 +71,20 @@ export function AddParentModal({ onClose, onSave, editParent }: Props) {
   const [form, setForm] = useState<FormData>(buildForm(editParent))
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>({})
+  const [schools, setSchools] = useState<{ name: string; city?: string }[]>([])
 
   useEffect(() => { setForm(buildForm(editParent)) }, [editParent])
+
+  // אזור → רשימת מסגרות נפתחת (מונע טעויות הקלדה). אם אין אזור — אין רשימה.
+  useEffect(() => {
+    if (!form.area) { setSchools([]); return }
+    let cancelled = false
+    fetch(`/api/schools?area=${encodeURIComponent(form.area)}`)
+      .then(r => r.json())
+      .then((data) => { if (!cancelled) setSchools(Array.isArray(data?.schools) ? data.schools : []) })
+      .catch(() => { if (!cancelled) setSchools([]) })
+    return () => { cancelled = true }
+  }, [form.area])
 
   const set = (field: keyof FormData, value: string) => {
     setForm(prev => ({ ...prev, [field]: value }))
@@ -195,8 +207,23 @@ export function AddParentModal({ onClose, onSave, editParent }: Props) {
                 </Field>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <Field label="בית ספר">
-                  <input type="text" placeholder='לדוגמה: "אורט"' value={form.school} onChange={e => set('school', e.target.value)} className={cls(false)} />
+                <Field label="בית ספר / גן">
+                  {!form.area ? (
+                    <input type="text" placeholder="בחרי אזור כדי לראות רשימה" value={form.school} onChange={e => set('school', e.target.value)} className={cls(false)} />
+                  ) : schools.length > 0 ? (
+                    <select value={form.school} onChange={e => set('school', e.target.value)} className={cls(false)}>
+                      <option value="">בחרי מסגרת...</option>
+                      {schools.map(s => (
+                        <option key={s.name} value={s.name}>{s.name}{s.city ? ` — ${s.city}` : ''}</option>
+                      ))}
+                      <option value="__other__">אחר (הקלדה ידנית)</option>
+                    </select>
+                  ) : (
+                    <input type="text" placeholder='לדוגמה: "אורט"' value={form.school} onChange={e => set('school', e.target.value)} className={cls(false)} />
+                  )}
+                  {form.school === '__other__' && (
+                    <input type="text" placeholder="שם המסגרת" value="" onChange={e => set('school', e.target.value)} className={`${cls(false)} mt-2`} />
+                  )}
                 </Field>
                 <Field label="כיתה">
                   <input type="text" placeholder="א1 / גן" value={form.grade || form.childClass} onChange={e => { set('grade', e.target.value); set('childClass', e.target.value) }} className={cls(false)} />

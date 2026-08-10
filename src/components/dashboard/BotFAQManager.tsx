@@ -6,12 +6,24 @@ import type { FAQ, FAQCategory } from '@/lib/types'
 
 const CATEGORIES: FAQCategory[] = ['תשלומים', 'לוז', 'קייטנה', 'ביטול', 'כללי']
 
-const CATEGORY_COLORS: Record<FAQCategory, { bg: string; text: string; border: string }> = {
-  'תשלומים': { bg: 'bg-[#E6F4EF]', text: 'text-[#297058]', border: 'border-[#297058]' },
-  'לוז':     { bg: 'bg-[#FEF9C3]', text: 'text-[#7B6010]', border: 'border-[#7B6010]' },
-  'קייטנה':  { bg: 'bg-[#FAF0ED]', text: 'text-[#9B4A38]', border: 'border-[#9B4A38]' },
-  'ביטול':   { bg: 'bg-[#FCEAEA]', text: 'text-[#EF4444]', border: 'border-[#EF4444]' },
-  'כללי':    { bg: 'bg-[#F0F1F2]', text: 'text-[#7B8794]', border: 'border-[#7B8794]' },
+// נקודת-צבע חמה לכל קטגוריה (בלי ירוק) — לצ'יפ קונטור
+const CAT_DOT: Record<FAQCategory, string> = {
+  'תשלומים': '#9B4A38',
+  'לוז':     '#C98A2B',
+  'קייטנה':  '#D29486',
+  'ביטול':   '#B0455E',
+  'כללי':    '#9A7B6B',
+}
+
+// צ'יפ קטגוריה — קונטור רך + נקודה
+function CatChip({ category }: { category: FAQCategory }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-0.5 rounded-full border font-medium"
+      style={{ background: 'var(--crm-surface)', borderColor: 'var(--crm-border)', color: 'var(--crm-text-muted)' }}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: CAT_DOT[category] }} />
+      {category}
+    </span>
+  )
 }
 
 interface FormData {
@@ -39,18 +51,20 @@ function FAQForm({ form, saving, onChange, onSave, onCancel }: {
   onCancel: () => void
 }) {
   return (
-    <div className="bg-[#fdf6ef] border-2 border-[#e8d5c4] rounded-2xl p-5 space-y-4">
+    <div className="bg-crm-surface-soft border border-crm-border rounded-2xl p-5 space-y-4">
       {/* שורה 1: קטגוריה + סטטוס */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2">
-          <label className="text-xs font-semibold text-gray-600">קטגוריה:</label>
+          <label className="text-xs font-semibold text-crm-text-muted">קטגוריה:</label>
           {CATEGORIES.map(c => (
             <button key={c} type="button" onClick={() => onChange('category', c)}
-              className={`text-xs px-2.5 py-1 rounded-full font-medium border transition-all ${
-                form.category === c
-                  ? `${CATEGORY_COLORS[c].bg} ${CATEGORY_COLORS[c].text} ${CATEGORY_COLORS[c].border}`
-                  : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
-              }`}>{c}</button>
+              className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium border transition-all"
+              style={form.category === c
+                ? { borderColor: 'var(--crm-primary)', color: 'var(--crm-primary)', background: 'var(--crm-surface-soft)' }
+                : { borderColor: 'var(--crm-border)', color: 'var(--crm-text-muted)', background: 'var(--crm-surface)' }}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: CAT_DOT[c] }} />
+              {c}
+            </button>
           ))}
         </div>
         <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -62,50 +76,50 @@ function FAQForm({ form, saving, onChange, onSave, onCancel }: {
 
       {/* שאלה */}
       <div>
-        <label className="text-xs font-semibold text-gray-700 mb-1 block">השאלה כפי שהורה ישאל</label>
+        <label className="text-xs font-semibold text-crm-text mb-1 block">השאלה כפי שהורה ישאל</label>
         <input value={form.question}
           onChange={e => onChange('question', e.target.value)}
           placeholder="למשל: מה השעות של הצהרון בימי תחפושות?"
-          className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#297058]/30 bg-white" />
+          className="w-full px-3 py-2.5 text-sm border border-crm-border rounded-lg focus:outline-none focus:ring-2 focus:ring-crm-primary/30 bg-white" />
       </div>
 
       {/* תשובה */}
       <div>
-        <label className="text-xs font-semibold text-gray-700 mb-1 block">
+        <label className="text-xs font-semibold text-crm-text mb-1 block">
           התשובה שהבוט יחזיר
-          <span className="text-gray-400 font-normal mr-2 text-xs">— *הדגשה* ו-Enter לשורה חדשה</span>
+          <span className="text-crm-text-muted font-normal mr-2 text-xs">— *הדגשה* ו-Enter לשורה חדשה</span>
         </label>
         <textarea value={form.answer}
           onChange={e => onChange('answer', e.target.value)}
           rows={5} dir="rtl"
           placeholder="למשל: ביום תחפושות הצהרון מתקיים בין השעות *12:00-15:30*."
-          className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#297058]/30 bg-white resize-y" />
+          className="w-full px-3 py-2.5 text-sm border border-crm-border rounded-lg focus:outline-none focus:ring-2 focus:ring-crm-primary/30 bg-white resize-y" />
       </div>
 
       {/* מילות מפתח */}
       <div>
-        <label className="text-xs font-semibold text-gray-700 mb-1 block">
-          מילות מפתח לחיפוש <span className="text-gray-400 font-normal">(לא חובה)</span>
-          <span className="text-gray-400 font-normal mr-2 text-xs">— מילים נוספות שהורים יכולים לכתוב, מופרדות בפסיק</span>
+        <label className="text-xs font-semibold text-crm-text mb-1 block">
+          מילות מפתח לחיפוש <span className="text-crm-text-muted font-normal">(לא חובה)</span>
+          <span className="text-crm-text-muted font-normal mr-2 text-xs">— מילים נוספות שהורים יכולים לכתוב, מופרדות בפסיק</span>
         </label>
         <input value={form.keywords}
           onChange={e => onChange('keywords', e.target.value)}
           placeholder="למשל: פורים, תחפושות, שעות, יום מיוחד"
-          className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#297058]/30 bg-white" />
-        <p className="text-xs text-gray-400 mt-1">
+          className="w-full px-3 py-2 text-xs border border-crm-border rounded-lg focus:outline-none focus:ring-2 focus:ring-crm-primary/30 bg-white" />
+        <p className="text-xs text-crm-text-muted mt-1">
           💡 אם הורה ישתמש במילים האלה (במקום הניסוח המדויק של השאלה) — הבוט עדיין ימצא את התשובה
         </p>
       </div>
 
       {/* כפתורים */}
-      <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#e8d5c4]">
+      <div className="flex items-center justify-end gap-2 pt-2 border-t border-crm-border">
         <button onClick={onCancel}
-          className="px-4 py-2 text-sm text-gray-600 hover:bg-white rounded-lg flex items-center gap-1">
+          className="px-4 py-2 text-sm text-crm-text-muted hover:bg-white rounded-lg flex items-center gap-1">
           <X size={14} /> ביטול
         </button>
         <button onClick={onSave}
           disabled={saving || !form.question.trim() || !form.answer.trim()}
-          className="px-4 py-2 text-sm bg-[#297058] text-white rounded-lg flex items-center gap-1 disabled:opacity-50 hover:bg-[#1f5543] transition-colors font-semibold">
+          className="px-4 py-2 text-sm bg-crm-primary text-white rounded-lg flex items-center gap-1 disabled:opacity-50 hover:opacity-90 transition-colors font-semibold">
           <Save size={14} /> {saving ? 'שומר...' : 'שמירה'}
         </button>
       </div>
@@ -210,18 +224,18 @@ export function BotFAQManager() {
       {/* כותרת + פעולות */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h3 className="font-bold text-[#3d2b1f] text-lg">שאלות ותשובות לבוט</h3>
-          <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+          <h3 className="font-bold text-crm-text text-lg">שאלות ותשובות לבוט</h3>
+          <p className="text-xs text-crm-text-muted mt-0.5 leading-relaxed">
             כל שאלה כאן תיענה אוטומטית ע&quot;י הבוט. הוסיפי מילות מפתח כדי שהבוט יזהה ניסוחים שונים של אותה שאלה.
           </p>
         </div>
         <div className="flex gap-2 items-center flex-shrink-0">
           <a href="/faq" target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1 text-xs text-[#297058] hover:underline px-2 py-1.5">
+            className="flex items-center gap-1 text-xs text-crm-primary hover:underline px-2 py-1.5">
             <ExternalLink size={12} /> דף ציבורי
           </a>
           <button onClick={openAdd}
-            className="flex items-center gap-1.5 bg-[#297058] text-white px-4 py-2 rounded-lg text-sm hover:bg-[#1f5543] transition-colors font-semibold">
+            className="flex items-center gap-1.5 bg-crm-primary text-white px-4 py-2 rounded-lg text-sm hover:opacity-90 transition-colors font-semibold">
             <Plus size={15} /> שאלה חדשה
           </button>
         </div>
@@ -229,10 +243,10 @@ export function BotFAQManager() {
 
       {/* חיפוש */}
       <div className="relative">
-        <Search size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <Search size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-crm-text-muted" />
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="חיפוש בכל השאלות..."
-          className="w-full pr-9 pl-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#297058]/30 bg-white" />
+          className="w-full pr-9 pl-3 py-2 text-sm border border-crm-border rounded-lg focus:outline-none focus:ring-2 focus:ring-crm-primary/30 bg-white" />
       </div>
 
       {/* פילטר קטגוריות עם ספירה */}
@@ -241,8 +255,8 @@ export function BotFAQManager() {
           <button key={cat} onClick={() => setCatFilter(cat as FAQCategory | 'הכל')}
             className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
               catFilter === cat
-                ? 'bg-[#297058] text-white'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                ? 'bg-crm-primary text-white'
+                : 'bg-crm-surface-soft text-crm-text-muted hover:bg-crm-surface-soft'
             }`}>
             {cat} <span className="opacity-70 mr-1">({counts[cat] ?? 0})</span>
           </button>
@@ -258,9 +272,9 @@ export function BotFAQManager() {
 
       {/* רשימה */}
       {loading ? (
-        <div className="text-center py-12 text-gray-400 text-sm">טוען...</div>
+        <div className="text-center py-12 text-crm-text-muted text-sm">טוען...</div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-12 text-gray-400 text-sm">
+        <div className="text-center py-12 text-crm-text-muted text-sm">
           {search ? `אין תוצאות לחיפוש "${search}"` : 'אין שאלות בקטגוריה זו'}
         </div>
       ) : (
@@ -272,42 +286,40 @@ export function BotFAQManager() {
                   onChange={(field, value) => setForm(f => ({ ...f, [field]: value }))}
                   onSave={handleSave} onCancel={() => setEditId(null)} />
               ) : (
-                <div className={`bg-white rounded-xl border p-4 transition-all hover:shadow-sm ${faq.is_active ? 'border-gray-100' : 'border-gray-200 opacity-60'}`}>
+                <div className={`bg-white rounded-xl border p-4 transition-all hover:shadow-sm ${faq.is_active ? 'border-crm-border' : 'border-crm-border opacity-60'}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${CATEGORY_COLORS[faq.category].bg} ${CATEGORY_COLORS[faq.category].text}`}>
-                          {faq.category}
-                        </span>
+                        <CatChip category={faq.category} />
                         {!faq.is_active && (
-                          <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">מושבת</span>
+                          <span className="text-xs border border-crm-border text-crm-text-muted px-1.5 py-0.5 rounded-full">מושבת</span>
                         )}
                       </div>
-                      <p className="font-semibold text-sm text-[#3d2b1f] mb-1">{faq.question}</p>
-                      <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line line-clamp-3">
+                      <p className="font-semibold text-sm text-crm-text mb-1">{faq.question}</p>
+                      <p className="text-sm text-crm-text-muted leading-relaxed whitespace-pre-line line-clamp-3">
                         {faq.answer.replace(/\*([^*]+)\*/g, '$1')}
                       </p>
                       {faq.keywords && (
-                        <p className="text-xs text-gray-400 mt-2">
+                        <p className="text-xs text-crm-text-muted mt-2">
                           🔎 <span className="font-medium">מילות מפתח:</span> {faq.keywords}
                         </p>
                       )}
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <button onClick={() => handleToggle(faq)}
-                        className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                        className="p-1.5 rounded-lg hover:bg-crm-surface-soft transition-colors"
                         title={faq.is_active ? 'השבת' : 'הפעל'}>
                         {faq.is_active
-                          ? <ToggleRight size={20} className="text-[#297058]" />
-                          : <ToggleLeft size={20} className="text-gray-400" />}
+                          ? <ToggleRight size={20} className="text-crm-primary" />
+                          : <ToggleLeft size={20} className="text-crm-text-muted" />}
                       </button>
                       <button onClick={() => openEdit(faq)}
-                        className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-[#297058] transition-colors"
+                        className="p-1.5 rounded-lg hover:bg-crm-surface-soft text-crm-text-muted hover:text-crm-primary transition-colors"
                         title="עריכה">
                         <Pencil size={15} />
                       </button>
                       <button onClick={() => handleDelete(faq.id, faq.question)}
-                        className="p-1.5 rounded-lg hover:bg-[#FCEAEA] text-gray-400 hover:text-[#EF4444] transition-colors"
+                        className="p-1.5 rounded-lg hover:bg-[#FCEAEA] text-crm-text-muted hover:text-[#EF4444] transition-colors"
                         title="מחיקה">
                         <Trash2 size={15} />
                       </button>

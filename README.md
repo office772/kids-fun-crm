@@ -40,14 +40,16 @@ SUPABASE_SERVICE_ROLE_KEY=eyJ...
 
 ---
 
-## חיבור uchat / ManyChat לבוט
+## חיבור uChat לבוט
 
 ### Webhook URL (אחרי פריסה ל-Vercel)
 ```
-POST https://your-domain.vercel.app/api/webhooks/whatsapp
+POST https://kids-fun-app-psi.vercel.app/api/webhooks/manychat
 ```
+> ⚠️ ה-webhook התקין הוא `/api/webhooks/manychat` (כולל whitelist + שמירת session).
+> אין להשתמש ב-`/api/webhooks/whatsapp` (route ישן, מיועד למחיקה).
 
-### הגדרת uchat
+### הגדרת uChat
 1. צרי HTTP Request action בתהליך
 2. שלחי POST עם Body:
 ```json
@@ -111,7 +113,7 @@ src/
   app/
     dashboard/page.tsx       # הדשבורד הראשי + סימולטור
     api/
-      webhooks/whatsapp/     # webhook מ-uchat/ManyChat
+      webhooks/manychat/     # webhook ראשי מ-uChat (התיקייה בשם manychat מטעמי URL)
       bot/simulate/          # סימולטור לבדיקות
       parents/               # API הורים
       tasks/                 # API משימות

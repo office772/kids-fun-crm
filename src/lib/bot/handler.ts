@@ -30,6 +30,15 @@ export async function processMessage(
   session: BotSession,
   userMessage: string
 ): Promise<BotResponse & { intent: BotIntent }> {
+  // ── קובץ/תמונה? ניתוח אמיתי במקום ניחוש כוונה מתוך URL ────────────────────
+  // (לפני התיקון: קישור לקובץ נכנס ל-classifier והחזיר תפריטים אקראיים)
+  const { detectMedia, handleMediaMessage } = await import('./media-handler')
+  const media = detectMedia(userMessage)
+  if (media) {
+    const mediaResult = await handleMediaMessage(session, media)
+    return { ...mediaResult, intent: 'לא_ידוע' }
+  }
+
   const intent = classifyIntent(userMessage)
 
   // ── FP: מסלול פעיל — ממשיכים בו ──────────────────────────────────────────
@@ -44,8 +53,10 @@ export async function processMessage(
   }
 
   // ── שאלה אמיתית? קודם נחפש ב-FAQ של האדמין לפני שמתחילים מסלול ──────────
-  // ככה שאלות מידע כמו "כמה ימים אפשר?" יקבלו תשובה ישירה במקום להיכנס לרישום
-  if (isLikelyQuestion(userMessage) && !isExplicitNumericChoice(userMessage)) {
+  // ככה שאלות מידע כמו "כמה ימים אפשר?" יקבלו תשובה ישירה במקום להיכנס לרישום.
+  // יוצא דופן: שאלה על הרכזת/הצוות → ל-LLM (שמקבל את פרטי הצוות בהקשר), לא FAQ גנרי.
+  const asksAboutStaff = /רכזת|מדריכה|גננת|המורה|צוות|מי אחרא|איש קשר/.test(userMessage)
+  if (!asksAboutStaff && isLikelyQuestion(userMessage) && !isExplicitNumericChoice(userMessage)) {
     const { findFaqAnswer } = await import('./faq-search')
     const faqAnswer = await findFaqAnswer(userMessage)
     if (faqAnswer) {
@@ -154,7 +165,7 @@ async function handleNewIntent(
       return { ...await handleCancellationFlow(session, userMessage), intent }
 
     case 'שאלת_לוז':
-      return { ...handleScheduleFlow(userMessage), intent }
+      return { ...await handleScheduleFlow(userMessage), intent }
 
     case 'איסוף_מוקדם':
       return { ...handleEarlyPickupFlow(session, userMessage), intent }
@@ -216,12 +227,18 @@ async function llmFallback(
   userMessage: string,
   intent: BotIntent
 ): Promise<BotResponse & { intent: BotIntent }> {
+  // שאלה על הצוות/המסגרת של ההורה → ישר ל-LLM (שמקבל את פרטי הצוות בהקשר),
+  // כדי לתת תשובה ספציפית עם השמות במקום תשובת FAQ גנרית ("כתבו מאיזה גן").
+  const asksAboutStaff = /רכזת|מדריכה|גננת|המורה|צוות|מי אחרא|איש קשר/.test(userMessage)
+
   // קודם — נסה למצוא תשובה ב-FAQ של האדמין (פאנל ניהול)
   // אם נמצא — חוסך קריאת LLM ועונה מהר ובדיוק לפי הניסוח של עינת
-  const { findFaqAnswer } = await import('./faq-search')
-  const faqAnswer = await findFaqAnswer(userMessage)
-  if (faqAnswer) {
-    return { text: faqAnswer, intent, isComplete: true }
+  if (!asksAboutStaff) {
+    const { findFaqAnswer } = await import('./faq-search')
+    const faqAnswer = await findFaqAnswer(userMessage)
+    if (faqAnswer) {
+      return { text: faqAnswer, intent, isComplete: true }
+    }
   }
 
   const llmResult = await callLLMFallback(session, userMessage)
@@ -237,10 +254,11 @@ async function llmFallback(
     isComplete: true,
     ...(llmResult.createTask
       ? {
+          // הבוט לא ידע לענות והעביר לקורלי → עדיפות גבוהה (מפעיל התראה + מייל לאדמין)
           createTask: {
             type: 'שאלה כללית',
-            description: llmResult.taskDescription || `שאלה חופשית מ-LLM: "${userMessage.slice(0, 80)}"`,
-            priority: 'רגיל' as const,
+            description: llmResult.taskDescription || `הבוט העביר לקורלי — שאלה שלא נענתה: "${userMessage.slice(0, 80)}"`,
+            priority: 'גבוה' as const,
           },
         }
       : {}),

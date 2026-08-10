@@ -9,6 +9,7 @@ import {
   DEFAULT_MONTHLY_FEE,
   type PaymentMethod,
 } from './payment-helpers'
+import { resolveMonthlyFee } from './pricing'
 
 export interface BotResponse {
   text: string
@@ -51,6 +52,37 @@ function looksOffScript(text: string): boolean {
   return false
 }
 
+// ─── ולידציית שם ילד/ה ───────────────────────────────────────────────────────
+// נמצא באתגור (07/2026): מסלול הביטול קיבל "מנהל" כשם ילד. כל נקודת קליטת שם
+// חייבת לוודא שהקלט באמת נראה כמו שם — לא פקודה, מילת שירות, מספר או קישור.
+const NOT_A_NAME = new Set([
+  // פקודות ומילות מערכת
+  'מנהל', 'ניהול', 'אדמין', 'תפריט', 'יציאה', 'סגור', 'החזר', 'השתק', 'ביטול', 'עזרה',
+  // מילות שיחה נפוצות
+  'כן', 'לא', 'אולי', 'תודה', 'שלום', 'היי', 'הי', 'טוב', 'בסדר', 'אוקי', 'סבבה', 'רגע',
+  // נושאי העסק (הורה שעונה על שאלה אחרת)
+  'נציג', 'נציגה', 'קייטנה', 'צהרון', 'רישום', 'תשלום', 'חשבונית', 'קבלה', 'מחיר', 'שעות', 'חופש',
+])
+
+// האם הקלט נראה כמו שם ילד/ה (לא בודק מול DB — רק צורנית)
+function looksLikeChildName(text: string): boolean {
+  const t = text.trim()
+  if (t.length < 2 || t.length > 40) return false
+  if (looksOffScript(t)) return false  // שאלות, משפטים ארוכים, מילות מטא
+  if (/\d|https?:|@|[?!#$%^*_=+\[\]{}<>\\\/|~]/.test(t)) return false  // ספרות/קישור/סימנים
+  const words = t.split(/\s+/).filter(Boolean)
+  if (words.some(w => NOT_A_NAME.has(w.replace(/[.,!]/g, '')))) return false
+  return true
+}
+
+// תגובה אחידה כשהקלט לא נראה כמו שם — נשארים באותו שלב
+function buildNotAName(nextFlow: string): BotResponse {
+  return {
+    text: `זה לא נראה לי כמו שם 🤔\nאפשר בבקשה *שם פרטי + שם משפחה* של הילד/ה? (לדוגמה: נועה כהן)`,
+    nextFlow,
+  }
+}
+
 // ─── utils ────────────────────────────────────────────────────────────────────
 // "עכשיו" לפי שעון ישראל — חובה כי Vercel רץ ב-UTC (אחרת שעה/תאריך שגויים).
 export function israelNow(): Date {
@@ -62,6 +94,14 @@ export function isBusinessHours(): boolean {
   const day = il.getDay() // 0=ראשון
   const hour = il.getHours()
   return [0, 1, 2, 3, 4].includes(day) && hour >= 8 && hour < 17
+}
+
+// ⏰ "שעות שקט" — חלון שבו אסור לבוט לשלוח הודעה יזומה להורה (כולל תזכורות):
+// לפני 08:00 או מ-21:30 ואילך (שעון ישראל). תקף רק לשליחה *יזומה מהמערכת* —
+// תגובה להודעה שהורה כתב מותרת תמיד (uChat ממילא חוסם מחוץ לחלון 24ש').
+export function isQuietHours(now: Date = israelNow()): boolean {
+  const minutes = now.getHours() * 60 + now.getMinutes()
+  return minutes < 8 * 60 || minutes >= 21 * 60 + 30
 }
 
 function isYes(msg: string): boolean {
@@ -98,9 +138,9 @@ export function buildDidNotUnderstand(): string {
 // ─── הסלמה לנציג ─────────────────────────────────────────────────────────────
 export function buildEscalationMessage(): string {
   if (isBusinessHours()) {
-    return `בוקר טוב! העברתי את פנייתך לנציגה שלנו — היא תחזור אליך בהקדם 💛`
+    return `העברתי את פנייתך לקורלי, הנציגה שלנו — היא תחזור אליך בהקדם 💛`
   }
-  return `קיבלתי! הפנייה שלך תועברת לנציגה בשעות הפעילות (ראשון-חמישי 8:00-17:00) 📬\n\nלילה טוב! 🌙`
+  return `קיבלתי! העברתי לקורלי, הנציגה שלנו, והיא תחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) 📬\n\nלילה טוב! 🌙`
 }
 
 // ─── פנייה יזומה (מהמערכת) ───────────────────────────────────────────────────
@@ -325,6 +365,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
         nextFlow: 'register_child_name',
       }
     }
+    if (!looksLikeChildName(trimmed)) return buildNotAName('register_child_name')
     session.collectedData.child_name = trimmed
 
     // ⚡ זיהוי משני: אולי הילד הזה כבר רשום אצלנו (גיבוי לטלפון לא-מזוהה)
@@ -599,6 +640,8 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
   }
 
   if (step === 'cancel_child') {
+    if (looksOffScript(userMessage)) return { text: '', useLLM: true }
+    if (!looksLikeChildName(userMessage)) return buildNotAName('cancel_child')
     session.collectedData.child_name = userMessage
 
     if (dayOfMonth <= 15) {
@@ -828,6 +871,8 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
 
   // תרחיש 2: בדיקת שם
   if (step === 'camp_check_name') {
+    if (looksOffScript(userMessage)) return { text: '', useLLM: true }
+    if (!looksLikeChildName(userMessage)) return buildNotAName('camp_check_name')
     session.collectedData.child_name = userMessage
     return {
       text: `*${userMessage}* — *מספר תעודת זהות של הילד/ה?*\n(3-4 ספרות אחרונות מספיקות)`,
@@ -930,6 +975,24 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
             },
           }
         }
+
+        // הגענו לכאן → השם לא אומת חד-משמעית (verified !== 1). מפרידים שני מצבים:
+        if (!kids?.length) {
+          // אין כלל ילד/ה בשם שנמסר → תשובה ודאית מהבוט: אין רישום (לא כשל זיהוי, לא נציגה אוטומטית)
+          return {
+            text:
+              `🔎 לפי הרישומים שבידינו, לא נמצא רישום לקייטנה על השם *${childName}*.\n\n` +
+              `אם נרשמתם לאחרונה או שנפלה טעות — כתבו "נציגה" ונבדוק עבורכם 💛`,
+            isComplete: true,
+          }
+        }
+        // נמצא שם תואם אך הת"ז לא התאימה → להגנת הפרטיות לא חושפים; מבקשים לאמת שוב
+        return {
+          text:
+            `כדי להגן על הפרטים לא הצלחתי לאמת את הזהות (מספר ת"ז לא תואם).\n\n` +
+            `בדקו את מספר תעודת הזהות ונסו שוב, או כתבו "נציגה" ונשמח לעזור 💛`,
+          isComplete: true,
+        }
       } catch (err) {
         console.error('[camp_check] lookup error:', err)
       }
@@ -976,6 +1039,7 @@ export function handleLateCampFlow(session: BotSession, userMessage: string): Bo
   const step = session.currentFlow
 
   if (step === 'camp_late_name') {
+    if (!looksLikeChildName(userMessage)) return buildNotAName('camp_late_name')
     session.collectedData.child_name = userMessage
     return {
       text: `*${userMessage}* — *כיתה/גיל?*`,
@@ -1007,57 +1071,32 @@ export function handleLateCampFlow(session: BotSession, userMessage: string): Bo
 // מסלול 4: שאלות לוח זמנים וחגים
 // TODO: לקרוא נתונים מ-Supabase calendar_events במקום hardcoded
 // ═══════════════════════════════════════════════════════════════════════════════
-export function handleScheduleFlow(message: string): BotResponse {
-  const lowerMsg = message.toLowerCase()
+// מסלול 4: שעות / חגים / לו"ז — מקור יחיד הוא ה-FAQ (נערך מהדשבורד).
+// אין יותר ערכים קשיחים כאן: כל תוכן השעות/חגים/חופשות חי ב-faqs, וכך
+// הלקוחה מעדכנת אותו מלשונית "תוכן הבוט" בלי נגיעה בקוד.
+export async function handleScheduleFlow(message: string): Promise<BotResponse> {
+  const { findFaqAnswer, findFaqByTopic } = await import('./faq-search')
 
-  if (lowerMsg.includes('שעות') || lowerMsg.includes('מתי פתוח') || lowerMsg.includes('שעה') || lowerMsg.includes('פתוח')) {
-    return {
-      text: `⏰ *שעות פעילות הצהרון:*\n\n` +
-        `ראשון עד חמישי: *13:00 – 18:00*\n` +
-        `שישי ושבת: סגור\n\n` +
-        `⚠️ השעות עשויות להשתנות בחגים ובתקופת הקיץ.\n\n` +
-        `יש שאלה נוספת? 😊`,
-      isComplete: true
-    }
+  // קודם — ניסוח ההורה עצמו (FAQ fuzzy)
+  let answer = await findFaqAnswer(message)
+
+  // נפילה — עוגן לפי תת-נושא, כדי שגם "שעות"/"חגים"/"4" יחזירו את ה-FAQ הנכון
+  if (!answer) {
+    const lower = message.toLowerCase()
+    const anchors = /חג|סגור/.test(lower)        ? ['חג', 'חגים']
+      : /חופש|קיץ|חופשה/.test(lower)             ? ['חופש', 'חופשה', 'קיץ']
+      : ['שעות', 'שעות פעילות']
+    answer = await findFaqByTopic(anchors)
   }
 
-  if (lowerMsg.includes('חג') || lowerMsg.includes('חגים') || lowerMsg.includes('סגור')) {
-    return {
-      text: `📅 *ימי חג — הצהרון סגור:*\n\n` +
-        `• שבועות — ב׳ סיון\n` +
-        `• ט׳ באב\n` +
-        `• ראש השנה — ב׳ ימים\n` +
-        `• יום כיפור\n` +
-        `• סוכות — א׳ וחול המועד\n` +
-        `• שמחת תורה\n` +
-        `• פסח — א׳ ושביעי + חול המועד\n` +
-        `• יום העצמאות\n\n` +
-        `לוח החגים המלא נשלח בתחילת כל שנת לימודים 📬\n\n` +
-        `יש שאלה ספציפית? 😊`,
-      isComplete: true
-    }
-  }
+  if (answer) return { text: answer, isComplete: true }
 
-  if (lowerMsg.includes('חופש') || lowerMsg.includes('קיץ')) {
-    return {
-      text: `🏖️ *חופשות:*\n\n` +
-        `• *חופש קיץ* (יולי-אוגוסט) — פעילות קייטנה בלבד\n` +
-        `• *חנוכה* — 3-4 ימי חופש (לפי לוח)\n` +
-        `• *פסח* — שבוע חופש מלא\n\n` +
-        `פרטים מלאים נשלחים בעדכון חודשי 💛`,
-      isComplete: true
-    }
-  }
-
+  // אין עדיין FAQ מתאים — תשובה רכה ללא שעות קשיחות (כדי לא לסתור את ה-FAQ)
   return {
-    text: `📋 *מידע על הצהרון:*\n\n` +
-      `ראשון-חמישי: 13:00 – 18:00\n\n` +
-      `לשאלות ספציפיות כתבו:\n` +
-      `• *"שעות"* — שעות פעילות\n` +
-      `• *"חגים"* — לוח חגים\n` +
-      `• *"חופש"* — חופשות\n\n` +
-      `${isBusinessHours() ? 'נציגה שלנו זמינה לעזור! 😊' : 'נחזור אליך בשעות הפעילות 😊'}`,
-    isComplete: true
+    text:
+      `אשמח לעזור! 😊\n\n` +
+      `לשעות הפעילות ולוח החגים המעודכן — נציגה שלנו תשלח לך את הפרטים המדויקים בהקדם 💛`,
+    isComplete: true,
   }
 }
 
@@ -1077,6 +1116,7 @@ export function handleEarlyPickupFlow(session: BotSession, userMessage: string):
   }
 
   if (step === 'pickup_child') {
+    if (!looksLikeChildName(userMessage)) return buildNotAName('pickup_child')
     session.collectedData.child_name = userMessage
     return {
       text: `*${userMessage}* — *באיזו שעה* תרצו לאסוף?`,
@@ -1507,37 +1547,65 @@ async function routePaymentFailBranch(session: BotSession): Promise<BotResponse>
   const childName = session.collectedData.child_name || 'הילד/ה'
 
   if (branch === 'card') {
-    // ענף 1: שליחת קישור PayPlus דינמי להזנת כרטיס חדש (יוצר הוראת קבע חדשה)
-    const regId      = session.collectedData.registration_id ?? `cardfix-${Date.now()}`
-    const areaCode   = session.collectedData.area_code ?? 'sharon'
-    const areaLabel  = session.collectedData.area_label ?? 'שרון'
-    const amount     = parseInt(session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE), 10)
-    const result = await createPayPlusPaymentLink({
-      registrationId: regId, parentName: session.parentName ?? '', phone: session.phone,
-      childName, areaCode, areaLabel, amount,
-      description: `החלפת כרטיס — הוראת קבע ${childName}`,
-      paymentType: 'standing_order',
-    })
-    if (result.success && result.paymentUrl) {
+    // ענף 1: עדכון כרטיס על הוראת הקבע ה*קיימת* (CreditCardRenewal) —
+    // ⚠️ לא יוצרים הוראת קבע חדשה (זה היה גורם לכפילות של 10 תשלומים).
+    // זיהוי לפי טלפון הפונה *או* שם הילד (הבוט כבר שאל שם) — לא טלפון בלבד.
+    const { findRecurringForRenewal } = await import('@/lib/bot/payment-helpers')
+    const found = await findRecurringForRenewal(session.phone, session.collectedData.child_name)
+    const recurringUid = found?.uid
+
+    if (recurringUid) {
+      const { renewRecurringCard } = await import('@/lib/payplus-api')
+      const r = await renewRecurringCard(recurringUid)
+      if (r.success) {
+        // אם חזר לינק — שולחים בוואטסאפ (העדפה); אחרת PayPlus שלח ללקוח מייל חידוש
+        if (r.data?.paymentUrl) {
+          return {
+            text:
+              `מצוין! 💳 הכנתי קישור מאובטח לעדכון הכרטיס *בהוראת הקבע הקיימת*:\n\n` +
+              `🔗 ${r.data.paymentUrl}\n\n` +
+              `אחרי שתעדכני — החיוב החודשי ימשיך כרגיל, בלי לפתוח הוראה חדשה 💛`,
+            nextFlow: 'payment_fail_card_link_sent',
+            createTask: {
+              type: 'כשל תשלום',
+              description: `חידוש כרטיס בהו"ק קיימת — ${childName} | קישור נשלח (וואטסאפ)`,
+              priority: 'רגיל',
+            },
+          }
+        }
+        return {
+          text:
+            `מצוין! 📧 שלחנו לך *למייל* קישור מאובטח לעדכון הכרטיס בהוראת הקבע הקיימת.\n\n` +
+            `בדקי את תיבת המייל (כולל ספאם) — אחרי העדכון החיוב החודשי ימשיך כרגיל, בלי לפתוח הוראה חדשה 💛`,
+          isComplete: true,
+          createTask: {
+            type: 'כשל תשלום',
+            description: `חידוש כרטיס — ${childName} | מייל חידוש נשלח ללקוח (Vault)`,
+            priority: 'רגיל',
+          },
+        }
+      }
+      // קריאת ה-API נכשלה ממש (נדיר) → נציגה
       return {
-        text:
-          `מצוין! 💳 הכנתי קישור מאובטח של PayPlus להזנת הכרטיס החדש:\n\n` +
-          `🔗 ${result.paymentUrl}\n\n` +
-          `אחרי שתסיימי — *הוראת הקבע הישנה תתבטל אוטומטית* והחדשה תתחיל לפעול 💛`,
-        nextFlow: 'payment_fail_card_link_sent',
+        text: `אני מעבירה את הבקשה לנציגה שתעדכן את הכרטיס ותחזור אליך בהקדם 💛`,
+        isComplete: true,
         createTask: {
           type: 'כשל תשלום',
-          description: `החלפת כרטיס — ${childName} | קישור נשלח. לוודא ביטול ההוראה הישנה לאחר התשלום`,
-          priority: 'גבוה',
+          description: `עדכון כרטיס — ${childName} | renewal API נכשל: ${r.error}`,
+          priority: 'דחוף',
         },
       }
     }
+
+    // אין מזהה הוראת קבע במערכת (הוקמה דרך הדשבורד / ייבוא) → לא יוצרים חדשה!
     return {
-      text: `קרתה תקלה זמנית בהפקת הקישור 😔\nנציגה תיצור איתך קשר תוך זמן קצר.`,
+      text:
+        `הבנתי 💛 כדי לעדכן את הכרטיס בהוראת הקבע שלך — נציגה תיצור איתך קשר בהקדם ` +
+        `ותסדר את זה איתך אישית.`,
       isComplete: true,
       createTask: {
         type: 'כשל תשלום',
-        description: `החלפת כרטיס — ${childName} | תקלה בהפקת קישור: ${result.error}`,
+        description: `עדכון כרטיס — ${childName} | אין payplus_recurring_uid במערכת — נציגה תעדכן ידנית ב-PayPlus`,
         priority: 'דחוף',
       },
     }
@@ -1783,6 +1851,120 @@ function parseRemindWhen(text: string): Date | null {
 // 💵 מזומן / 📝 צ׳קים / 🏛️ העברה: יצירת task לנציגה + הוראות
 // 🔗 חשבונית ירוקה: קישור מ-bot_assets → שליחה
 // ═══════════════════════════════════════════════════════════════════════════════
+// ─── עוזרי תמחור לזרימת הסדרת תשלום (מחיר לפי גן/בי"ס, לא לפי אזור) ──────────
+// אחרי שההורה בחר אזור — שואלים *איזה גן/בי"ס* (כי המחיר נקבע לפי המסגרת),
+// ואז מתמחרים לפי המודל של קורלי. לעולם לא נופלים ל-799.
+async function resolvePaymentSchool(session: BotSession): Promise<BotResponse> {
+  // אם כבר ידוע בית-הספר (מרישום קיים) — ישר לתמחור
+  if (session.collectedData.child_school) return await paymentResolveFeeAndContinue(session)
+  try {
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const sb = createServiceClient()
+    const { data: schools } = await sb
+      .from('schools').select('name')
+      .eq('area_code', session.collectedData.area_code ?? '')
+      .eq('is_active', true).order('sort_order')
+    const names: string[] = (schools ?? []).map((s: { name: string }) => s.name)
+
+    if (names.length === 0) return paymentToStaff(session, 'לא נמצאו מסגרות לאזור')
+    if (names.length === 1) {
+      session.collectedData.child_school = names[0]
+      return await paymentResolveFeeAndContinue(session)
+    }
+    session.collectedData.payment_setup_school_list = names.join('||')
+    return {
+      text: `מצוין! ובאיזה גן / בית ספר?\n\n` + names.map((s, i) => `*${i + 1}* — ${s}`).join('\n'),
+      nextFlow: 'payment_setup_school',
+    }
+  } catch {
+    return paymentToStaff(session, 'שגיאה בשליפת מסגרות')
+  }
+}
+
+async function paymentResolveFeeAndContinue(session: BotSession): Promise<BotResponse> {
+  const school    = session.collectedData.child_school ?? ''
+  const className = session.collectedData.child_class ?? null
+  const fee = resolveMonthlyFee({ area_code: session.collectedData.area_code, school, class_name: className })
+  if (fee != null) {
+    session.collectedData.monthly_fee = String(fee)
+    return await finalizePaymentLink(session)
+  }
+  // מתן מתמחר לפי כיתה — אם חסרה, נשאל
+  if (school.includes('מתן') && !className) {
+    return {
+      text: `ובאיזו כיתה ${session.collectedData.child_name ?? 'הילד/ה'}? (למשל: א / ב / ג)`,
+      nextFlow: 'payment_setup_class',
+    }
+  }
+  return paymentToStaff(session, `מחיר לא מוגדר למסגרת "${school}"`)
+}
+
+function paymentToStaff(session: BotSession, reason: string): BotResponse {
+  const childName = session.collectedData.child_name ?? 'הילד/ה'
+  return {
+    text: `אשמח לעזור! 💛 נציגה שלנו תשלח לכם את קישור התשלום המדויק בהקדם.`,
+    isComplete: true,
+    createTask: {
+      type:        'כשל תשלום',
+      description: `הסדרת תשלום — ${childName} | ${reason} | טלפון: ${session.phone} | נציגה תשלח קישור ידני`,
+      priority:    'גבוה',
+    },
+  }
+}
+
+async function finalizePaymentLink(session: BotSession): Promise<BotResponse> {
+  const childName   = session.collectedData.child_name ?? 'הילד/ה'
+  const regId       = session.collectedData.registration_id ?? `bot-${Date.now()}`
+  const amount      = parseInt(session.collectedData.monthly_fee ?? '0', 10)
+  const areaLabel   = session.collectedData.area_label ?? ''
+  const areaCode    = session.collectedData.area_code ?? ''
+  const school      = session.collectedData.child_school ?? areaLabel
+  const firstName   = session.parentName?.split(' ')[0] ?? ''
+  const isStanding  = session.collectedData.payment_method === 'standing_order'
+  const description = isStanding
+    ? `הוראת קבע — צהרון Kids & Fun | ${childName}`
+    : `תשלום חודשי — צהרון Kids & Fun | ${childName}`
+
+  if (!amount || amount <= 0) return paymentToStaff(session, 'סכום לא נקבע')
+
+  // מניעת הוראת קבע כפולה (החלטה 2)
+  if (isStanding) {
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const sb = createServiceClient()
+    const { data: existing } = await sb
+      .from('parents').select('payplus_recurring_uid, payplus_recurring_status')
+      .or(`phone.eq.${session.phone},phone.eq.972${session.phone.replace(/^0/, '')}`)
+      .maybeSingle()
+    if (existing?.payplus_recurring_uid && existing.payplus_recurring_status === 'active') {
+      return {
+        text:
+          `יש לכם כבר הוראת קבע פעילה 💛\n\n` +
+          `אם צריך *לעדכן כרטיס* — כתבו "כשל תשלום". לכל שינוי אחר — נציגה תיצור קשר.`,
+        isComplete: true,
+        createTask: { type: 'כשל תשלום', description: `ביקש/ה הסדרת תשלום אך כבר קיימת הו"ק פעילה — ${childName}.`, priority: 'רגיל' },
+      }
+    }
+  }
+
+  const result = await createPayPlusPaymentLink({
+    registrationId: regId, parentName: session.parentName ?? firstName, phone: session.phone,
+    childName, areaCode, areaLabel, amount, description,
+    paymentType: isStanding ? 'standing_order' : 'credit',
+  })
+  if (result.success && result.paymentUrl) {
+    return {
+      text:
+        `מעולה! ${isStanding ? '🏦 *הוראת קבע*' : '💳 *אשראי*'} עבור *${childName}* (${school}) — *${amount}₪/חודש*:\n\n` +
+        `🔗 ${result.paymentUrl}\n\n` +
+        `לאחר השלמת התשלום — יישלח אישור. יש שאלה? כתבו לנו 💛`,
+      isComplete: true,
+      createTask: { type: 'כשל תשלום', description: `קישור ${isStanding ? 'הו"ק' : 'אשראי'} נשלח — ${childName} | ${school} | ${amount}₪ | טלפון ${session.phone}`, priority: 'רגיל' },
+    }
+  }
+  console.error('[PayPlus] Failed to create payment link:', result.error)
+  return paymentToStaff(session, `PayPlus error: ${result.error}`)
+}
+
 export async function handlePaymentSetupFlow(
   session: BotSession,
   userMessage: string
@@ -2010,6 +2192,36 @@ export async function handlePaymentSetupFlow(
     session.collectedData.area_code  = areaCode
     session.collectedData.area_label = areaLabel
 
+    // אחרי האזור — שואלים גן/בי"ס ומתמחרים לפי המסגרת (לא לפי אזור, לעולם לא 799)
+    return await resolvePaymentSchool(session)
+  }
+
+  // ─── שלב זיהוי 3: בחירת גן/בי"ס (לתמחור נכון) ──────────────────────────────
+  if (step === 'payment_setup_school') {
+    const list = (session.collectedData.payment_setup_school_list ?? '').split('||').filter(Boolean)
+    const m = userMessage.trim()
+    const num = parseInt(m, 10)
+    const chosen = (!isNaN(num) && num >= 1 && num <= list.length)
+      ? list[num - 1]
+      : (list.find(s => m.length >= 2 && s.includes(m)) ?? null)
+    if (!chosen) {
+      return {
+        text: `לא הבנתי 😊 בחרו מספר מהרשימה:\n` + list.map((s, i) => `*${i + 1}* — ${s}`).join('\n'),
+        nextFlow: 'payment_setup_school',
+      }
+    }
+    session.collectedData.child_school = chosen
+    return await paymentResolveFeeAndContinue(session)
+  }
+
+  // ─── שלב זיהוי 4: כיתה (למסגרות שמתמחרות לפי כיתה, כמו מתן) ─────────────────
+  if (step === 'payment_setup_class') {
+    session.collectedData.child_class = userMessage.trim()
+    return await paymentResolveFeeAndContinue(session)
+  }
+
+  // (הקוד הישן של יצירת לינק לפי אזור הוחלף בעוזרים resolvePaymentSchool/finalizePaymentLink — מושבת)
+  if (step === '__payment_area_legacy_disabled__') {
     const childName  = session.collectedData.child_name ?? 'הילד/ה'
     const regId      = session.collectedData.registration_id ?? `bot-${Date.now()}`
     const amount     = parseInt(session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE), 10)
@@ -2018,6 +2230,34 @@ export async function handlePaymentSetupFlow(
     const description = isStanding
       ? `הוראת קבע — צהרון Kids & Fun | ${childName}`
       : `תשלום חודשי — צהרון Kids & Fun | ${childName}`
+    const areaCode  = session.collectedData.area_code ?? ''
+    const areaLabel = session.collectedData.area_label ?? ''
+
+    // ⚠️ מניעת הוראת קבע כפולה (החלטה 2): אם כבר קיימת הו"ק פעילה — לא יוצרים חדשה.
+    // הו"ק חדשה נוצרת רק ברישום; לעדכון כרטיס משתמשים ב-"כשל תשלום" (renewal).
+    if (isStanding) {
+      const { createServiceClient } = await import('@/lib/supabase/server')
+      const sb = createServiceClient()
+      const { data: existing } = await sb
+        .from('parents')
+        .select('payplus_recurring_uid, payplus_recurring_status')
+        .or(`phone.eq.${session.phone},phone.eq.972${session.phone.replace(/^0/, '')}`)
+        .maybeSingle()
+      if (existing?.payplus_recurring_uid && existing.payplus_recurring_status === 'active') {
+        return {
+          text:
+            `יש לכם כבר הוראת קבע פעילה 💛\n\n` +
+            `אם צריך *לעדכן כרטיס* — כתבו "כשל תשלום" ואשלח קישור לעדכון ההוראה הקיימת.\n` +
+            `לכל שינוי אחר — נציגה תיצור איתכם קשר.`,
+          isComplete: true,
+          createTask: {
+            type:        'כשל תשלום',
+            description: `ביקש/ה הסדרת תשלום אך כבר קיימת הו"ק פעילה — ${childName}. לבדוק אם נדרש עדכון/שינוי.`,
+            priority:    'רגיל',
+          },
+        }
+      }
+    }
 
     const result = await createPayPlusPaymentLink({
       registrationId: regId,

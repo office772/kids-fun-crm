@@ -7,6 +7,7 @@ export const dynamic = 'force-dynamic'
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from 'next/server'
+import { isAuthorizedWebhook, unauthorized } from '@/lib/api-auth'
 
 function normalizePhone(raw: string): string {
   let p = raw.replace(/[\s\-.()+]/g, '')
@@ -23,12 +24,14 @@ function isCardExpired(statusCode: string, reason: string): boolean {
 
 // PayPlus עשוי לשלוח callback גם כ-GET עם query params (תלוי בהגדרת "שיטת החזרת מידע" בדף הסליקה)
 export async function GET(req: NextRequest) {
+  if (!isAuthorizedWebhook(req, 'PAYPLUS_WEBHOOK_SECRET')) return unauthorized()
   const params = Object.fromEntries(new URL(req.url).searchParams.entries())
   console.log('[PayPlus Webhook GET]', JSON.stringify(params))
   return handlePayPlusEvent(params)
 }
 
 export async function POST(req: NextRequest) {
+  if (!isAuthorizedWebhook(req, 'PAYPLUS_WEBHOOK_SECRET')) return unauthorized()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let body: Record<string, any> = {}
   try {
@@ -109,6 +112,13 @@ async function handlePayPlusEvent(body: Record<string, any>) {
       if (reg?.parent_id) parentId = reg.parent_id
     }
 
+    // התאמה לפי מזהה הוראת הקבע — קריטי לכשלי חיוב חוזר (לרוב אין בהם טלפון)
+    if (!parentId && recurringUid) {
+      const { data: byRec } = await supabase
+        .from('parents').select('id').eq('payplus_recurring_uid', recurringUid).maybeSingle()
+      if (byRec) parentId = byRec.id
+    }
+
     const phone = rawPhone ? normalizePhone(rawPhone) : null
     if (!parentId && phone) {
       const { data: byPhone } = await supabase.from('parents').select('id').eq('phone', phone).maybeSingle()
@@ -153,8 +163,8 @@ async function handlePayPlusEvent(body: Record<string, any>) {
       }).eq('id', parentId)
     }
 
-    // ── רשומת תשלום ────────────────────────────────────────────────────────
-    await supabase.from('payments').insert({
+    // ── רשומת תשלום (upsert ignoreDuplicates — לא לכפול עם רשומת ה-sync) ──────
+    await supabase.from('payments').upsert({
       parent_id:          parentId,
       amount:             amount || null,
       status:             isSuccess ? 'שולם' : 'נכשל',
@@ -168,7 +178,7 @@ async function handlePayPlusEvent(body: Record<string, any>) {
       failure_reason:     isSuccess ? null : (reason || 'חיוב נכשל'),
       payment_number:     paymentNumber,
       total_payments:     totalPayments,
-    })
+    }, { onConflict: 'payplus_transaction_uid', ignoreDuplicates: true })
 
     if (isSuccess) {
       // עדכן רישום אם קיים
@@ -189,6 +199,56 @@ async function handlePayPlusEvent(body: Record<string, any>) {
         metadata:    { amount, payplus_ref: txId },
       })
       console.log(`[PayPlus Webhook] ✅ Success — parent ${parentId}, amount ${amount}₪`)
+
+      // ── callback הצלחה = הכרטיס תקין (עדכון בדף החידוש או חיוב שחזר לתקין) ──────
+      // סוגרים פניות כשל-תשלום פתוחות ומסמנים את ההו"ק כפעילה — כך הבוט "יודע"
+      // שהעדכון עבר, בלי להמתין לחודש הבא.
+      try {
+        if (recurringUid) {
+          await supabase.from('parents')
+            .update({ payplus_recurring_status: 'active' })
+            .eq('id', parentId).neq('payplus_recurring_status', 'active')
+        }
+        await supabase.from('tasks')
+          .update({ status: 'טופל' })
+          .eq('parent_id', parentId).eq('type', 'כשל תשלום').neq('status', 'טופל')
+      } catch (resolveErr) {
+        console.error('[PayPlus Webhook] resolve failure tasks error:', resolveErr)
+      }
+
+      // ── אישור תשלום בוואטסאפ להורה — רק בתוך חלון 24ש' של uChat ──────────────
+      // אם ההורה שילם אחרי שחלף חלון ההודעות (למשל כמה ימים אחרי) — לא שולחים
+      // (uChat/Meta חוסמים ממילא, וזה מונע ניסיון שליחה כושל). כך גם חיובים
+      // חודשיים מתחדשים לא מפעילים הודעה (ההורה לא בחלון) — רק התשלום הראשון.
+      try {
+        const { data: lastIn } = await supabase
+          .from('conversations')
+          .select('created_at')
+          .eq('parent_id', parentId)
+          .eq('direction', 'נכנס')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        const within24h = !!lastIn?.created_at &&
+          (Date.now() - new Date(lastIn.created_at).getTime()) < 24 * 60 * 60 * 1000
+        if (within24h && rawPhone) {
+          const { sendText, getUserNsByPhone } = await import('@/lib/uchat')
+          const userNs = await getUserNsByPhone(rawPhone)
+          if (userNs) {
+            const ok = await sendText(
+              userNs,
+              `✅ *התשלום התקבל!* תודה רבה 💛\n\n` +
+                (amount ? `סכום: *${amount}₪*\n` : '') +
+                `אישור מפורט נשלח גם למייל. נתראה בצהרון! 🎒`,
+            )
+            console.log(`[PayPlus Webhook] אישור וואטסאפ להורה ${parentId}: ${ok ? 'נשלח' : 'נכשל'}`)
+          }
+        } else {
+          console.log(`[PayPlus Webhook] מחוץ לחלון 24ש' — דילוג על אישור וואטסאפ (parent ${parentId})`)
+        }
+      } catch (waErr) {
+        console.error('[PayPlus Webhook] שגיאת אישור וואטסאפ:', waErr)
+      }
     } else {
       // ── כשל חיוב — צור משימה לטיפול + רשומת timeline ─────────────────────
       const failLabel = cardExpired ? 'כרטיס אשראי פג תוקף' : (reason || 'חיוב נכשל')

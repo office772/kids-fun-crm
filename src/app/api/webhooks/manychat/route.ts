@@ -20,7 +20,8 @@ export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { processMessage } from '@/lib/bot/handler'
-import { isTestPhone as isAllowedPhone } from '@/lib/bot/test-phones'
+import { isTestPhone as isAllowedPhone, TEST_PHONES } from '@/lib/bot/test-phones'
+import { phoneVariants } from '@/lib/phone'
 import type { BotSession, TaskPriority } from '@/lib/types'
 
 // ─── Auth ──────────────────────────────────────────────────────────────────────
@@ -43,42 +44,40 @@ function isAuthorized(req: NextRequest): boolean {
 function normPhone(raw: string): string {
   return raw.replace(/\D/g, '').replace(/^0/, '972')
 }
+// מספרי אדמין מורשים: STAFF_ADMIN_PHONE (קורלי) + ADMIN_PHONES (רשימה מופרדת בפסיקים,
+// לאדמינים נוספים בעתיד). תשתית למסלול הניהול — כרגע מזהה את הגישה; הרחבת הפקודות אחרי הפגישה.
+function adminPhones(): string[] {
+  const list = [process.env.STAFF_ADMIN_PHONE, ...(process.env.ADMIN_PHONES?.split(',') ?? [])]
+  return list.map(p => p?.trim()).filter((p): p is string => !!p).map(normPhone)
+}
 function isAdminPhone(raw: string): boolean {
-  const admin = process.env.STAFF_ADMIN_PHONE
-  return !!admin && normPhone(raw) === normPhone(admin)
+  if (adminPhones().includes(normPhone(raw))) return true
+  // שלב בדיקות: כל מספרי הבדיקה יכולים לבדוק גם את מסלול הניהול (בקשת עינת).
+  // כשעוברים להורים אמיתיים (TEST_PHONES ריק) — נשארים רק האדמינים מה-env.
+  return TEST_PHONES.length > 0 && isAllowedPhone(raw)
 }
 
-// מטפל בהודעות מהאדמין (קורלי). מחזיר טקסט תשובה, או null אם לא אדמין.
+// מטפל בהודעות מהאדמין (קורלי) — מסלול הניהול המלא (src/lib/bot/admin-flow.ts).
+// מחזיר טקסט תשובה אם ההודעה טופלה כניהול, או null → ממשיכה למסלול הורה רגיל
+// (כך קורלי ממשיכה לבדוק את הבוט כהורה כשהיא לא במצב ניהול).
 async function handleAdminCommand(phone: string, message: string, userNs: string | null): Promise<string | null> {
   if (!isAdminPhone(phone)) return null
 
-  // שמירת ה-user_ns של קורלי (לשליחת התראות אליה בעתיד)
+  const { createServiceClient } = await import('@/lib/supabase/server')
+  const supabase = createServiceClient()
+
+  // שמירת ה-user_ns של קורלי (לשליחת התראות/תבניות אליה)
   if (userNs) {
     try {
-      const { createServiceClient } = await import('@/lib/supabase/server')
-      const supabase = createServiceClient()
       const normalized = phone.replace(/\D/g, '').replace(/^972/, '0')
+      const intl = '972' + normalized.replace(/^0/, '')
       await supabase.from('parents').update({ uchat_user_ns: userNs })
-        .or(`phone.eq.${normalized},phone.eq.${'972' + normalized.replace(/^0/, '')}`)
+        .or(`phone.eq.${normalized},phone.eq.${intl},phone.eq.+${intl}`)
     } catch { /* לא חוסם */ }
   }
 
-  const m = message.trim()
-  if (!/^\s*(החזר|להחזיר|resume)/i.test(m)) return null  // לא פקודת resume → תיפול ל-away רגיל
-
-  const phoneMatch = m.match(/972\d{8,9}|0\d{8,9}/)
-  if (!phoneMatch) {
-    return 'כדי להחזיר את הבוט — כתבי *החזר* ואחריו מספר הפונה.\nלדוגמה: *החזר 0541234567* 💛'
-  }
-  const { getUserNsByPhone, resumeBot } = await import('@/lib/uchat')
-  const targetNs = await getUserNsByPhone(phoneMatch[0])
-  if (!targetNs) {
-    return `לא מצאתי פונה פעיל עם המספר ${phoneMatch[0]} 🤔\nודאי שהמספר נכון.`
-  }
-  const ok = await resumeBot(targetNs)
-  return ok
-    ? `✅ הבוט חזר לפעולה עבור ${phoneMatch[0]} 💛`
-    : `הייתה תקלה בהחזרת הבוט עבור ${phoneMatch[0]}. אפשר לנסות שוב או דרך הדשבורד.`
+  const { handleAdminFlow } = await import('@/lib/bot/admin-flow')
+  return handleAdminFlow(supabase, phone, message)
 }
 
 // ─── TaskType mapper ───────────────────────────────────────────────────────────
@@ -192,13 +191,14 @@ async function getOrCreateParent(
   firstName?: string,
   lastName?: string
 ): Promise<{ id: string; name?: string }> {
-  const { data: existing } = await supabase
+  // חיפוש לפי כל וריאנטי הטלפון (+972/972/0…) — כדי לא לכפול הורה שכבר קיים מטופס/ידני
+  const { data: matches } = await supabase
     .from('parents')
     .select('id, name')
-    .eq('phone', phone)
-    .single()
+    .in('phone', phoneVariants(phone))
+    .limit(1)
 
-  if (existing) return existing
+  if (matches?.[0]) return matches[0]
 
   const name = [firstName, lastName].filter(Boolean).join(' ') || undefined
   const { data: created } = await supabase
@@ -220,6 +220,7 @@ async function logConversation(
     text: string
     intent?: string
     sessionId?: string
+    idMessage?: string | null   // מזהה הודעת uChat — לסינון כפילויות
   }
 ) {
   await supabase.from('conversations').insert({
@@ -231,6 +232,7 @@ async function logConversation(
     intent: opts.intent ?? null,
     handled_by: 'בוט',
     session_id: opts.sessionId ?? null,
+    id_message: opts.idMessage ?? null,
   })
 }
 
@@ -243,6 +245,8 @@ async function createTask(
     description: string
     priority: TaskPriority
     framework?: { area_code: string; school?: string; type?: 'צהרון'|'קייטנה' }
+    parentName?: string
+    parentPhone?: string
   }
 ) {
   await supabase.from('tasks').insert({
@@ -254,12 +258,44 @@ async function createTask(
   })
 
   // התראה לאדמין + צוות המסגרת (אם הוגדר framework). פעיל ברגע ש-uChat מחובר.
-  const { notifyStaff } = await import('@/lib/notify')
+  const { notifyStaff, sendCorliEscalationTemplate } = await import('@/lib/notify')
   await notifyStaff({
     text: `משימה חדשה (${opts.type}):\n${opts.description}`,
     priority: opts.priority,
     framework: opts.framework,
   })
+
+  // הסלמה דחופה/גבוהה → גם תבנית וואטסאפ לקורלי (עם כפתור "צפייה בשיחה").
+  // לא-חוסם: כשל בשליחה לא מפיל את יצירת הפנייה.
+  if (opts.priority === 'דחוף' || opts.priority === 'גבוה') {
+    try {
+      await sendCorliEscalationTemplate({
+        parentName:  opts.parentName  || 'לא ידוע',
+        parentPhone: opts.parentPhone || '—',
+        topic:       opts.description,
+        parentId:    opts.parentId,
+      })
+    } catch (err) {
+      console.error('[manychat] Corli template escalation failed (non-blocking):', err)
+    }
+  }
+
+  // התראת מייל לאדמין — ערוץ אמין (בלי מגבלת 24ש' של וואטסאפ). רק לפניות שאינן שגרתיות
+  // (נציגה / כשל תשלום / דחוף). לא-חוסם: כשל מייל לא מפיל את יצירת הפנייה.
+  if (opts.priority === 'דחוף' || opts.priority === 'גבוה') {
+    try {
+      const { sendAdminAlert } = await import('@/lib/email')
+      await sendAdminAlert({
+        taskType: opts.type,
+        description: opts.description,
+        priority: opts.priority,
+        parentName: opts.parentName,
+        parentPhone: opts.parentPhone,
+      })
+    } catch (err) {
+      console.error('[manychat] admin alert email failed:', err)
+    }
+  }
 }
 
 // ─── POST ──────────────────────────────────────────────────────────────────────
@@ -281,6 +317,8 @@ export async function POST(req: NextRequest) {
   const lastName = (body.last_name as string | undefined) ?? undefined
   // user_ns של uChat — נדרש ל-resume/notify. uChat שולח אותו בגוף ה-External Request.
   const userNs = ((body.user_ns ?? body.subscriber_ns ?? body.ns ?? '') as string).trim() || null
+  // מזהה הודעה (אם uChat שולח) — לסינון כפילויות webhook
+  const messageId = ((body.message_id ?? body.mid ?? body.id_message ?? '') as string).toString().trim() || null
 
   if (!phone || !messageText) {
     return NextResponse.json({ error: 'Missing phone or message' }, { status: 400 })
@@ -302,6 +340,34 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createServiceClient()
+
+  // ─── סינון כפילויות (משוב קורלי: הבוט ענה פעמיים על אותה הודעה) ─────────────
+  // 1. לפי מזהה הודעה (אם uChat שלח) — webhook retry קלאסי.
+  // 2. לפי טקסט זהה מאותו טלפון ב-15 השניות האחרונות — כפילות בלי מזהה.
+  try {
+    if (messageId) {
+      const { data: dupById } = await supabase
+        .from('conversations').select('id')
+        .eq('id_message', messageId).limit(1)
+      if (dupById?.length) {
+        console.log(`[manychat] duplicate message_id ${messageId} — skipped`)
+        return NextResponse.json({ reply: '', skip: true, duplicate: true }, { status: 200 })
+      }
+    } else {
+      const cutoff = new Date(Date.now() - 15_000).toISOString()
+      const { data: dupByText } = await supabase
+        .from('conversations').select('id')
+        .eq('phone', phone).eq('direction', 'נכנס')
+        .eq('message_text', messageText)
+        .gte('created_at', cutoff).limit(1)
+      if (dupByText?.length) {
+        console.log(`[manychat] duplicate text within 15s from ${phone} — skipped`)
+        return NextResponse.json({ reply: '', skip: true, duplicate: true }, { status: 200 })
+      }
+    }
+  } catch (err) {
+    console.error('[manychat] dedup check failed (continuing):', err)
+  }
 
   // 1. טעינת הורה
   const parent = await getOrCreateParent(supabase, phone, firstName, lastName)
@@ -331,6 +397,7 @@ export async function POST(req: NextRequest) {
     direction: 'נכנס',
     text: messageText,
     sessionId: session.sessionId,
+    idMessage: messageId,
   })
 
   // 4. עיבוד ההודעה (async — כולל LLM fallback)
@@ -390,6 +457,8 @@ export async function POST(req: NextRequest) {
       description: result.createTask.description,
       priority: result.createTask.priority,
       framework: frameworkCtx,
+      parentName: parent.name ?? undefined,
+      parentPhone: phone,
     })
   }
 
