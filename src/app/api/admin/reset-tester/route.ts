@@ -11,7 +11,8 @@ export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { isTestPhone, normIntl } from '@/lib/bot/test-phones'
+import { normIntl } from '@/lib/bot/test-phones'
+import { isAllowedPhoneAsync } from '@/lib/bot/test-phones-db'
 
 export async function POST(req: NextRequest) {
   try {
@@ -21,8 +22,8 @@ export async function POST(req: NextRequest) {
     }
     const convOnly = scope === 'conversations'
 
-    // בטיחות — רק מספרי בדיקה
-    if (!isTestPhone(phone)) {
+    // בטיחות — רק מספרי בדיקה (כולל מספרים שנוספו דרך הדשבורד)
+    if (!(await isAllowedPhoneAsync(phone))) {
       return NextResponse.json(
         { success: false, error: 'אפשר לאפס רק מספרי בדיקה מאושרים' },
         { status: 403 },

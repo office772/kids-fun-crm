@@ -5,17 +5,35 @@ import { useState, useEffect, useRef } from 'react'
 // =========================================
 // TesterReset — איפוס פונה לבדיקה (לבודק, דרך הפרונטהנד)
 // =========================================
+const RESET_KNOWN_LABELS: Record<string, string> = {
+  '972544535688': 'עינת',
+  '972546603344': 'בדיקה',
+  '972546102262': 'קורלי',
+  '972544487290': 'אייבי',
+}
+
 export function TesterReset() {
-  const TEST_NUMBERS = [
-    { phone: '0544535688', label: 'מספר בדיקה 1' },
-    { phone: '0546603344', label: 'מספר בדיקה 2' },
-    { phone: '0546102262', label: 'מספר בדיקה 3 — קורלי' },
-    { phone: '0544487290', label: 'מספר בדיקה 4 — אייבי' },
-  ]
+  // רשימת מספרי הבדיקה נטענת מ-API (base קבוע + extra שנוספו בדשבורד) —
+  // אותו מקור אמת כמו הבוט, כדי שמספר שאייל מוסיף יופיע גם כאן לאיפוס.
+  const [testNumbers, setTestNumbers] = useState<{ phone: string; label: string }[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
   // ברירת מחדל: רק שיחות — לא מוחק בטעות רישום שמולא בטופס
   const [scope, setScope] = useState<'conversations' | 'full'>('conversations')
+
+  useEffect(() => {
+    fetch('/api/admin/test-phones')
+      .then(r => r.json())
+      .then(d => {
+        if (!d.success) return
+        const all = [...(d.base ?? []), ...(d.extra ?? [])] as string[]
+        setTestNumbers(all.map(intl => ({
+          phone: '0' + intl.replace(/^972/, ''),
+          label: RESET_KNOWN_LABELS[intl] ?? 'מספר בדיקה',
+        })))
+      })
+      .catch(() => { /* ignore */ })
+  }, [])
 
   const reset = async (phone: string, label: string) => {
     const msg = scope === 'conversations'
@@ -62,7 +80,10 @@ export function TesterReset() {
       </div>
 
       <div className="flex flex-wrap gap-3">
-        {TEST_NUMBERS.map(n => (
+        {testNumbers.length === 0 && (
+          <p className="text-sm" style={{ color: 'var(--crm-text-muted)' }}>טוען מספרי בדיקה…</p>
+        )}
+        {testNumbers.map(n => (
           <button
             key={n.phone}
             onClick={() => reset(n.phone, n.label)}

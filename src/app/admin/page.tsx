@@ -6,6 +6,7 @@ import { CapacitySettings } from '@/components/admin/CapacitySettings'
 import { SchoolCapacitySettings } from '@/components/admin/SchoolCapacitySettings'
 import { FrameworkStaffManager } from '@/components/dashboard/FrameworkStaffManager'
 import { BotSimulator, TesterReset } from '@/components/dashboard/BotSimulator'
+import { TestPhonesManager } from '@/components/dashboard/TestPhonesManager'
 import { HelpGuide } from '@/components/admin/HelpGuide'
 import Link from 'next/link'
 
@@ -165,6 +166,7 @@ export default function AdminPage() {
           <div className="bg-crm-surface rounded-crm border border-crm-border p-4 md:p-6">
             <BotSimulator />
           </div>
+          <TestPhonesManager />
           <TesterReset />
         </div>
       ),

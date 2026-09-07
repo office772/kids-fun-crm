@@ -21,6 +21,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { processMessage } from '@/lib/bot/handler'
 import { isTestPhone as isAllowedPhone, TEST_PHONES } from '@/lib/bot/test-phones'
+import { isAllowedPhoneAsync } from '@/lib/bot/test-phones-db'
 import { phoneVariants } from '@/lib/phone'
 import type { BotSession, TaskPriority } from '@/lib/types'
 
@@ -334,7 +335,9 @@ export async function POST(req: NextRequest) {
 
   // שלב בדיקות — רק מספרי הבדיקה מקבלים את הבוט. כל מספר אחר (הורים אמיתיים) —
   // הבוט לא מגיב כלל (reply ריק) כדי לא לשלוח להם כלום. הצוות מטפל בהם ידנית.
-  if (!isAllowedPhone(phone)) {
+  // כולל את מספרי הבסיס הקבועים + מספרים שנוספו דרך הדשבורד (settings ב-Supabase).
+  // כשל DB → נשארים רק ה-base הקבועים (בטוח — לא נפתח לכולם בטעות).
+  if (!(await isAllowedPhoneAsync(phone))) {
     console.log(`[manychat] phone ${phone} not a test number — silent (no reply)`)
     return NextResponse.json({ reply: '', skip: true, ignored: true }, { status: 200 })
   }
