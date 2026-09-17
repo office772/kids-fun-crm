@@ -13,6 +13,7 @@ import { BotFlowKanban } from '@/components/dashboard/BotFlowKanban'
 import { BotFAQManager } from '@/components/dashboard/BotFAQManager'
 import { BotAssets } from '@/components/dashboard/BotAssets'
 import { SystemSettings } from '@/components/dashboard/SystemSettings'
+import { BotVoiceSettings } from '@/components/dashboard/BotVoiceSettings'
 import { RegistrationsList } from '@/components/dashboard/RegistrationsList'
 import { AttendanceList } from '@/components/dashboard/AttendanceList'
 import { ParentDetail } from '@/components/dashboard/ParentDetail'
@@ -842,8 +843,44 @@ function BotManagementTab() {
         {subTab === 'kanban' && <BotFlowKanban />}
         {subTab === 'content' && <BotContentManager />}
         {subTab === 'faq' && <BotFAQManager />}
-        {subTab === 'settings' && <SystemSettings />}
+        {subTab === 'settings' && <SettingsSection />}
       </div>
+    </div>
+  )
+}
+
+// =========================================
+// SettingsSection — ניווט פנימי: כללי / קול הבוט
+// =========================================
+function SettingsSection() {
+  const [inner, setInner] = useState<'general' | 'voice'>('general')
+
+  const pill = (active: boolean) =>
+    active
+      ? { background: 'var(--crm-primary)', color: '#fff' }
+      : { background: '#fff', color: 'var(--crm-text)', border: '1px solid var(--crm-border)', opacity: 0.7 }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex gap-2 flex-wrap">
+        <button
+          onClick={() => setInner('general')}
+          className="px-4 py-1.5 rounded-full text-sm font-semibold transition-all"
+          style={pill(inner === 'general')}
+        >
+          ⚙️ כללי
+        </button>
+        <button
+          onClick={() => setInner('voice')}
+          className="px-4 py-1.5 rounded-full text-sm font-semibold transition-all"
+          style={pill(inner === 'voice')}
+        >
+          🗣️ קול הבוט
+        </button>
+      </div>
+
+      {inner === 'general' && <SystemSettings />}
+      {inner === 'voice' && <BotVoiceSettings />}
     </div>
   )
 }

@@ -249,9 +249,17 @@ export async function callLLMFallback(
     )
   }
 
+  // קול הבוט (פרסונה/טון שהלקוח הגדיר בדשבורד). ריק → '' → הפרומפט לא משתנה.
+  let voiceBlock = ''
+  try {
+    const { getBotVoice, buildVoicePromptBlock } = await import('./bot-voice')
+    voiceBlock = buildVoicePromptBlock(await getBotVoice())
+  } catch { /* לא חוסם — אם נכשל, ממשיכים עם הפרומפט הרגיל */ }
+  const systemBase = SYSTEM_PROMPT_BASE + voiceBlock
+
   const systemWithContext = contextLines.length > 0
-    ? SYSTEM_PROMPT_BASE + '\n\n== הקשר נוכחי ==\n' + contextLines.join('\n')
-    : SYSTEM_PROMPT_BASE
+    ? systemBase + '\n\n== הקשר נוכחי ==\n' + contextLines.join('\n')
+    : systemBase
 
   try {
     // המודל ניתן להחלפה ב-env (BOT_LLM_MODEL) — ברירת מחדל Haiku 4.5.

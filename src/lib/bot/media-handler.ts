@@ -126,11 +126,18 @@ export async function handleMediaMessage(
   if (session.parentName) contextLines.push(`שם ההורה: ${session.parentName}`)
   if (media.caption)      contextLines.push(`ההורה כתב/ה לצד הקובץ: "${media.caption}"`)
 
+  // קול הבוט (פרסונה/טון מהדשבורד). ריק → '' → הפרומפט לא משתנה.
+  let voiceBlock = ''
+  try {
+    const { getBotVoice, buildVoicePromptBlock } = await import('./bot-voice')
+    voiceBlock = buildVoicePromptBlock(await getBotVoice())
+  } catch { /* לא חוסם — ממשיכים עם הפרומפט הרגיל */ }
+
   try {
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5',
       max_tokens: 450,
-      system: MEDIA_SYSTEM_PROMPT,
+      system: MEDIA_SYSTEM_PROMPT + voiceBlock,
       messages: [
         {
           role: 'user',

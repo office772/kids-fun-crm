@@ -16,6 +16,7 @@ import { processMessage } from '@/lib/bot/handler'
 import { parsePickupTime, splitNameAndClass, scheduleFaqAnchors, isHolidayQuestion } from '@/lib/bot/flows'
 import { parseLLMResponse, sanitizeForWhatsApp } from '@/lib/bot/llm-fallback'
 import { detectMedia } from '@/lib/bot/media-handler'
+import { buildVoicePromptBlock, isVoiceConfigured, EMPTY_VOICE } from '@/lib/bot/bot-voice'
 import type { BotIntent, BotSession } from '@/lib/types'
 
 const PHONE = '+972500000000'   // מספר שלא קיים ב-DB — "הורה לא מזוהה"
@@ -520,6 +521,32 @@ function llmParsingCases() {
     `got=${sanitizeForWhatsApp('זה **חשוב** מאוד')}`)
 }
 
+// ─── קול הבוט (פאזה 1) — ריק לא משנה פרומפט, מוגדר כן ─────────────────────────
+function voiceCases() {
+  console.log('\n── קול הבוט ──')
+
+  // קריטי: קול לא מוגדר → בלוק ריק → הפרומפט זהה *בדיוק* להיום.
+  check('קול הבוט — ריק אינו מוגדר', isVoiceConfigured(EMPTY_VOICE) === false, 'צריך false')
+  check('קול הבוט — ריק → בלוק ריק (פרומפט לא משתנה)',
+    buildVoicePromptBlock(EMPTY_VOICE) === '',
+    `got="${buildVoicePromptBlock(EMPTY_VOICE)}"`)
+
+  // קול מוגדר → הבלוק נכנס ומכיל את מה שהוגדר.
+  const configured = {
+    ...EMPTY_VOICE,
+    personaName: 'ג׳וני',
+    gender: 'female' as const,
+    forbiddenWords: 'בוט',
+  }
+  const block = buildVoicePromptBlock(configured)
+  check('קול הבוט — מוגדר → בלוק לא ריק', block.length > 0, `got len=${block.length}`)
+  check('קול הבוט — שם הפרסונה מופיע בפרומפט', block.includes('ג׳וני'), block.slice(0, 120))
+  check('קול הבוט — מגדר נקבה מופיע בפרומפט', /נקבה/.test(block), block.slice(0, 200))
+  check('קול הבוט — מילה אסורה מופיעה בפרומפט', block.includes('בוט'), block.slice(0, 200))
+  check('קול הבוט — כללי הבטיחות נשמרים בבלוק',
+    block.includes('לא גובר על כללי הבטיחות'), 'צריך משפט שמירת בטיחות')
+}
+
 async function main() {
   intentCases()
   await flowCases()
@@ -532,6 +559,7 @@ async function main() {
   await flowDetailCases()
   await miscCases()
   llmParsingCases()
+  voiceCases()
   console.log(`\n────────────\nעברו: ${passed} | נכשלו: ${failed}`)
   process.exit(failed === 0 ? 0 : 1)
 }
