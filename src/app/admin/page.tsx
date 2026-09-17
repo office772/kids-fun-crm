@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Users, Settings, ChevronLeft, RefreshCw, CheckCircle, AlertCircle, Info, UsersRound, MessageSquare, BookOpen, Building2 } from 'lucide-react'
 import { CapacitySettings } from '@/components/admin/CapacitySettings'
-import { SchoolCapacitySettings } from '@/components/admin/SchoolCapacitySettings'
+import { FrameworksManager } from '@/components/admin/FrameworksManager'
 import { FrameworkStaffManager } from '@/components/dashboard/FrameworkStaffManager'
 import { BotSimulator, TesterReset } from '@/components/dashboard/BotSimulator'
 import { TestPhonesManager } from '@/components/dashboard/TestPhonesManager'
@@ -133,10 +133,10 @@ export default function AdminPage() {
     },
     {
       id: 'school-capacity',
-      label: 'קיבולת לפי מסגרת',
+      label: 'מסגרות (גנים/בתי״ס)',
       icon: <Building2 size={18} />,
-      description: 'מקסימום נרשמים לכל בי"ס/גן',
-      component: <SchoolCapacitySettings />,
+      description: 'הוספה, מחיר, קיבולת וכיבוי מסגרות',
+      component: <FrameworksManager />,
     },
     {
       id: 'staff-tzaharon',

@@ -19,6 +19,8 @@ import { detectMedia } from '@/lib/bot/media-handler'
 import { buildVoicePromptBlock, isVoiceConfigured, EMPTY_VOICE } from '@/lib/bot/bot-voice'
 import { getCachedSettings } from '@/lib/bot/settings-db'
 import { getDefaultMonthlyFee, DEFAULT_MONTHLY_FEE } from '@/lib/bot/payment-helpers'
+import { resolveMonthlyFee } from '@/lib/bot/pricing'
+import { priceFromCachedSchools } from '@/lib/bot/schools-db'
 import type { BotIntent, BotSession } from '@/lib/types'
 
 const PHONE = '+972500000000'   // מספר שלא קיים ב-DB — "הורה לא מזוהה"
@@ -568,6 +570,25 @@ function settingsFallbackCases() {
     typeof bh === 'boolean', `got=${typeof bh}`)
 }
 
+// ─── תמחור מסגרות (פאזה 3) — בלי cache, נשמר התמחור הקשיח ─────────────────────
+function pricingFallbackCases() {
+  console.log('\n── תמחור מסגרות (fallback) ──')
+
+  // בלי cache (replay) → אין מחיר DB → resolveMonthlyFee נופל למודל הקשיח.
+  check('מחיר מסגרת — DB ריק כשלא הוזרק', priceFromCachedSchools('גלי עתלית') === null, 'צריך null')
+
+  check('תמחור קשיח — גלי עתלית = 1150',
+    resolveMonthlyFee({ school: 'גלי עתלית' }) === 1150, `got=${resolveMonthlyFee({ school: 'גלי עתלית' })}`)
+  check('תמחור קשיח — מתן כיתה ג = 1015',
+    resolveMonthlyFee({ school: 'בי"ס מתן', class_name: "כיתה ג'" }) === 1015,
+    `got=${resolveMonthlyFee({ school: 'בי"ס מתן', class_name: "כיתה ג'" })}`)
+  check('תמחור קשיח — חצב/אלמוג = 1470',
+    resolveMonthlyFee({ school: 'גן חצב' }) === 1470, `got=${resolveMonthlyFee({ school: 'גן חצב' })}`)
+  check('תמחור קשיח — מסגרת לא מזוהה = null',
+    resolveMonthlyFee({ school: 'גן שלא קיים בכלל' }) === null,
+    `got=${resolveMonthlyFee({ school: 'גן שלא קיים בכלל' })}`)
+}
+
 async function main() {
   intentCases()
   await flowCases()
@@ -582,6 +603,7 @@ async function main() {
   llmParsingCases()
   voiceCases()
   settingsFallbackCases()
+  pricingFallbackCases()
   console.log(`\n────────────\nעברו: ${passed} | נכשלו: ${failed}`)
   process.exit(failed === 0 ? 0 : 1)
 }

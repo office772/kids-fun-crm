@@ -2,9 +2,10 @@
 // המחיר נקבע לפי בית-הספר/הגן (ולעיתים הכיתה), לא לפי אזור.
 // מקור התשובות: docs/payplus-links-mapping.md ("תשובות קורלי").
 //
-// ⚠️ אם שינוי מחיר עתידי — לעדכן כאן (וקורלי מעדכנת את הסכום בלינק ב-PayPlus).
-// resolveMonthlyFee מחזיר null כשאי-אפשר לקבוע מחיר בוודאות — אז הבוט
-// לא ייצר לינק עם סכום מנוחש אלא יפנה לנציגה.
+// ⚠️ אם שינוי מחיר עתידי — עדיף לעדכן בפאנל (schools.monthly_price); הקשיח כאן
+// נשאר כ-fallback. resolveMonthlyFee מחזיר null כשאי-אפשר לקבוע מחיר בוודאות —
+// אז הבוט לא ייצר לינק עם סכום מנוחש אלא יפנה לנציגה.
+import { priceFromCachedSchools } from './schools-db'
 
 // תל אביב — 5 גני "המערכה" (כולל אבטחה) = ₪991
 const TA_991 = ['זיו', 'יערה', 'מכחול', 'מניפה', 'צבעי הקשת']
@@ -32,6 +33,11 @@ export interface FeeContext {
 export function resolveMonthlyFee(ctx: FeeContext): number | null {
   const school = (ctx.school ?? '').trim()
   if (!school) return null
+
+  // מקור מועדף: מחיר שהלקוח הגדיר למסגרת בפאנל (schools.monthly_price), אם קיים
+  // התאמה יחידה. כשאין (או ב-replay בלי cache) → נופלים למודל הקשיח למטה.
+  const dbPrice = priceFromCachedSchools(school)
+  if (dbPrice != null) return dbPrice
 
   // חוף הכרמל — גלי עתלית: ₪1,150 אחיד לכל הכיתות, כולל שמות הקבוצות שבתוכו
   // (פיטר פן / דרדסים / החתול במגפיים — אישרה קורלי 2026-06-23).
