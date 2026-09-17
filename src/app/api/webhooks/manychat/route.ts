@@ -442,15 +442,17 @@ export async function POST(req: NextRequest) {
     await saveSession(supabase, session)
   }
 
-  // 7. רישום תשובת הבוט
-  await logConversation(supabase, {
-    phone,
-    parentId: parent.id,
-    direction: 'יוצא',
-    text: result.text,
-    intent: result.intent,
-    sessionId: session.sessionId,
-  })
+  // 7. רישום תשובת הבוט (תשובה ריקה = שתיקה מכוונת אחרי העברה לקורלי — לא נרשמת)
+  if (result.text) {
+    await logConversation(supabase, {
+      phone,
+      parentId: parent.id,
+      direction: 'יוצא',
+      text: result.text,
+      intent: result.intent,
+      sessionId: session.sessionId,
+    })
+  }
 
   // 8. יצירת task אם נדרש — והתראה לצוות המסגרת אם הוגדר notifyFramework
   if (result.createTask) {

@@ -155,9 +155,67 @@ async function flowCases() {
   }
 }
 
+
+// ─── 3. שומר תסכול + handoff (בקשת עינת 17.9: "לא יותר מ-2 הודעות מתסכלות") ─────
+async function guardCases() {
+  console.log('\n── שומר תסכול / handoff ──')
+  const bot  = (text: string) => ({ role: 'bot'  as const, text, timestamp: new Date() })
+  const user = (text: string) => ({ role: 'user' as const, text, timestamp: new Date() })
+
+  // שתי "לא הבנתי" ברצף → העברה לקורלי + handoff
+  {
+    const s = makeSession('payment_status_menu')
+    s.messages = [user('אני נמצא בגבעתיים'), bot('לא הבנתי 😊 אנא בחרו:\n*1* — סטטוס')]
+    const r = await processMessage(s, 'מה זה צריך להיות')
+    check('guard — non-answer אחרי non-answer → העברה לקורלי',
+      /קורלי/.test(r.text) && r.nextFlow === 'handoff_paused' && !!r.createTask,
+      `nextFlow=${r.nextFlow} task=${!!r.createTask} text=${JSON.stringify(r.text.slice(0, 80))}`)
+  }
+  // הורה כועס פעמיים → העברה
+  {
+    const s = makeSession()
+    s.messages = [user('מה אתה מטומטם?'), bot('סליחה על הבלבול 😅 במה אפשר לעזור?')]
+    const r = await processMessage(s, 'אתה רציני???? אני מאבד סבלנות')
+    check('guard — שני סימני עצבים → העברה לקורלי',
+      /קורלי/.test(r.text) && r.nextFlow === 'handoff_paused',
+      `nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 80))}`)
+  }
+  // אחרי handoff — שתיקה
+  {
+    const s = makeSession('handoff_paused')
+    const r = await processMessage(s, 'תודה, אני מחכה')
+    check('handoff — הודעה אחרי העברה = שתיקה', r.text === '' && r.nextFlow === 'handoff_paused',
+      `text=${JSON.stringify(r.text)} nextFlow=${r.nextFlow}`)
+  }
+  // "1" מוציא מה-handoff
+  {
+    const s = makeSession('handoff_paused')
+    const r = await processMessage(s, '1')
+    check('handoff — "1" חוזר לבוט', r.text.length > 0 && r.nextFlow !== 'handoff_paused',
+      `text=${JSON.stringify(r.text.slice(0, 60))} nextFlow=${r.nextFlow}`)
+  }
+  // בלי false positive: שיחה תקינה
+  {
+    const s = makeSession('register_area')
+    s.messages = [user('1'), bot('לאיזה אזור מבקשים רישום לצהרון?')]
+    const r = await processMessage(s, '2')
+    check('guard — שיחה תקינה לא מוסלמת', !/קורלי/.test(r.text) && r.nextFlow === 'register_child_name',
+      `nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 60))}`)
+  }
+  // עצבים פעם אחת + תשובה טובה → לא מוסלם
+  {
+    const s = makeSession('register_area')
+    s.messages = [user('1'), bot('לאיזה אזור מבקשים רישום לצהרון?')]
+    const r = await processMessage(s, 'נו כבר!!! 2')
+    check('guard — עצבים פעם אחת עם תשובה תקינה → ממשיכים', r.nextFlow === 'register_child_name',
+      `nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 60))}`)
+  }
+}
+
 async function main() {
   intentCases()
   await flowCases()
+  await guardCases()
   console.log(`\n────────────\nעברו: ${passed} | נכשלו: ${failed}`)
   process.exit(failed === 0 ? 0 : 1)
 }

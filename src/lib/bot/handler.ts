@@ -26,7 +26,101 @@ import { callLLMFallback } from './llm-fallback'
 // 1. מנסה כל ה-FP (Fast Paths) בסדר עדיפות
 // 2. אם שום FP לא תפס → fallback ל-Claude LLM
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// שומר תסכול (בקשת עינת 17.9): "לא יותר מ-2 הודעות מתסכלות" — אחרי שתי הודעות
+// שלא קיבלו מענה אמיתי (או שני סימני עצבים) הבוט מפסיק להתעקש ומעביר לקורלי.
+// אחרי ההעברה הבוט שותק 30 דקות (bank #13 — המשך כתיבה אחרי handoff), אלא אם
+// ההורה מבקש במפורש לחזור לתפריט (ספרה / "תפריט" / "בוט").
+// ─────────────────────────────────────────────────────────────────────────────
+export const HANDOFF_FLOW = 'handoff_paused'
+
+const FRUSTRATION_PATTERNS: RegExp[] = [
+  /אתה רציני|את רצינית|רציני\?|רצינית\?/,
+  /מטומטם|דפוק|טיפש|אידיוט|מפגר|חסר תועלת|לא שווה/,
+  /רובוט|בוט מטומטם|בוט דפוק/,
+  /לא הבנת אותי|לא מבין אותי|לא מבינה אותי|לא מקשיב|מתעלם|מתעלמת/,
+  /נמאס|די כבר|נו כבר|מספיק כבר|תפסיק|עזוב אותי|עזבי אותי/,
+  /בא לי למות|אני מתעצבן|מעצבן|מתסכל|מרגיז/,
+  /לא עוזר|לא עוזרת|לא עונה לי|לא מגיב|מה הקשר/,
+  /כבר אמרתי|אמרתי לך|אמרתי כבר|כמה פעמים|פעם שלישית|שוב פעם/,
+  /!{3,}|\?{3,}|נו{3,}/,
+]
+
+function looksFrustrated(msg: string): boolean {
+  const t = (msg || '').trim()
+  if (!t) return false
+  return FRUSTRATION_PATTERNS.some(re => re.test(t))
+}
+
+// תשובת "לא הבנתי" / נפילה גנרית של ה-LLM = הודעה שלא ענתה להורה
+function isNonAnswer(text: string): boolean {
+  const t = (text || '').trim()
+  if (!t) return false
+  return t.startsWith('לא הבנתי') ||
+    t.startsWith('לא הצלחתי להבין') ||
+    t.includes('נציגה שלנו תחזור אליך בהקדם 💛')   // buildLLMErrorFallback
+}
+
+function wantsMenuBack(msg: string): boolean {
+  const t = msg.trim()
+  return /^[1-6]$/.test(t) || /^(תפריט|בוט|חזרה לבוט|התחלה|start|menu)$/i.test(t)
+}
+
 export async function processMessage(
+  session: BotSession,
+  userMessage: string
+): Promise<BotResponse & { intent: BotIntent }> {
+  // ── אחרי העברה לקורלי — שתיקה (עד פקיעת ה-session), אלא אם מבקשים תפריט ──
+  if (session.currentFlow === HANDOFF_FLOW) {
+    if (!wantsMenuBack(userMessage)) {
+      return { text: '', intent: 'לא_ידוע', nextFlow: HANDOFF_FLOW, isComplete: false }
+    }
+    session.currentFlow = undefined
+    session.collectedData = {}
+  }
+
+  // ההיסטוריה נטענת *לפני* רישום ההודעה הנוכחית — לכן "אחרון" = התור הקודם
+  const history = session.messages || []
+  const lastBot  = [...history].reverse().find(m => m.role === 'bot')?.text ?? ''
+  const lastUser = [...history].reverse().find(m => m.role === 'user')?.text ?? ''
+
+  const result = await processMessageCore(session, userMessage)
+
+  // תשובה שכבר מסלימה (בקשת נציג / LLM שהעביר לקורלי) → מעבר למצב handoff
+  if (result.escalate || (result.createTask?.priority === 'גבוה' && /קורלי/.test(result.text))) {
+    session.currentFlow = HANDOFF_FLOW
+    session.collectedData = {}
+    return { ...result, nextFlow: HANDOFF_FLOW, isComplete: false }
+  }
+
+  const strikes =
+    (looksFrustrated(lastUser) ? 1 : 0) +
+    (isNonAnswer(lastBot) ? 1 : 0) +
+    (looksFrustrated(userMessage) ? 1 : 0) +
+    ((isNonAnswer(result.text) || (!!result.text && result.text === lastBot)) ? 1 : 0)
+
+  if (strikes >= 2) {
+    console.log(`[frustration-guard] strikes=${strikes} → handoff to Corli (flow=${session.currentFlow ?? '-'})`)
+    session.currentFlow = HANDOFF_FLOW
+    session.collectedData = {}
+    return {
+      text: buildEscalationMessage(),
+      intent: result.intent,
+      escalate: true,
+      nextFlow: HANDOFF_FLOW,
+      isComplete: false,
+      createTask: {
+        type: 'שאלה כללית',
+        description: `הורה מתוסכל — הבוט לא הצליח לענות פעמיים. ההודעה האחרונה: "${userMessage.slice(0, 80)}" | התשובה שנחסמה: "${(result.text || '').replace(/\n/g, ' ').slice(0, 60)}"`,
+        priority: 'גבוה',
+      },
+    }
+  }
+
+  return result
+}
+
+async function processMessageCore(
   session: BotSession,
   userMessage: string
 ): Promise<BotResponse & { intent: BotIntent }> {
@@ -173,6 +267,16 @@ const STEP_OWN_INTENTS: Record<string, BotIntent[]> = {
   payment_fail_method_choice: ['בדיקת_תשלום', 'אפשרויות_תשלום', 'כשל_תשלום'],
 }
 
+
+// הודעה קצרה (עד 3 מילים) שמכילה ספרה בודדת אחת → הספרה היא הבחירה מהתפריט.
+// "יש לי 2 ילדים" (4 מילים) לא נתפס — בכוונה.
+function shortDigitChoice(msg: string): string | null {
+  const words = msg.trim().split(/\s+/).filter(Boolean)
+  if (words.length === 0 || words.length > 3) return null
+  const digits = words.map(w => w.replace(/[.!?,]+$/g, '')).filter(w => /^[1-9]$/.test(w))
+  return digits.length === 1 ? digits[0] : null
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // handleActiveFlow — מסלול פעיל
 // מחזיר null אם ההודעה לא שייכת למסלול (→ LLM יטפל)
@@ -183,6 +287,12 @@ async function handleActiveFlow(
   intent: BotIntent
 ): Promise<(BotResponse & { intent: BotIntent }) | null> {
   const flow = session.currentFlow!
+
+  // ── ספרה בתוך הודעה קצרה = בחירה ("נו כבר!!! 2", "אפשרות 2", "2 בבקשה") ──────
+  if (CHOICE_STEPS.has(flow) && !isExplicitNumericChoice(userMessage)) {
+    const digit = shortDigitChoice(userMessage)
+    if (digit) userMessage = digit
+  }
 
   // ── תפריט שמכבד כוונה ─────────────────────────────────────────────────────
   // לפני התיקון כל טקסט חופשי בתפריט קיבל "לא הבנתי, אנא בחרו" — כולל
