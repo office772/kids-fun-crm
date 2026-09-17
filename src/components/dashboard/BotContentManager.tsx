@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Plus, Pencil, Trash2, Search, X, Check, LayoutGrid, List } from 'lucide-react'
+import { Plus, Pencil, Trash2, Search, X, Check, LayoutGrid, List, AlertTriangle } from 'lucide-react'
 import { BotContent, BotContentCategory, BotContentFlow } from '@/lib/types'
 
 // ─── Demo data ───────────────────────────────────────────────────────────────
@@ -103,6 +103,19 @@ export function BotContentManager() {
 
   return (
     <div className="space-y-5">
+      {/* ⚠️ תצוגה מקדימה — עריכה כאן עדיין לא נשמרת ולא משפיעה על הבוט (התוכן דמו). */}
+      <div className="rounded-xl border p-4 flex items-start gap-3" style={{ background: '#FEF3E2', borderColor: '#F5C97A' }}>
+        <AlertTriangle size={20} color="#B45309" className="flex-shrink-0 mt-0.5" />
+        <div className="text-sm leading-relaxed" style={{ color: '#7C4A03' }}>
+          <p className="font-bold mb-0.5">תצוגה מקדימה — העריכה כאן עדיין לא פעילה</p>
+          <p>
+            ההודעות כאן הן דוגמה, ו<b>שינוי/הוספה/מחיקה כאן לא נשמרים ולא משפיעים על הבוט</b> (הפיצ&apos;ר בבנייה).
+            לראות את ההודעות <b>האמיתיות</b> של הבוט — בלשונית <b>🗺️ מסלולים (קנבן)</b>.
+            לשינוי טקסט בשלב זה — פני לעינת.
+          </p>
+        </div>
+      </div>
+
       {/* Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
