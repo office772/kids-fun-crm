@@ -403,15 +403,27 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
     if (!looksLikeChildName(trimmed)) return buildNotAName('register_child_name')
     session.collectedData.child_name = trimmed
 
-    // ⚡ זיהוי משני: אולי הילד הזה כבר רשום אצלנו (גיבוי לטלפון לא-מזוהה)
+    // ⚡ זיהוי משני: אולי הילד הזה כבר רשום אצלנו — *רק* בין הילדים של ההורה
+    // שמזוהה לפי הטלפון. ⚠️ אסור לחפש לפי שם בלבד: כל מי שמקליד שם של ילד קיים
+    // היה מקבל כיתה, מסגרת ושם ההורה של משפחה אחרת (אתגור 17.9, S1).
     try {
       const { createServiceClient } = await import('@/lib/supabase/server')
+      const { phoneVariants } = await import('@/lib/phone')
       const supabase = createServiceClient()
-      const { data: kids } = await supabase
-        .from('children')
-        .select('id, name, class_name, area_code, framework, parent_id')
-        .ilike('name', trimmed)
-        .limit(2)
+      let kids: Array<{ id: string; name: string; class_name: string | null; area_code: string | null; framework: string | null; parent_id: string }> = []
+      if (session.phone && session.phone !== 'simulator') {
+        const { data: parentRow } = await supabase
+          .from('parents').select('id').in('phone', phoneVariants(session.phone)).limit(1).maybeSingle()
+        if (parentRow?.id) {
+          const { data } = await supabase
+            .from('children')
+            .select('id, name, class_name, area_code, framework, parent_id')
+            .eq('parent_id', parentRow.id)
+            .ilike('name', trimmed)
+            .limit(2)
+          kids = data ?? []
+        }
+      }
 
       if (kids?.length === 1) {
         const kid = kids[0]
@@ -468,9 +480,16 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
 
   // ─── שלב כיתה + בדיקת קיבולת ─────────────────────────────────────────────
   if (step === 'register_class') {
+    // בלי אזור אין למה לרשום — שואלים במקום ליפול ל-'sharon' (הורה מעתלית נרשם לשרון, 17.9)
+    if (!session.collectedData.area_code) {
+      return {
+        text: `לפני שנמשיך — *לאיזה אזור מבקשים רישום לצהרון?*\n\n*1* — דרום השרון / חוף השרון\n*2* — חוף הכרמל\n*3* — גני ילדים תל אביב`,
+        nextFlow: 'register_area',
+      }
+    }
     session.collectedData.class_name = userMessage
     const childName = session.collectedData.child_name || 'הילד/ה'
-    const areaCode  = session.collectedData.area_code  || 'sharon'
+    const areaCode  = session.collectedData.area_code
 
     const { checkCapacity, buildRegisterLink, AREAS } = await import('./registration-helpers')
     const capacity = await checkCapacity(areaCode)
@@ -577,25 +596,19 @@ async function performCancellation(
     // איתור מועמדים: קודם הילדים של ההורה המזוהה לפי טלפון, אחר כך לפי שם בלבד
     let candidates: { id: string; name: string; parent_id: string }[] = []
 
+    // ⚠️ מבטלים *רק* ילד ששייך להורה המזוהה לפי הטלפון. ה-fallback הישן (חיפוש לפי
+    // שם בכל הילדים) איפשר לכל מספר לבטל רישום + הוראת קבע של משפחה אחרת (אתגור 17.9, S1).
     if (session.phone && session.phone !== 'simulator') {
-      const normalized = session.phone.replace(/\D/g, '').replace(/^972/, '0')
-      const intl = '972' + normalized.replace(/^0/, '')
+      const { phoneVariants } = await import('@/lib/phone')
       const { data: parent } = await supabase
         .from('parents').select('id')
-        .or(`phone.eq.${normalized},phone.eq.${intl},phone.eq.${session.phone}`)
-        .maybeSingle()
+        .in('phone', phoneVariants(session.phone)).limit(1).maybeSingle()
       if (parent) {
         const { data } = await supabase
           .from('children').select('id, name, parent_id')
           .eq('parent_id', parent.id).ilike('name', `%${name}%`)
         candidates = data ?? []
       }
-    }
-    if (!candidates.length) {
-      const { data } = await supabase
-        .from('children').select('id, name, parent_id')
-        .ilike('name', name).limit(2)
-      candidates = data ?? []
     }
 
     // דורשים התאמה חד-משמעית — לא מבטלים בניחוש!
