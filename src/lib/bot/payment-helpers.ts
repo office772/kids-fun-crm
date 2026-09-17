@@ -17,6 +17,7 @@
 
 import type { BotSession } from '@/lib/types'
 import { resolveMonthlyFee } from './pricing'
+import { getCachedSettings } from './settings-db'
 
 export type PaymentMethod =
   | 'credit'           // 💳 כרטיס אשראי — חיוב חודשי דרך PayPlus
@@ -298,7 +299,7 @@ export async function loadParentRegistrationContext(
         telaviv: 950,
       }
       const areaCode = reg?.area_code ?? 'sharon'
-      session.collectedData.monthly_fee = String(areaFees[areaCode] ?? DEFAULT_MONTHLY_FEE)
+      session.collectedData.monthly_fee = String(areaFees[areaCode] ?? getDefaultMonthlyFee())
 
       return
     }
@@ -596,4 +597,12 @@ export function buildSpotOfferMessage(
 }
 
 // ─── עלות חודשית ברירת מחדל ─────────────────────────────────────────────────
-export const DEFAULT_MONTHLY_FEE = 799  // ₪ — ברירת מחדל כשאין נתון ספציפי
+// ⚠️ זו נפילה אחרונה בלבד — כמעט תמיד מתמחרים לפי מסגרת (resolveMonthlyFee).
+export const DEFAULT_MONTHLY_FEE = 799  // ₪ — הקשיח (fallback סופי)
+
+// המחיר ברירת המחדל מ-settings (מפתח default_monthly_fee) — עם fallback לקשיח 799.
+// נקרא מה-cache הסינכרוני (primeSettingsCache הוזרק בתחילת הבקשה); לא הוזרק → 799.
+export function getDefaultMonthlyFee(): number {
+  const raw = parseInt(getCachedSettings().default_monthly_fee || '', 10)
+  return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_MONTHLY_FEE
+}

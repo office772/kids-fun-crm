@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
 import { processMessage } from '@/lib/bot/handler'
+import { primeSettingsCache } from '@/lib/bot/settings-db'
 import { BotSession } from '@/lib/types'
 
 // Sessions in-memory לסימולטור
@@ -46,6 +47,8 @@ export async function POST(req: NextRequest) {
         : {},
     }
 
+    // טעינת settings פעם אחת לבקשה (שעות/מחיר) — flows קורא סינכרונית מה-cache.
+    await primeSettingsCache()
     // processMessage הוא עכשיו async (LLM fallback)
     const response = await processMessage(session, message)
 

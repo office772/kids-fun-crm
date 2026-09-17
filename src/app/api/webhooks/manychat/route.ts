@@ -22,6 +22,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { processMessage } from '@/lib/bot/handler'
 import { isTestPhone as isAllowedPhone, TEST_PHONES } from '@/lib/bot/test-phones'
 import { isAllowedPhoneAsync } from '@/lib/bot/test-phones-db'
+import { primeSettingsCache } from '@/lib/bot/settings-db'
 import { phoneVariants } from '@/lib/phone'
 import { HANDOFF_FLOW } from '@/lib/bot/handler'
 import { detectMedia, handleMediaMessage, type MediaInfo } from '@/lib/bot/media-handler'
@@ -495,6 +496,8 @@ export async function POST(req: NextRequest) {
   }
 
   // 4. עיבוד ההודעה (async — כולל LLM fallback)
+  // טעינת settings פעם אחת לבקשה (שעות/מחיר וכו') — flows קורא סינכרונית מה-cache.
+  await primeSettingsCache()
   const result = await processMessage(session, messageText)
 
   // 5. עדכון session לפי התוצאה

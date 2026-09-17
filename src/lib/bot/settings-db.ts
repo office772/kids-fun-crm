@@ -40,4 +40,30 @@ export async function upsertSettings(entries: SettingEntry[]): Promise<void> {
   const supabase = createServiceClient()
   const { error } = await supabase.from('settings').upsert(entries, { onConflict: 'key' })
   if (error) throw new Error(error.message)
+  _settingsCache = null // הכתיבה מבטלת cache מקומי (בקשות אחר כך יטענו מחדש)
+}
+
+// ─── cache פר-בקשה לקריאה *סינכרונית* מתוך flows ──────────────────────────────
+// isBusinessHours ומחיר ברירת המחדל נקראים סינכרונית בעשרות מקומות בתוך המסלולים.
+// במקום עשרות קריאות DB — מזריקים primeSettingsCache() *פעם אחת* בתחילת כל בקשת
+// webhook/סימולטור, והקוראים משתמשים ב-getCachedSettings().
+//
+// ⚠️ כשלא הוזרק (למשל ב-replay-bot בלי DB) או כש-TTL פג → מפה ריקה, והקורא נופל
+//    לערך הקשיח. כך ההתנהגות זהה *בדיוק* להיום כשאין הגדרה.
+let _settingsCache: { at: number; map: Record<string, string> } | null = null
+const CACHE_TTL_MS = 60_000
+
+// טעינה חד-פעמית של כל ה-settings ל-cache (בתחילת בקשה). מחזיר גם את המפה.
+export async function primeSettingsCache(): Promise<Record<string, string>> {
+  const map = await getAllSettings()
+  _settingsCache = { at: Date.now(), map }
+  return map
+}
+
+// קריאה סינכרונית מה-cache. לא הוזרק / פג → {} (הקורא ייפול ל-fallback).
+export function getCachedSettings(): Record<string, string> {
+  if (_settingsCache && Date.now() - _settingsCache.at < CACHE_TTL_MS) {
+    return _settingsCache.map
+  }
+  return {}
 }

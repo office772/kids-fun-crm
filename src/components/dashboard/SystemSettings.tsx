@@ -1,242 +1,208 @@
 'use client'
 
-import { useState } from 'react'
-import { SystemSetting, SettingCategory } from '@/lib/types'
-import { AlertTriangle } from 'lucide-react'
+// ─── הגדרות מערכת (עריכה אמיתית) ──────────────────────────────────────────────
+// מציג *רק* הגדרות שהבוט באמת קורא (שעות פעילות + מחיר ברירת מחדל), עם שמירה
+// אמיתית ל-/api/admin/settings. אין כאן שדות מדומים או סודות — מפתחות סליקה חיים
+// ב-env, וניסוחי הבוט/מסגרות נערכים בלשוניות/מסכים הייעודיים.
+import { useEffect, useState } from 'react'
+import { Info, Check, Loader2 } from 'lucide-react'
 
-// ⚠️ באנר "תצוגה מקדימה" — הלשונית הזו עדיין לא מחוברת ל-DB (אין /api/settings).
-// עד שתחובר, אסור שתיראה כמו מסך עריכה אמיתי — אחרת הצוות יערוך, יראה "נשמר",
-// והבוט ימשיך להתעלם. הגדרות שכן עובדות: שאלות ותשובות, קיבולת, צוות מסגרות, מספרי בדיקה.
-function PreviewNotice() {
-  return (
-    <div
-      className="rounded-xl border p-4 mb-5 flex items-start gap-3"
-      style={{ background: '#FEF3E2', borderColor: '#F5C97A' }}
-    >
-      <AlertTriangle size={20} color="#B45309" className="flex-shrink-0 mt-0.5" />
-      <div className="text-sm leading-relaxed" style={{ color: '#7C4A03' }}>
-        <p className="font-bold mb-0.5">תצוגה מקדימה — עדיין לא ניתן לערוך כאן</p>
-        <p>
-          המסך הזה מציג את ההגדרות המתוכננות, אבל <b>שינוי כאן לא נשמר ולא משפיע על הבוט</b> (הפיצ'ר בבנייה).
-          לשינוי שעות, מחירים או טקסטים בשלב זה — פני לעינת.
-          הלשוניות שכבר עובדות: <b>שאלות ותשובות · קיבולת · צוות מסגרות · מספרי בדיקה</b>.
-        </p>
-      </div>
-    </div>
-  )
-}
-
-// ─── Demo data ────────────────────────────────────────────────────────────────
-const DEMO_SETTINGS: SystemSetting[] = [
-  // details
-  {
-    id: '1', category: 'details', key: 'branch_name', label: 'שם הסניף',
-    value: 'Kids & Fun – תל אביב', value_type: 'text',
-    description: 'שם שיוצג בפניות ובהודעות הבוט',
-  },
-  {
-    id: '2', category: 'details', key: 'branch_phone', label: 'מספר טלפון',
-    value: '052-000-0000', value_type: 'text',
-    description: 'מספר ליצירת קשר — יוצג להורים',
-  },
-  {
-    id: '3', category: 'details', key: 'branch_city', label: 'עיר',
-    value: 'תל אביב', value_type: 'text',
-    description: 'העיר בה פועל הסניף',
-  },
-  {
-    id: '4', category: 'details', key: 'support_hours', label: 'שעות פעילות',
-    value: 'ראשון–חמישי 08:00–17:00', value_type: 'text',
-    description: 'שעות בהן נציג זמין — שימוש בהסלמת הבוט',
-  },
-
-  // whatsapp
-  {
-    id: '5', category: 'whatsapp', key: 'manychat_webhook_secret', label: 'uChat Webhook Secret',
-    value: 'your-secret-here', value_type: 'text',
-    description: 'מפתח לאימות הודעות נכנסות מ-uChat',
-  },
-  {
-    id: '6', category: 'whatsapp', key: 'whatsapp_number', label: 'מספר WhatsApp עסקי',
-    value: '+972520000000', value_type: 'text',
-    description: 'מספר ה-WhatsApp Business של הסניף',
-  },
-  {
-    id: '7', category: 'whatsapp', key: 'bot_active', label: 'בוט פעיל',
-    value: 'true', value_type: 'boolean',
-    description: 'כאשר כבוי — כל הפניות עוברות ישירות לנציג',
-  },
-  {
-    id: '8', category: 'whatsapp', key: 'out_of_hours_message', label: 'הודעה מחוץ לשעות',
-    value: 'קיבלתי את פנייתך! 😊 הצוות יחזור אליך בשעות הפעילות. חנות זמנים: ראשון–חמישי 08:00–17:00.',
-    value_type: 'text',
-    description: 'נשלח אוטומטית כאשר הפנייה מגיעה מחוץ לשעות הפעילות',
-  },
-
-  // flow
-  {
-    id: '9', category: 'flow', key: 'registration_open', label: 'רישום לצהרון פתוח',
-    value: 'true', value_type: 'boolean',
-    description: 'כאשר סגור — הבוט מנתב להמתנה',
-  },
-  {
-    id: '10', category: 'flow', key: 'camp_registration_open', label: 'רישום לקייטנה פתוח',
-    value: 'false', value_type: 'boolean',
-    description: 'כאשר סגור — הבוט אוסף פרטים ידנית לצוות',
-  },
-  {
-    id: '11', category: 'flow', key: 'max_waiting_list', label: 'מקסימום רשימת המתנה',
-    value: '20', value_type: 'number',
-    description: 'מספר המקסימלי בתור ההמתנה — מעל זה הבוט מתנצל',
-  },
-  {
-    id: '12', category: 'flow', key: 'registration_form_url', label: 'קישור טופס רישום',
-    value: 'https://forms.example.com/register', value_type: 'url',
-    description: 'הקישור שהבוט ישלח להורים לאחר אישור רישום',
-  },
-  {
-    id: '13', category: 'flow', key: 'escalation_enabled', label: 'הסלמה לנציג מופעלת',
-    value: 'true', value_type: 'boolean',
-    description: 'כאשר כבוי — אין הסלמה לנציג, הבוט מטפל בהכל',
-  },
-
-  // payments
-  {
-    id: '14', category: 'payments', key: 'payplus_api_key', label: 'PayPlus API Key',
-    value: 'YOUR_PAYPLUS_API_KEY', value_type: 'text',
-    description: 'מפתח API לממשק PayPlus — שמור בסוד!',
-  },
-  {
-    id: '15', category: 'payments', key: 'payment_check_interval_hours', label: 'תדירות בדיקת תשלומים (שעות)',
-    value: '2', value_type: 'number',
-    description: 'כמה שעות בין כל בדיקת סטטוס תשלומים',
-  },
-  {
-    id: '16', category: 'payments', key: 'proactive_failure_enabled', label: 'פנייה יזומה בכשל תשלום',
-    value: 'true', value_type: 'boolean',
-    description: 'כאשר פעיל — הבוט שולח הודעה אוטומטית בכשל תשלום',
-  },
-  {
-    id: '17', category: 'payments', key: 'monthly_fee', label: 'שכר לימוד חודשי (ש"ח)',
-    value: '1200', value_type: 'number',
-    description: 'עלות חודשית לצהרון — לשימוש בחישובי זיכוי',
-  },
+const DAYS = [
+  { n: 0, label: 'ראשון' }, { n: 1, label: 'שני' }, { n: 2, label: 'שלישי' },
+  { n: 3, label: 'רביעי' }, { n: 4, label: 'חמישי' }, { n: 5, label: 'שישי' },
+  { n: 6, label: 'שבת' },
 ]
 
-const CATEGORY_LABELS: Record<SettingCategory, string> = {
-  details: '🏫 פרטי סניף',
-  whatsapp: '💬 WhatsApp',
-  flow: '🔄 זרימת בוט',
-  payments: '💳 תשלומים',
-}
+// ברירות מחדל = בדיוק הקשיח בקוד (א-ה, 8-17, 799) — כך המסך משקף את מצב הבוט.
+const FALLBACK = { start: '8', end: '17', days: '0,1,2,3,4', fee: '799' }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+interface State { start: string; end: string; days: string; fee: string }
+
 export function SystemSettings() {
-  // תצוגה מקדימה בלבד — הנתונים דמו, אין כתיבה ל-DB עד שיחובר /api/settings.
-  const [activeCategory, setActiveCategory] = useState<SettingCategory>('details')
+  const [values, setValues]   = useState<State>(FALLBACK)
+  const [initial, setInitial] = useState<State>(FALLBACK)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving]   = useState(false)
+  const [saved, setSaved]     = useState(false)
+  const [error, setError]     = useState('')
 
-  const categories: SettingCategory[] = ['details', 'whatsapp', 'flow', 'payments']
-  const visibleSettings = DEMO_SETTINGS.filter(s => s.category === activeCategory)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res  = await fetch('/api/admin/settings')
+        const json = await res.json()
+        if (cancelled) return
+        const s = (json?.settings || {}) as Record<string, string>
+        const next: State = {
+          start: s.business_hours_start || FALLBACK.start,
+          end:   s.business_hours_end   || FALLBACK.end,
+          days:  s.business_days        || FALLBACK.days,
+          fee:   s.default_monthly_fee  || FALLBACK.fee,
+        }
+        setValues(next)
+        setInitial(next)
+      } catch {
+        if (!cancelled) setError('לא הצלחנו לטעון את ההגדרות. רעננו את הדף ונסו שוב.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  const dirty = (Object.keys(values) as (keyof State)[]).some(k => values[k] !== initial[k])
+
+  const activeDays = values.days.split(',').map(d => parseInt(d.trim(), 10)).filter(n => !isNaN(n))
+  const toggleDay = (n: number) => {
+    const has = activeDays.includes(n)
+    const next = (has ? activeDays.filter(d => d !== n) : [...activeDays, n]).sort((a, b) => a - b)
+    setValues(prev => ({ ...prev, days: next.join(',') }))
+    setSaved(false)
+  }
+  const setNum = (k: 'start' | 'end' | 'fee', v: string) => {
+    setValues(prev => ({ ...prev, [k]: v.replace(/[^\d]/g, '') }))
+    setSaved(false)
+  }
+
+  const save = async () => {
+    setSaving(true); setError(''); setSaved(false)
+
+    // ולידציה קלה: שעות 0-23, פתיחה < סגירה, לפחות יום אחד, מחיר > 0.
+    const start = parseInt(values.start, 10), end = parseInt(values.end, 10), fee = parseInt(values.fee, 10)
+    if (isNaN(start) || isNaN(end) || start < 0 || start > 23 || end < 0 || end > 24 || start >= end) {
+      setSaving(false); setError('שעות לא תקינות — הפתיחה חייבת להיות קטנה מהסגירה (0–24).'); return
+    }
+    if (!activeDays.length) { setSaving(false); setError('בחרו לפחות יום פעילות אחד.'); return }
+    if (isNaN(fee) || fee <= 0) { setSaving(false); setError('מחיר ברירת מחדל חייב להיות מספר חיובי.'); return }
+
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: {
+          business_hours_start: values.start,
+          business_hours_end:   values.end,
+          business_days:        values.days,
+          default_monthly_fee:  values.fee,
+        } }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json?.success) throw new Error(json?.error || 'שמירה נכשלה')
+      setInitial(values); setSaved(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'שמירה נכשלה')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-10 justify-center" style={{ color: 'var(--crm-text)', opacity: 0.6 }}>
+        <Loader2 size={18} className="animate-spin" /> טוען…
+      </div>
+    )
+  }
 
   return (
-    <div>
-      {/* ⚠️ תצוגה מקדימה — לא מחובר ל-DB עדיין. אסור להטעות את המשתמשת שכאילו נשמר. */}
-      <PreviewNotice />
-
-      {/* Category tabs */}
-      <div className="flex gap-2 flex-wrap mb-6">
-        {categories.map(cat => (
-          <button
-            key={cat}
-            onClick={() => setActiveCategory(cat)}
-            className="px-4 py-2 rounded-full text-sm font-semibold transition-all"
-            style={
-              activeCategory === cat
-                ? { background: 'var(--crm-primary)', color: '#fff' }
-                : { background: '#fff', color: 'var(--crm-text)', border: '1px solid #e5e7eb', opacity: 0.7 }
-            }
-          >
-            {CATEGORY_LABELS[cat]}
-          </button>
-        ))}
-      </div>
-
-      {/* Settings rows */}
-      <div className="space-y-3">
-        {visibleSettings.map(setting => (
-          <SettingRow key={setting.id} setting={setting} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ─── SettingRow ───────────────────────────────────────────────────────────────
-function SettingRow({ setting }: { setting: SystemSetting }) {
-  const isBoolean = setting.value_type === 'boolean'
-  const isActive = setting.value === 'true'
-
-  return (
-    <div
-      className="rounded-xl border p-4 flex items-start justify-between gap-4"
-      style={{ background: '#fff', borderColor: '#f3f4f6' }}
-    >
-      {/* Label + description */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-0.5">
-          <p className="font-semibold text-sm" style={{ color: 'var(--crm-text)' }}>
-            {setting.label}
+    <div className="space-y-5">
+      <div className="rounded-xl border p-4 flex items-start gap-3" style={{ background: '#EEF6FF', borderColor: '#BBD8F5' }}>
+        <Info size={20} color="#1E5A9E" className="flex-shrink-0 mt-0.5" />
+        <div className="text-sm leading-relaxed" style={{ color: '#1E3A5F' }}>
+          <p className="font-bold mb-0.5">מה נשמר כאן משפיע ישירות על הבוט</p>
+          <p>
+            <b>שעות ימי הפעילות</b> קובעות מתי הבוט מפנה לנציגה מחוץ לשעות.
+            <b> מחיר ברירת המחדל</b> משמש רק כשאי אפשר לתמחר לפי מסגרת (כמעט אף פעם).
+            מחירים לפי גן/בי״ס, מסגרות וניסוחי הודעות נערכים במסכים הייעודיים.
           </p>
-          <span
-            className="text-xs font-mono px-2 py-0.5 rounded-full"
-            style={{ background: '#f3f4f6', color: '#78716c' }}
-          >
-            {setting.key}
-          </span>
         </div>
-        {setting.description && (
-          <p className="text-xs" style={{ color: 'var(--crm-text)', opacity: 0.55 }}>
-            {setting.description}
-          </p>
+      </div>
+
+      {/* שעות פעילות */}
+      <div>
+        <label className="block font-bold text-sm mb-1" style={{ color: 'var(--crm-text)' }}>שעות פעילות</label>
+        <p className="text-xs mb-2" style={{ color: 'var(--crm-text)', opacity: 0.55 }}>
+          השעות בהן נציגה זמינה. מחוץ להן הבוט מודיע שנחזור בשעות הפעילות.
+        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="text-sm" style={{ color: 'var(--crm-text)', opacity: 0.7 }}>משעה</span>
+            <input type="text" inputMode="numeric" value={values.start} onChange={e => setNum('start', e.target.value)} className="crm-input-sm" />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm" style={{ color: 'var(--crm-text)', opacity: 0.7 }}>עד שעה</span>
+            <input type="text" inputMode="numeric" value={values.end} onChange={e => setNum('end', e.target.value)} className="crm-input-sm" />
+          </div>
+          <span className="text-xs" style={{ color: 'var(--crm-text)', opacity: 0.5 }}>(בפורמט 24 שעות, למשל 8 עד 17)</span>
+        </div>
+      </div>
+
+      {/* ימי פעילות */}
+      <div>
+        <label className="block font-bold text-sm mb-1" style={{ color: 'var(--crm-text)' }}>ימי פעילות</label>
+        <p className="text-xs mb-2" style={{ color: 'var(--crm-text)', opacity: 0.55 }}>בחרו את הימים בהם הצהרון פעיל.</p>
+        <div className="flex gap-2 flex-wrap">
+          {DAYS.map(d => {
+            const on = activeDays.includes(d.n)
+            return (
+              <button
+                key={d.n} onClick={() => toggleDay(d.n)}
+                className="px-3 py-1.5 rounded-full text-sm font-semibold transition-all"
+                style={on
+                  ? { background: 'var(--crm-primary)', color: '#fff' }
+                  : { background: '#fff', color: 'var(--crm-text)', border: '1px solid var(--crm-border)', opacity: 0.7 }}
+              >
+                {d.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* מחיר ברירת מחדל */}
+      <div>
+        <label className="block font-bold text-sm mb-1" style={{ color: 'var(--crm-text)' }}>מחיר צהרון — ברירת מחדל (₪)</label>
+        <p className="text-xs mb-2" style={{ color: 'var(--crm-text)', opacity: 0.55 }}>
+          נפילה אחרונה בלבד — כשאי אפשר לתמחר לפי המסגרת. המחיר הרגיל נקבע לפי הגן/בי״ס.
+        </p>
+        <input type="text" inputMode="numeric" value={values.fee} onChange={e => setNum('fee', e.target.value)} className="crm-input-sm" style={{ width: '8rem' }} />
+      </div>
+
+      {error && <p className="text-sm font-medium" style={{ color: '#B91C1C' }}>{error}</p>}
+
+      <div className="flex items-center gap-3 pt-1">
+        <button
+          onClick={save} disabled={saving || !dirty}
+          className="px-6 py-2.5 rounded-full text-sm font-bold transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ background: 'var(--crm-primary)', color: '#fff' }}
+        >
+          {saving ? <Loader2 size={16} className="animate-spin" /> : null}
+          {saving ? 'שומר…' : 'שמירה'}
+        </button>
+        {saved && !dirty && (
+          <span className="text-sm font-semibold flex items-center gap-1.5" style={{ color: '#15803D' }}>
+            <Check size={16} /> נשמר בהצלחה
+          </span>
+        )}
+        {dirty && !saving && (
+          <span className="text-sm" style={{ color: 'var(--crm-text)', opacity: 0.55 }}>יש שינויים שלא נשמרו</span>
         )}
       </div>
 
-      {/* Control */}
-      <div className="flex items-center gap-2 flex-shrink-0">
-        {isBoolean ? (
-          /* Toggle */
-          <div className="flex items-center gap-2" title="תצוגה מקדימה — לא ניתן לשנות עדיין">
-            <span
-              className="relative w-12 h-6 rounded-full opacity-50 cursor-not-allowed"
-              style={{ background: isActive ? 'var(--crm-primary)' : '#d1d5db' }}
-            >
-              <span
-                className="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm"
-                style={{ transform: isActive ? 'translateX(1.5rem)' : 'translateX(0.125rem)' }}
-              />
-            </span>
-            <span
-              className="text-sm font-medium w-10"
-              style={{ color: isActive ? 'var(--crm-primary)' : '#9ca3af' }}
-            >
-              {isActive ? 'פעיל' : 'כבוי'}
-            </span>
-          </div>
-        ) : (
-          /* Text / URL / Number — תצוגה בלבד (readOnly), בלי כפתור שמירה מטעה */
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={setting.value}
-              readOnly
-              dir={setting.value_type === 'url' || setting.key.includes('key') ? 'ltr' : 'rtl'}
-              className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none w-56 cursor-not-allowed"
-              style={{ borderColor: '#e5e7eb', background: '#f9fafb', color: '#6b7280' }}
-              title="תצוגה מקדימה — לא ניתן לשנות עדיין"
-            />
-          </div>
-        )}
-      </div>
+      <style jsx>{`
+        :global(.crm-input-sm) {
+          border: 1px solid var(--crm-border, #e5e7eb);
+          border-radius: 0.6rem;
+          padding: 0.45rem 0.7rem;
+          font-size: 0.95rem;
+          background: #fff;
+          color: var(--crm-text, #1f2937);
+          width: 5rem;
+          text-align: center;
+        }
+        :global(.crm-input-sm:focus) { outline: none; border-color: var(--crm-primary, #d97706); }
+      `}</style>
     </div>
   )
 }

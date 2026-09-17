@@ -6,10 +6,11 @@ import {
   loadParentRegistrationContext,
   getPaymentStatusByPhone,
   getPaymentStatusByChildName,
-  DEFAULT_MONTHLY_FEE,
+  getDefaultMonthlyFee,
   type PaymentMethod,
 } from './payment-helpers'
 import { resolveMonthlyFee } from './pricing'
+import { getCachedSettings } from './settings-db'
 
 export interface BotResponse {
   text: string
@@ -190,11 +191,26 @@ export function israelNow(): Date {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }))
 }
 
+// שעות פעילות — נקראות מ-settings (start/end/days) שהלקוח עורך בדשבורד.
+// ⚠️ fallback זהה *בדיוק* לקשיח הישן (ימים א-ה, 8:00-17:00) — כשאין הגדרה/cache
+//    (או ב-replay בלי DB) ההתנהגות לא משתנה.
 export function isBusinessHours(): boolean {
   const il = israelNow()
   const day = il.getDay() // 0=ראשון
   const hour = il.getHours()
-  return [0, 1, 2, 3, 4].includes(day) && hour >= 8 && hour < 17
+
+  const s = getCachedSettings()
+  const start = parseInt(s.business_hours_start || '', 10)
+  const end   = parseInt(s.business_hours_end || '', 10)
+  const days  = (s.business_days || '')
+    .split(',').map(d => parseInt(d.trim(), 10))
+    .filter(n => Number.isInteger(n) && n >= 0 && n <= 6)
+
+  const startHour  = Number.isInteger(start) ? start : 8
+  const endHour    = Number.isInteger(end) ? end : 17
+  const activeDays = days.length ? days : [0, 1, 2, 3, 4]
+
+  return activeDays.includes(day) && hour >= startHour && hour < endHour
 }
 
 // ⏰ "שעות שקט" — חלון שבו אסור לבוט לשלוח הודעה יזומה להורה (כולל תזכורות):
@@ -1585,7 +1601,7 @@ export async function handleCostInfoFlow(
 ): Promise<BotResponse> {
   const msg       = userMessage.trim()
   const areaLabel = session.collectedData.area_label ?? ''
-  const amount    = session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE)
+  const amount    = session.collectedData.monthly_fee ?? String(getDefaultMonthlyFee())
 
   // ─── 1. עלות חודשית צהרון ──────────────────────────────────────────────────
   if (msg === '1' || /חודשי|צהרון|ירחי|חודש|עלות/i.test(msg)) {
@@ -2250,7 +2266,7 @@ export async function handlePaymentSetupFlow(
 
     const childName  = session.collectedData.child_name  ?? ''
     const areaLabel  = session.collectedData.area_label  ?? ''
-    const amount     = session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE)
+    const amount     = session.collectedData.monthly_fee ?? String(getDefaultMonthlyFee())
     const fromSpot   = session.collectedData.from_spot_offer === 'true'
 
     // ── intro מותאם אישית ─────────────────────────────────────────────────
@@ -2280,7 +2296,7 @@ export async function handlePaymentSetupFlow(
   if (step === 'payment_setup_method') {
     const msg       = userMessage.trim()
     const childName = session.collectedData.child_name   ?? 'הילד/ה'
-    const amount    = parseInt(session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE), 10)
+    const amount    = parseInt(session.collectedData.monthly_fee ?? String(getDefaultMonthlyFee()), 10)
     const firstName = session.parentName?.split(' ')[0] ?? ''
 
     let chosenMethod: PaymentMethod | null = null
@@ -2494,7 +2510,7 @@ export async function handlePaymentSetupFlow(
   if (step === '__payment_area_legacy_disabled__') {
     const childName  = session.collectedData.child_name ?? 'הילד/ה'
     const regId      = session.collectedData.registration_id ?? `bot-${Date.now()}`
-    const amount     = parseInt(session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE), 10)
+    const amount     = parseInt(session.collectedData.monthly_fee ?? String(getDefaultMonthlyFee()), 10)
     const firstName  = session.parentName?.split(' ')[0] ?? ''
     const isStanding = session.collectedData.payment_method === 'standing_order'
     const description = isStanding
@@ -2580,7 +2596,7 @@ export async function handlePaymentSetupFlow(
   // ─── שלב מספר צ׳קים ──────────────────────────────────────────────────────
   if (step === 'payment_setup_checks') {
     const childName = session.collectedData.child_name ?? 'הילד/ה'
-    const amount    = parseInt(session.collectedData.monthly_fee ?? String(DEFAULT_MONTHLY_FEE), 10)
+    const amount    = parseInt(session.collectedData.monthly_fee ?? String(getDefaultMonthlyFee()), 10)
     const numChecks = parseInt(userMessage.trim(), 10)
 
     const validNum = !isNaN(numChecks) && numChecks >= 1 && numChecks <= 12

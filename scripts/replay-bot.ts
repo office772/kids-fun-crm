@@ -13,10 +13,12 @@
 
 import { classifyIntent } from '@/lib/bot/intent-classifier'
 import { processMessage } from '@/lib/bot/handler'
-import { parsePickupTime, splitNameAndClass, scheduleFaqAnchors, isHolidayQuestion } from '@/lib/bot/flows'
+import { parsePickupTime, splitNameAndClass, scheduleFaqAnchors, isHolidayQuestion, isBusinessHours } from '@/lib/bot/flows'
 import { parseLLMResponse, sanitizeForWhatsApp } from '@/lib/bot/llm-fallback'
 import { detectMedia } from '@/lib/bot/media-handler'
 import { buildVoicePromptBlock, isVoiceConfigured, EMPTY_VOICE } from '@/lib/bot/bot-voice'
+import { getCachedSettings } from '@/lib/bot/settings-db'
+import { getDefaultMonthlyFee, DEFAULT_MONTHLY_FEE } from '@/lib/bot/payment-helpers'
 import type { BotIntent, BotSession } from '@/lib/types'
 
 const PHONE = '+972500000000'   // מספר שלא קיים ב-DB — "הורה לא מזוהה"
@@ -547,6 +549,25 @@ function voiceCases() {
     block.includes('לא גובר על כללי הבטיחות'), 'צריך משפט שמירת בטיחות')
 }
 
+// ─── הגדרות מ-DB (פאזה 2) — בלי cache מוזרק, נשמר ה-fallback הקשיח ────────────
+function settingsFallbackCases() {
+  console.log('\n── הגדרות מ-DB (fallback) ──')
+
+  // ב-replay אין DB ולא הוזרק cache → מפה ריקה (הקוראים נופלים לקשיח).
+  check('settings — cache ריק כשלא הוזרק',
+    Object.keys(getCachedSettings()).length === 0, 'צריך {}')
+
+  // מחיר ברירת מחדל ללא הגדרה → הקשיח 799.
+  check('מחיר ברירת מחדל — fallback 799 בלי הגדרה',
+    getDefaultMonthlyFee() === DEFAULT_MONTHLY_FEE && DEFAULT_MONTHLY_FEE === 799,
+    `got=${getDefaultMonthlyFee()}`)
+
+  // isBusinessHours רץ בלי לזרוק ומחזיר boolean (הלוגיקה עצמה תלוית-שעה).
+  const bh = isBusinessHours()
+  check('שעות פעילות — isBusinessHours מחזיר boolean בלי cache',
+    typeof bh === 'boolean', `got=${typeof bh}`)
+}
+
 async function main() {
   intentCases()
   await flowCases()
@@ -560,6 +581,7 @@ async function main() {
   await miscCases()
   llmParsingCases()
   voiceCases()
+  settingsFallbackCases()
   console.log(`\n────────────\nעברו: ${passed} | נכשלו: ${failed}`)
   process.exit(failed === 0 ? 0 : 1)
 }
