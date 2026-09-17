@@ -58,6 +58,16 @@ function isAdminPhone(raw: string): boolean {
   return TEST_PHONES.length > 0 && isAllowedPhone(raw)
 }
 
+// המספר של קורלי עצמה (האדמין). הודעות שמגיעות *ממנו* לבוט לא מסלימות אליה —
+// אין טעם לשלוח לקורלי תבנית "פנייה חדשה" על הודעה שהיא שלחה (בקשת עינת 17.9).
+// מזהים לפי env (STAFF_ADMIN_PHONE / ADMIN_PHONES) + המספר הידוע כגיבוי.
+// ⚠️ לא isAdminPhone — הוא מחזיר true לכל מספרי הבדיקה בשלב הבדיקות.
+const STAFF_ADMIN_FALLBACK = '972546102262'
+function isStaffAdminSender(raw: string): boolean {
+  const n = normPhone(raw)
+  return n === STAFF_ADMIN_FALLBACK || adminPhones().includes(n)
+}
+
 // מטפל בהודעות מהאדמין (קורלי) — מסלול הניהול המלא (src/lib/bot/admin-flow.ts).
 // מחזיר טקסט תשובה אם ההודעה טופלה כניהול, או null → ממשיכה למסלול הורה רגיל
 // (כך קורלי ממשיכה לבדוק את הבוט כהורה כשהיא לא במצב ניהול).
@@ -269,9 +279,17 @@ async function createTask(
     framework: opts.framework,
   })
 
+  // הודעה מהמספר של קורלי עצמה → הפנייה נרשמת בדשבורד, אבל בלי תבנית ובלי מייל
+  // (אחרת קורלי מקבלת "פנייה חדשה מהבוט" על החשבוניות שהיא שלחה בעצמה).
+  const urgent = opts.priority === 'דחוף' || opts.priority === 'גבוה'
+  const selfEscalation = !!opts.parentPhone && isStaffAdminSender(opts.parentPhone)
+  if (urgent && selfEscalation) {
+    console.log('[manychat] escalation notifications skipped — message came from the staff admin phone')
+  }
+
   // הסלמה דחופה/גבוהה → גם תבנית וואטסאפ לקורלי (עם כפתור "צפייה בשיחה").
   // לא-חוסם: כשל בשליחה לא מפיל את יצירת הפנייה.
-  if (opts.priority === 'דחוף' || opts.priority === 'גבוה') {
+  if (urgent && !selfEscalation) {
     try {
       await sendCorliEscalationTemplate({
         parentName:  opts.parentName  || 'לא ידוע',
@@ -286,7 +304,7 @@ async function createTask(
 
   // התראת מייל לאדמין — ערוץ אמין (בלי מגבלת 24ש' של וואטסאפ). רק לפניות שאינן שגרתיות
   // (נציגה / כשל תשלום / דחוף). לא-חוסם: כשל מייל לא מפיל את יצירת הפנייה.
-  if (opts.priority === 'דחוף' || opts.priority === 'גבוה') {
+  if (urgent && !selfEscalation) {
     try {
       const { sendAdminAlert } = await import('@/lib/email')
       await sendAdminAlert({
