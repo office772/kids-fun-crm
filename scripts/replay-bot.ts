@@ -458,6 +458,13 @@ async function miscCases() {
       isWelcomeMenu(r.text) && !r.nextFlow, `nextFlow=${r.nextFlow} text=${r.text.slice(0, 40)}`)
   }
   {
+    const s = makeSession('camp_problem_desc')
+    const r = await processMessage(s, 'האתר לא נותן לי לשלם')
+    check('camp_problem_desc — תיאור בעיה עם "לשלם" לא קופץ לתפריט תשלומים',
+      !/\*1\* — סטטוס התשלום/.test(r.text) && r.intent !== 'בדיקת_תשלום' || r.createTask != null,
+      `text=${r.text.slice(0, 60)} intent=${r.intent}`)
+  }
+  {
     check('מדיה — קישור לחנות אינו קובץ', detectMedia('https://kidsandfun.co.il/shop/') === null,
       `got=${JSON.stringify(detectMedia('https://kidsandfun.co.il/shop/'))}`)
     check('מדיה — קובץ uChat כן מזוהה',

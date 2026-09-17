@@ -340,6 +340,17 @@ const CHOICE_STEPS = new Set([
   'payment_fail_method_choice',
 ])
 
+// שלבי *תיאור חופשי* — ההורה מתאר בעיה/מועד, וכל מילה עלולה להיראות ככוונה.
+// D2 17.9: "האתר לא נותן לי לשלם" בתיאור בעיית קייטנה קפץ לתפריט התשלומים.
+// בשלבים האלה לא מחליפים מסלול (רק בקשת נציג / "תפריט" מכובדות).
+const DESCRIPTION_STEPS = new Set([
+  'camp_problem_desc',
+  'payment_fail_describe',
+  'payment_fail_remind_when',
+  'cost_info_freetext',
+  'pickup_collector',
+])
+
 // כוונות שמצדיקות יציאה ממסלול ומעבר למסלול אחר
 const SWITCHABLE_INTENTS = new Set<BotIntent>([
   'רישום_צהרון', 'רישום_קייטנה', 'ביטול', 'שאלת_לוז',
@@ -468,6 +479,7 @@ async function handleActiveFlow(
   // לפני התיקון כל טקסט חופשי בתפריט קיבל "לא הבנתי, אנא בחרו".
   if (!isExplicitNumericChoice(userMessage) &&
       SWITCHABLE_INTENTS.has(intent) && !ownIntents.includes(intent) &&
+      !DESCRIPTION_STEPS.has(flow) &&
       (CHOICE_STEPS.has(flow) || canSwitchFromFreeText(userMessage))) {
     session.currentFlow = undefined
     const switched = await handleNewIntent(session, userMessage, intent)
