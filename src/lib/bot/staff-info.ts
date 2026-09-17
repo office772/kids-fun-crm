@@ -2,6 +2,7 @@
 // לא מסלול נפרד: המידע מוזרק לתוך ההקשר של הבוט, כדי שכשהורה שואל על הגן/הצוות
 // שלו (או כל דבר) — הבוט "יודע" גם את זה ויכול לשלב בתשובה.
 import { createServiceClient } from '@/lib/supabase/server'
+import { phoneVariants } from '@/lib/phone'
 
 function nameMatch(a?: string | null, b?: string | null): boolean {
   if (!a || !b) return false
@@ -59,4 +60,173 @@ export async function buildStaffContext(phone: string): Promise<string | null> {
 
   if (parts.length === 0) return null
   return 'מסגרת/צוות ההורה (השתמש במידע הזה אם ההורה שואל על הגן/הצוות שלו; אל תמציא פרטים שאינם כאן): ' + parts.join(' ')
+}
+
+// ─── הקשר רישומים/תשלומים של ההורה — כהקשר ל-LLM ─────────────────────────────
+// נמצא בלוגים (09/2026): הבוט הציג "ראיתי שיש לכם רישום: נועם בירן", ודקות אחר כך
+// ענה "אני לא יודעת לגשת לנתוני הרישום" והעביר לקורלי — כי ל-LLM לא הוזרקו
+// הרישומים בכלל. כאן נבנה ההקשר הזה, ותמיד *במפורש* (יש רישום / אין רישום).
+// ⚠️ כל חיפוש לפי טלפון חייב לעבור דרך phoneVariants (+972/972/0…).
+
+interface ParentChildRow {
+  id:         string
+  name:       string
+  school?:    string | null
+  class_name?: string | null
+  framework?: string | null
+  area_code?: string | null
+}
+
+interface ParentRecord {
+  id:       string
+  name:     string | null
+  children: ParentChildRow[]
+}
+
+async function loadParentByPhone(phone: string): Promise<ParentRecord | null> {
+  if (!phone || phone === 'simulator') return null
+  const supabase = createServiceClient()
+  const { data } = await supabase
+    .from('parents')
+    .select('id, name, children:children(id, name, school, class_name, framework, area_code)')
+    .in('phone', phoneVariants(phone))
+    .limit(1)
+  const parent = one(data as unknown as ParentRecord[])
+  if (!parent) return null
+  return { ...parent, children: (parent.children ?? []) as ParentChildRow[] }
+}
+
+// placeholder = ילד/ה שיובא מ-PayPlus/חשבונית ירוקה בלי שם אמיתי ("—", "*", "?")
+function isPlaceholderName(n?: string | null): boolean {
+  if (!n) return true
+  const t = n.trim()
+  return t.length < 3 || ['—', '–', '-', '*', '?'].includes(t)
+}
+
+function childLine(c: ParentChildRow): string {
+  const bits = [
+    c.school     ? `מסגרת: ${c.school}`   : '',
+    c.class_name ? `כיתה: ${c.class_name}` : '',
+    c.framework  ? `סוג: ${c.framework}`   : '',
+  ].filter(Boolean)
+  return `${c.name}${bits.length ? ` (${bits.join(', ')})` : ''}`
+}
+
+export interface ParentContext {
+  text:        string
+  hasChildren: boolean
+}
+
+// מחזיר הקשר מלא על ההורה: ילדים, סטטוס רישום ותשלום אחרון.
+// כשאין כלום — מחזיר משפט מפורש ("לא מצאתי רישום"), כדי שה-LLM יאמר את זה
+// במקום להסלים לקורלי בטענה שאין לו גישה לנתונים.
+export async function buildParentContext(phone: string): Promise<ParentContext | null> {
+  if (!phone || phone === 'simulator') return null
+  try {
+    const parent = await loadParentByPhone(phone)
+    if (!parent) {
+      return {
+        text: 'נתוני ההורה במערכת: מספר הטלפון הזה *לא נמצא* אצלנו — אין לך רישומים או תשלומים עליו. ' +
+              'אם ההורה שואל אם נרשם — אמור בכנות שלא מצאת רישום על המספר הזה ובקש שם מלא של הילד/ה לבדיקה.',
+        hasChildren: false,
+      }
+    }
+
+    const supabase = createServiceClient()
+    const kids = parent.children.filter(c => !isPlaceholderName(c.name))
+
+    const { data: regsRaw } = await supabase
+      .from('registrations')
+      .select('child_id, type, status, area_label, created_at')
+      .eq('parent_id', parent.id)
+      .order('created_at', { ascending: false })
+    const regs = (regsRaw ?? []) as Array<{
+      child_id: string | null; type: string; status: string; area_label: string | null
+    }>
+
+    const { data: paysRaw } = await supabase
+      .from('payments')
+      .select('amount, status, payment_type, paid_at, created_at')
+      .eq('parent_id', parent.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+    const pay = (paysRaw ?? [])[0] as
+      { amount: number | null; status: string; payment_type: string | null; paid_at: string | null } | undefined
+
+    const lines: string[] = []
+    lines.push(`נתוני ההורה במערכת${parent.name ? ` (${parent.name})` : ''}:`)
+
+    if (kids.length === 0) {
+      lines.push('• ההורה קיים אצלנו אבל *אין ילדים רשומים* על המספר הזה.')
+    } else {
+      for (const c of kids) {
+        const childRegs = regs.filter(r => r.child_id === c.id)
+        const regText = childRegs.length
+          ? childRegs.map(r => `${r.type} — ${r.status}${r.area_label ? ` (${r.area_label})` : ''}`).join('; ')
+          : 'אין רשומת רישום פורמלית, אבל הילד/ה קיים/ת אצלנו במערכת'
+        lines.push(`• ${childLine(c)} — ${regText}.`)
+      }
+      lines.push(
+        'כלומר: כן, יש רישום/ים אצלנו. אם ההורה שואל "האם X רשום" — ענה מהנתונים האלה בביטחון, ' +
+        'ואל תעביר לקורלי רק בגלל השאלה הזו.'
+      )
+    }
+
+    if (pay) {
+      const when = pay.paid_at ? new Date(pay.paid_at).toLocaleDateString('he-IL') : ''
+      lines.push(
+        `• תשלום אחרון: ${pay.status}${pay.amount ? ` — ₪${pay.amount}` : ''}` +
+        `${pay.payment_type ? ` (${pay.payment_type})` : ''}${when ? `, ${when}` : ''}.`
+      )
+    } else {
+      lines.push('• אין עדיין רשומת תשלום פעילה.')
+    }
+
+    return { text: lines.join('\n'), hasChildren: kids.length > 0 }
+  } catch (err) {
+    console.error('[buildParentContext] error:', err)
+    return null
+  }
+}
+
+// ─── מסלול מהיר: "האם נרשמתי / האם זה נשמר?" ─────────────────────────────────
+// עונה ישירות מה-DB במקום להעביר לקורלי. מחזיר null כשאין מה לענות
+// (ואז ה-LLM עונה עם ההקשר של buildParentContext — בלי הסלמה).
+export async function buildRegistrationStatusAnswer(phone: string): Promise<string | null> {
+  if (!phone || phone === 'simulator') return null
+  try {
+    const parent = await loadParentByPhone(phone)
+    const kids = (parent?.children ?? []).filter(c => !isPlaceholderName(c.name))
+    if (!parent || kids.length === 0) return null
+
+    const supabase = createServiceClient()
+    const { data: regsRaw } = await supabase
+      .from('registrations')
+      .select('child_id, type, status, area_label, created_at')
+      .eq('parent_id', parent.id)
+      .order('created_at', { ascending: false })
+    const regs = (regsRaw ?? []) as Array<{
+      child_id: string | null; type: string; status: string; area_label: string | null
+    }>
+
+    const blocks = kids.map(c => {
+      const r = regs.find(x => x.child_id === c.id)
+      const details = [
+        c.school     && `מסגרת: *${c.school}*`,
+        c.class_name && `כיתה: *${c.class_name}*`,
+        r            && `סטטוס: *${r.status}*${r.area_label ? ` (${r.area_label})` : ''}`,
+        !r && c.framework && `רשום/ה ל*${c.framework}*`,
+      ].filter(Boolean).join('\n')
+      return `✅ *${c.name}*${details ? `\n${details}` : ''}`
+    })
+
+    return (
+      `בדקתי אצלנו — הפרטים שלכם *נשמרו* 💛\n\n` +
+      blocks.join('\n\n') +
+      `\n\nאם משהו לא נכון או שחסר פרט — כתבו לי ונתקן 😊`
+    )
+  } catch (err) {
+    console.error('[buildRegistrationStatusAnswer] error:', err)
+    return null
+  }
 }

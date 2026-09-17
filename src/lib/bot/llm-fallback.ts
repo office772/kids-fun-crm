@@ -124,6 +124,18 @@ export async function callLLMFallback(
   // אם זוהתה מסגרת לפי הטלפון — אנחנו כן מכירים את הילד/ים, ולכן לא נפעיל
   // את אזהרת "אין לך שם ילד" (שאחרת תגרום לבוט לבקש שם למרות שהוא יודע).
   let knowsParentFromPhone = false
+
+  // ילדים + סטטוס רישום + תשלום אחרון — בלי זה הבוט ענה "אין לי גישה לנתוני
+  // הרישום" והסלים לקורלי, דקות אחרי שהוא עצמו הציג את הרישום (לוגים 09/2026).
+  try {
+    const { buildParentContext } = await import('./staff-info')
+    const parentCtx = await buildParentContext(session.phone)
+    if (parentCtx) {
+      contextLines.push(parentCtx.text)
+      if (parentCtx.hasChildren) knowsParentFromPhone = true
+    }
+  } catch { /* לא חוסם — אם נכשל, ממשיכים בלי ההקשר */ }
+
   try {
     const { buildStaffContext } = await import('./staff-info')
     const staffCtx = await buildStaffContext(session.phone)

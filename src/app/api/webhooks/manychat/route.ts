@@ -164,14 +164,17 @@ async function clearSession(
 }
 
 // טעינת היסטוריית שיחה אחרונה (ל-context של ה-LLM — שיבין הקשר ולא יתנהג כטופס)
+// ⏱️ רק 6 השעות האחרונות: הודעות מאתמול הן שיחה אחרת, וגררו את ה-LLM להקשר שגוי.
 async function loadRecentMessages(
   supabase: ReturnType<typeof createServiceClient>,
   phone: string
 ): Promise<BotSession['messages']> {
+  const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
   const { data } = await supabase
     .from('conversations')
     .select('direction, message_text, created_at')
     .eq('phone', phone)
+    .gte('created_at', since)
     .order('created_at', { ascending: false })
     .limit(8)
   if (!data?.length) return []

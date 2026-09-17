@@ -112,6 +112,26 @@ function isNo(msg: string): boolean {
   return /^(לא|לא רוצה|לא תודה|no|אין צורך|לא עכשיו)/i.test(msg.trim())
 }
 
+// ─── "כן"/"לא" *נקיים* — לשלבי אישור קריטיים (ביטול) ────────────────────────
+// נמצא בלוגים (09/2026): "לא הבנתי עד מתי אני משלם בפועל?" נקרא כ-"לא" והבוט
+// ענה "בסדר, הביטול לא בוצע". שאלה או משפט ארוך אינם תשובת כן/לא —
+// הם הולכים ל-LLM (והמסלול נשמר), לא מכריעים פעולה כספית.
+function isPlainAnswer(msg: string): boolean {
+  const t = msg.trim()
+  if (!t) return false
+  if (t.includes('?')) return false                     // שאלה — לא הכרעה
+  if (/הבנתי|למה|מה זאת|כלומר/.test(t)) return false     // בקשת הבהרה
+  return t.split(/\s+/).filter(Boolean).length <= 3      // תשובה קצרה בלבד
+}
+
+function isBareYes(msg: string): boolean {
+  return isPlainAnswer(msg) && isYes(msg)
+}
+
+function isBareNo(msg: string): boolean {
+  return isPlainAnswer(msg) && isNo(msg)
+}
+
 const MENU_TEXT =
   `*1* — רישום לצהרון\n` +
   `*2* — רישום לקייטנה\n` +
@@ -278,7 +298,8 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
   // ─── הורה מזוהה — בחירה מה לעשות ───────────────────────────────────────
   if (step === 'register_existing_parent') {
     const msg = userMessage.trim()
-    if (msg === '1' || /נוסף|אח|אחות/i.test(msg)) {
+    // מיפוי טקסט חופשי לאפשרויות — "אמרתי, אני רוצה לרשום ילד לצהרון" = אפשרות 1
+    if (msg === '1' || /לרשום|רישום|להירשם|עוד ילד|ילד נוסף|נוסף|נוספת|אחות|אח שלו|אח שלה/i.test(msg)) {
       return {
         text: `מעולה! 🌟\n\nלאיזה אזור מבקשים לרשום?\n\n*1* — דרום השרון / חוף השרון\n*2* — חוף הכרמל\n*3* — גני ילדים תל אביב`,
         nextFlow: 'register_area',
@@ -290,7 +311,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
         nextFlow: 'register_update_details',
       }
     }
-    if (msg === '3' || /סטטוס|תשלום/i.test(msg)) {
+    if (msg === '3' || /סטטוס|תשלום|שילמתי/i.test(msg)) {
       session.currentFlow = 'payment_status_menu'
       return handlePaymentStatusFlow(session.parentName)
     }
@@ -300,12 +321,8 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
         nextFlow: 'register_existing_question',
       }
     }
-    return {
-      text:
-        `לא הבנתי 😊\n\n` +
-        `*1* — לרשום ילד/ה נוסף/ת\n*2* — לעדכן פרטים\n*3* — לבדוק סטטוס תשלום\n*4* — שאלה אחרת`,
-      nextFlow: 'register_existing_parent',
-    }
+    // לא אחת מהאפשרויות → ל-LLM עם ההקשר (המסלול נשמר) במקום "לא הבנתי"
+    return { text: '', useLLM: true }
   }
 
   // עדכון פרטים → משימה לנציגה
@@ -334,19 +351,37 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
   }
 
   // ─── שלב אזור ────────────────────────────────────────────────────────────
+  // ⚠️ הורים לא עונים "2" — הם כותבים "אני מגבעתיים" או שם הגן ("גלי עתלית").
+  // לפני התיקון כל תשובה כזו קיבלה "לא הבנתי" שוב ושוב (3 פעמים בלוגים 09/2026).
   if (step === 'register_area') {
-    const { areaFromMessage } = await import('./registration-helpers')
-    const area = areaFromMessage(userMessage)
+    const { areaFromMessage, areaFromSchoolName, servedAreasText } = await import('./registration-helpers')
+    const m = userMessage.trim()
+
+    // 1. בחירה מספרית — בדיוק כמו קודם
+    let area: string | null =
+      m === '1' ? 'sharon' : m === '2' ? 'carmel' : m === '3' ? 'telaviv' : null
+    // 2. שם גן / בית ספר (schools table + מפה קשיחה) — לפני ה-regex הרחב של אזור
+    if (!area) area = await areaFromSchoolName(m)
+    // 3. שם אזור / עיר
+    if (!area) area = areaFromMessage(m)
+
     if (!area) {
+      const misses = parseInt(session.collectedData._area_miss ?? '0', 10) + 1
+      session.collectedData._area_miss = String(misses)
+
+      // אחרי ניסיון שני — ל-LLM עם ההקשר (המסלול נשמר ב-handler)
+      if (misses >= 2) return { text: '', useLLM: true }
+
       return {
         text:
-          `לא הבנתי 😊 אנא בחרו:\n\n` +
-          `*1* — דרום השרון / חוף השרון\n` +
-          `*2* — חוף הכרמל\n` +
-          `*3* — גני ילדים תל אביב`,
+          `לא הצלחתי לזהות את האזור 🤔\n\n` +
+          `אנחנו מפעילים צהרונים ב:\n${servedAreasText()}\n\n` +
+          `אפשר לבחור מספר, או פשוט לכתוב את *שם הגן / בית הספר* של הילד/ה.\n` +
+          `ואם האזור שלכם לא ברשימה — כתבו לי ואעביר את הפרטים לקורלי שתחזור אליכם 💛`,
         nextFlow: 'register_area',
       }
     }
+    delete session.collectedData._area_miss
     session.collectedData.area_code = area
     return {
       text: `מצוין! 💛\n\n*מה שם הילד/ה?* (שם פרטי + שם משפחה)`,
@@ -669,7 +704,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
   // לפני 15 — אישור
   if (step === 'cancel_confirm_before15') {
     const childName = session.collectedData.child_name || 'הילד/ה'
-    if (isYes(userMessage)) {
+    if (isBareYes(userMessage)) {
       // ביצוע הביטול בפועל ב-CRM
       const result = await performCancellation(
         session, childName, `לפני ה-15 (יום ${dayOfMonth}) — המשך עד סוף החודש + זיכוי מלא`
@@ -707,12 +742,17 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
           priority: 'גבוה'
         }
       }
-    } else {
+    }
+
+    if (isBareNo(userMessage)) {
       return {
         text: `בסדר, הביטול *לא בוצע* 😊\nאם תרצו לחזור לנושא — כתבו לנו בכל עת!`,
         isComplete: true
       }
     }
+
+    // לא כן ולא לא — שאלה/הבהרה. ל-LLM, והשלב נשמר (handler מחזיר nextFlow).
+    return { text: '', useLLM: true }
   }
 
   // אחרי 15 — אישור תקנון או בקשת חריג
@@ -736,7 +776,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
       }
     }
 
-    if (isYes(userMessage)) {
+    if (isBareYes(userMessage)) {
       // ביצוע הביטול בפועל ב-CRM
       const result = await performCancellation(
         session, childName, `אחרי ה-15 (יום ${dayOfMonth}) — ממשיך חודש נוסף ומסיים בסוף החודש הבא`
@@ -775,7 +815,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
       }
     }
 
-    if (isNo(userMessage)) {
+    if (isBareNo(userMessage)) {
       return {
         text: `בסדר, הביטול *לא בוצע* 😊\n` +
           `שמחים שאתם נשארים! אם תרצו לחזור לנושא — כתבו לנו.`,
@@ -783,13 +823,8 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
       }
     }
 
-    // תגובה לא ברורה
-    return {
-      text: `לא הבנתי 😊\n\nכדי לאשר את הביטול כתבו *"כן"*.\n` +
-        `כדי לבטל — כתבו *"לא"*.\n\n` +
-        `_אם יש נסיבות מיוחדות — פרטו ואנחנו נבדוק_`,
-      nextFlow: 'cancel_confirm_after15'
-    }
+    // לא כן ולא לא — שאלה/הבהרה. ל-LLM, והשלב נשמר (handler מחזיר nextFlow).
+    return { text: '', useLLM: true }
   }
 
   return { text: '😊 כתבו *"ביטול"* להתחיל מחדש.' }
@@ -859,14 +894,8 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
       }
     }
 
-    // לא הבין
-    return {
-      text: `לא הבנתי 😊 אנא בחרו:\n` +
-        `*1* — לרשום ילד/ה לקייטנה\n` +
-        `*2* — לבדוק אם כבר נרשמתי\n` +
-        `*3* — יש לי בעיה בהרשמה`,
-      nextFlow: 'camp_menu'
-    }
+    // לא אחת מהאפשרויות → ל-LLM עם ההקשר (המסלול נשמר) במקום "לא הבנתי"
+    return { text: '', useLLM: true }
   }
 
   // תרחיש 2: בדיקת שם
@@ -1250,17 +1279,8 @@ export async function handlePaymentStatusMenuFlow(
     return { text: '__redirect_payment_setup__', nextFlow: 'payment_setup_start' }
   }
 
-  // לא הבין
-  return {
-    text:
-      `לא הבנתי 😊\n\n` +
-      `*1* — סטטוס התשלום שלי\n` +
-      `*2* — לשנות שיטת תשלום\n` +
-      `*3* — לא עבר תשלום / בעיה\n` +
-      `*4* — מה העלות החודשית?\n` +
-      `*5* — 💳 להסדיר תשלום חדש`,
-    nextFlow: 'payment_status_menu',
-  }
+  // לא אחת מהאפשרויות → ל-LLM עם ההקשר (המסלול נשמר) במקום "לא הבנתי"
+  return { text: '', useLLM: true }
 }
 
 // שלב זיהוי לפי שם ילד לבדיקת סטטוס (כשהטלפון לא נמצא במערכת)

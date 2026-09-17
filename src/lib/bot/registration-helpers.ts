@@ -15,6 +15,69 @@ export function areaFromMessage(msg: string): string | null {
   return null
 }
 
+// ─── שם גן / בית ספר → אזור ────────────────────────────────────────────────
+// הורים לא יודעים מה זה "חוף הכרמל" — הם כותבים "גלי עתלית" או "מתן".
+// מפה קשיחה כגיבוי ל-DB (וגם כשאין חיבור), ואחריה חיפוש בטבלת schools.
+const SCHOOL_AREA_FALLBACK: Record<string, string> = {
+  // חוף הכרמל
+  'גלי עתלית': 'carmel', 'עתלית': 'carmel',
+  'פיטר פן': 'carmel', 'דרדסים': 'carmel', 'החתול במגפיים': 'carmel',
+  // שרון
+  'מתן': 'sharon', 'חצב': 'sharon', 'אלמוג': 'sharon',
+  'רשפון': 'sharon', 'רישפון': 'sharon', 'צור יצחק': 'sharon',
+  // תל אביב (שמות הגנים)
+  'זיו': 'telaviv', 'יערה': 'telaviv', 'מכחול': 'telaviv', 'מניפה': 'telaviv',
+  'צבעי הקשת': 'telaviv', 'אריגן': 'telaviv', 'יצירה': 'telaviv', 'לביא': 'telaviv',
+  'ציור': 'telaviv', 'אילון': 'telaviv', 'ירדן': 'telaviv', 'פולג': 'telaviv',
+  'נחשון': 'telaviv', 'געתון': 'telaviv', 'גולן': 'telaviv', 'ערבה': 'telaviv',
+}
+
+// מסיר קידומות ("בי״ס", "גן", "בית ספר") כדי להשוות גרעין שם בלבד
+function schoolCore(name: string): string {
+  return name
+    .replace(/^\s*(בי["׳']?ס|בית ספר|בית-ספר|גן|גני|ביה["׳']?ס)\s+/, '')
+    .replace(/["׳'״]/g, '')
+    .trim()
+}
+
+// מחזיר area_code לפי שם גן/בי"ס שההורה כתב, או null.
+// דורש גרעין שם באורך 3+ תווים כדי שלא כל "גן" יתפוס אזור שלם.
+export async function areaFromSchoolName(text: string): Promise<string | null> {
+  const raw = (text || '').trim()
+  if (raw.length < 3 || /^\d+$/.test(raw)) return null
+  const needle = schoolCore(raw)
+
+  // 1. טבלת schools (מקור האמת — הלקוחה מעדכנת אותה מהדשבורד)
+  try {
+    const supabase = createServiceClient()
+    const { data } = await supabase
+      .from('schools').select('name, city, area_code').eq('is_active', true)
+    const rows = (data ?? []) as { name: string; city: string | null; area_code: string }[]
+    const hits = rows.filter(r => {
+      const core = schoolCore(r.name)
+      if (core.length < 3) return false
+      return needle.includes(core) || core.includes(needle) ||
+             (!!r.city && r.city.length >= 3 && needle.includes(r.city))
+    })
+    const areas = Array.from(new Set(hits.map(h => h.area_code)))
+    if (areas.length === 1) return areas[0]
+  } catch (err) {
+    console.error('[areaFromSchoolName] schools lookup failed, using fallback map:', err)
+  }
+
+  // 2. מפה קשיחה (גם כשאין DB)
+  const matches = Object.entries(SCHOOL_AREA_FALLBACK)
+    .filter(([name]) => name.length >= 3 && needle.includes(name))
+    .map(([, area]) => area)
+  const unique = Array.from(new Set(matches))
+  return unique.length === 1 ? unique[0] : null
+}
+
+// רשימת האזורים שאנחנו מפעילים בהם — לתשובה כשלא זיהינו את מה שההורה כתב
+export function servedAreasText(): string {
+  return Object.values(AREAS).map((a, i) => `*${i + 1}* — ${a.label}`).join('\n')
+}
+
 // ─── בדיקת קיבולת ──────────────────────────────────────────────────────────
 export async function checkCapacity(areaCode: string): Promise<{
   hasSpots:            boolean
