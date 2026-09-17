@@ -1,10 +1,12 @@
 import { BotIntent, BotSession } from '@/lib/types'
-import { classifyIntent, matchesWholeWord } from './intent-classifier'
+import { classifyIntent, matchesWholeWord, normalizeMessage } from './intent-classifier'
 import {
   BotResponse,
   buildWelcomeMessage,
   buildEscalationMessage,
   buildDidNotUnderstand,
+  looksLikeChildName,
+  isHolidayQuestion,
   handleRegistrationFlow,
   handleCancellationFlow,
   handleCampRegistrationFlow,
@@ -52,18 +54,57 @@ function looksFrustrated(msg: string): boolean {
   return FRUSTRATION_PATTERNS.some(re => re.test(t))
 }
 
-// תשובת "לא הבנתי" / נפילה גנרית של ה-LLM = הודעה שלא ענתה להורה
+// ניסוחי "לא הבנתי" של ה-LLM — גם כשהם מנוסחים יפה, ההורה לא קיבל תשובה.
+// (אתגור 17.9: הבוט ביקש "אפשר לפרט?" שלוש פעמים ברצף וההורה התפוצץ.)
+const LLM_REPHRASE_RE =
+  /לא הבנתי|לא הצלחתי (להבין|לזהות)|(לא|אינ[הו])[^.!?]{0,14}(ברור|ברורה) לי|כתוב\/?י שוב|תכתבי שוב|נסה שוב|נסי שוב|בעיה בהקלדה|תוכל\/?י לפרט|אפשר לפרט|אשמח שתפרט|אשמח שתסביר|לא בטוח(ה)? שהבנתי|רק שאדייק|נראה שהודעת|בוא(י|ו)? נתחיל מחדש|מה בדיוק (אתה|את|אתם|תרצ)/
+
 function isNonAnswer(text: string): boolean {
   const t = (text || '').trim()
   if (!t) return false
-  return t.startsWith('לא הבנתי') ||
-    t.startsWith('לא הצלחתי להבין') ||
+  return LLM_REPHRASE_RE.test(t) ||
     t.includes('נציגה שלנו תחזור אליך בהקדם 💛')   // buildLLMErrorFallback
 }
 
+// הודעה שאין בה תוכן ממשי ("...", "?", "asdf") — גם היא "תור שלא התקדם".
+// ⚠️ תשובות קצרות תקינות (כן/לא/אוקי/תודה) *אינן* ג'יבריש.
+const SHORT_VALID_RE = /^(כן|לא|ok|okay|אוקי|אוקיי|טוב|בסדר|תודה|היי|הי|שלום|יש|אין|סבבה|מעולה)[!.?]*$/i
+
+function isGibberish(msg: string): boolean {
+  const t = (msg || '').trim()
+  if (!t) return false
+  if (/^[?.!…\s]+$/.test(t)) return true              // "?" / "..." / "…"
+  if (SHORT_VALID_RE.test(t)) return false
+  const hasHebrewWord = /[א-ת]{3,}/.test(t)
+  const hasDigit      = /\d/.test(t)
+  return !hasHebrewWord && !hasDigit
+}
+
+// ─── יציאה ממצב handoff ──────────────────────────────────────────────────────
 function wantsMenuBack(msg: string): boolean {
-  const t = msg.trim()
-  return /^[1-6]$/.test(t) || /^(תפריט|בוט|חזרה לבוט|התחלה|start|menu)$/i.test(t)
+  const t = normalizeMessage(msg).trim()
+  return /^[1-6]$/.test(t) || isMenuWord(t)
+}
+
+function isMenuWord(msg: string): boolean {
+  return /^(תפריט|בוט|חזרה לבוט|התחלה|start|menu)$/i.test(msg.trim())
+}
+
+// ─── הודעות שנוגעות לשלום הילד/ה — קורלי מקבלת התראה מיידית ─────────────────
+// ⚠️ ה-\b של JS לא עובד ליד עברית — לכן גבול מילה ידני משני הצדדים.
+const SAFETY_WORDS = [
+  'פצע', 'פצעים', 'פציעה', 'נפצע', 'נפצעה', 'חבורה', 'חבורות',
+  'נפל', 'נפלה', 'תאונה', 'תאונת', 'אלימות', 'אלים', 'אלימה',
+  'הכה', 'הכו', 'הכתה', 'נעלם', 'נעלמה', 'מציק', 'מציקה', 'מציקים',
+  'בוכה', 'אמבולנס', 'נחנק', 'נחנקה', 'נשך', 'נשכה', 'נשכו',
+]
+const SAFETY_PHRASES = ['לא חזר', 'לא חזרה', 'חולה בבית']
+
+function isSafetyCritical(msg: string): boolean {
+  const t = (msg || '').trim()
+  if (!t) return false
+  if (SAFETY_PHRASES.some(p => t.includes(p))) return true
+  return SAFETY_WORDS.some(w => new RegExp(`(^|[^א-ת])[ולבהכמש]{0,2}${w}([^א-ת]|$)`).test(t))
 }
 
 export async function processMessage(
@@ -77,6 +118,10 @@ export async function processMessage(
     }
     session.currentFlow = undefined
     session.collectedData = {}
+    // "תפריט" / "בוט" (לא ספרה) → מחזירים את התפריט מיד, בלי לסווג כוונה
+    if (isMenuWord(normalizeMessage(userMessage))) {
+      return { text: buildWelcomeMessage(session.parentName), intent: 'שאלה_כללית', isComplete: true }
+    }
   }
 
   // ההיסטוריה נטענת *לפני* רישום ההודעה הנוכחית — לכן "אחרון" = התור הקודם
@@ -95,9 +140,9 @@ export async function processMessage(
   }
 
   const strikes =
-    (looksFrustrated(lastUser) ? 1 : 0) +
+    ((looksFrustrated(lastUser) || isGibberish(lastUser)) ? 1 : 0) +
     (isNonAnswer(lastBot) ? 1 : 0) +
-    (looksFrustrated(userMessage) ? 1 : 0) +
+    ((looksFrustrated(userMessage) || isGibberish(userMessage)) ? 1 : 0) +
     ((isNonAnswer(result.text) || (!!result.text && result.text === lastBot)) ? 1 : 0)
 
   if (strikes >= 2) {
@@ -136,6 +181,28 @@ async function processMessageCore(
 
   const intent = classifyIntent(userMessage)
 
+  // ── שלום הילד/ה קודם לכל מסלול ────────────────────────────────────────────
+  // "הילד חזר עם חבורה בראש" / "מישהו מציק לו" — לא שאלה לבוט. פנייה *דחופה*
+  // לקורלי מיד, מכל שלב, ובלי להשתיק את הבוט (ההורה עדיין יכול לכתוב).
+  if (isSafetyCritical(userMessage)) {
+    console.log('[safety] escalating immediately (דחוף)')
+    session.currentFlow = undefined
+    session.collectedData = {}
+    return {
+      text:
+        `זה נשמע חשוב 💛\n\n` +
+        `העברתי את זה *עכשיו* לקורלי, הנציגה שלנו, והיא תחזור אליך בהקדם.\n` +
+        `אם זה דחוף ממש — אפשר להתקשר ישירות למסגרת.`,
+      intent,
+      isComplete: true,
+      createTask: {
+        type:        'שאלה כללית',
+        description: `⚠️ פנייה דחופה מהורה (שלום/בטיחות הילד/ה): "${userMessage.slice(0, 120)}" | טלפון: ${session.phone}`,
+        priority:    'דחוף',
+      },
+    }
+  }
+
   // ── FP: מסלול פעיל — ממשיכים בו ──────────────────────────────────────────
   if (session.currentFlow) {
     const flowBefore = session.currentFlow
@@ -156,7 +223,8 @@ async function processMessageCore(
   // לפני התיקון זה נפל ל-LLM שהעביר לקורלי ("אין לי גישה לנתוני הרישום").
   if (!isExplicitNumericChoice(userMessage) && asksAboutRegistrationStatus(userMessage)) {
     const { buildRegistrationStatusAnswer } = await import('./staff-info')
-    const statusAnswer = await buildRegistrationStatusAnswer(session.phone)
+    // ההודעה עוברת הלאה — "נרשמתי לקייטנה?" חייב להיענות על *קייטנה*, לא על הצהרון
+    const statusAnswer = await buildRegistrationStatusAnswer(session.phone, userMessage)
     if (statusAnswer) {
       return { text: statusAnswer, intent, isComplete: true }
     }
@@ -167,8 +235,11 @@ async function processMessageCore(
   // ── שאלה אמיתית? קודם נחפש ב-FAQ של האדמין לפני שמתחילים מסלול ──────────
   // ככה שאלות מידע כמו "כמה ימים אפשר?" יקבלו תשובה ישירה במקום להיכנס לרישום.
   // יוצא דופן: שאלה על הרכזת/הצוות → ל-LLM (שמקבל את פרטי הצוות בהקשר), לא FAQ גנרי.
+  // יוצא דופן נוסף: שאלת *חג/חופשה* → למסלול הלו"ז, שיודע לבחור את ה-FAQ של
+  // החגים. חיפוש ה-fuzzy כאן החזיר לה את שעות הפעילות הרגילות (אתגור 17.9).
   const asksAboutStaff = /רכזת|מדריכה|גננת|המורה|צוות|מי אחרא|איש קשר/.test(userMessage)
-  if (!asksAboutStaff && isLikelyQuestion(userMessage) && !isExplicitNumericChoice(userMessage)) {
+  if (!asksAboutStaff && !isHolidayQuestion(userMessage) &&
+      isLikelyQuestion(userMessage) && !isExplicitNumericChoice(userMessage)) {
     const { findFaqAnswer } = await import('./faq-search')
     const faqAnswer = await findFaqAnswer(userMessage)
     if (faqAnswer) {
@@ -187,8 +258,9 @@ async function processMessageCore(
 // זיהוי אם ההודעה היא שאלת מידע (לא בקשה לפעולה כמו "רישום לצהרון")
 function isLikelyQuestion(msg: string): boolean {
   const t = msg.trim()
-  if (t.endsWith('?')) return true
-  return /^(האם|מה|מתי|איך|כמה|איפה|למה|אילו|מי|יש|אפשר|מ?אילו)\b/i.test(t)
+  if (t.includes('?')) return true
+  // ⚠️ ה-\b של JS לא עובד ליד עברית — הגרסה הקודמת עם \b לא תפסה *כלום*.
+  return /^(האם|מה|מתי|איך|כמה|איפה|למה|אילו|מי|יש|אפשר)([^א-תA-Za-z0-9]|$)/i.test(t)
 }
 
 function isExplicitNumericChoice(msg: string): boolean {
@@ -266,8 +338,51 @@ const STEP_OWN_INTENTS: Record<string, BotIntent[]> = {
   // יודע לתזמן תזכורת, וזה עדיף על הסלמה
   payment_fail_type:          ['בדיקת_תשלום', 'אפשרויות_תשלום', 'כשל_תשלום', 'בקשת_נציג'],
   payment_fail_method_choice: ['בדיקת_תשלום', 'אפשרויות_תשלום', 'כשל_תשלום'],
+  // ── שלבי טקסט חופשי: הכוונה של המסלול עצמו אינה "החלפת נושא" ──────────────
+  register_child_name:        ['רישום_צהרון'],
+  register_class:             ['רישום_צהרון'],
+  register_waiting_confirm:   ['רישום_צהרון'],
+  cancel_child:               ['ביטול'],
+  cancel_confirm_before15:    ['ביטול'],
+  cancel_confirm_after15:     ['ביטול'],
+  camp_check_name:            ['רישום_קייטנה'],
+  camp_late_name:             ['רישום_קייטנה'],
+  pickup_child:               ['איסוף_מוקדם'],
+  pickup_time:                ['איסוף_מוקדם'],
+  pickup_collector:           ['איסוף_מוקדם'],
+  payment_status_child_name:  ['בדיקת_תשלום'],
+  payment_fail_child_name:    ['בדיקת_תשלום', 'כשל_תשלום'],
+  payment_fail_new_date:      ['בדיקת_תשלום', 'כשל_תשלום'],
+  payment_fail_remind_when:   ['בדיקת_תשלום', 'כשל_תשלום'],
+  payment_setup_child_name:   ['בדיקת_תשלום', 'אפשרויות_תשלום'],
 }
 
+// ─── שלבי אישור ──────────────────────────────────────────────────────────────
+// בשלבים האלה "כן" מבצע פעולה כספית/בלתי הפיכה. אם השיחה יצאה מהם (הסלמה),
+// אסור להחזיר אליהם את ההורה — "כן" מאוחר לא יבצע ביטול שההורה כבר נטש.
+const CONFIRM_STEPS = new Set([
+  'cancel_confirm_before15',
+  'cancel_confirm_after15',
+  'register_waiting_confirm',
+  'waiting_spot_confirm',
+  'payment_fail_confirm_child',
+])
+
+
+// ─── החלפת נושא מפורשת בשלב *טקסט חופשי* ────────────────────────────────────
+// בשלב איסוף טקסט (שם ילד/ה, שעה, תיאור) כל מילה עלולה להיראות ככוונה, ולכן
+// מחליפים מסלול רק כשההודעה באמת נשמעת כמו בקשה חדשה: לפחות 3 מילים,
+// ולא משהו שנראה כמו שם ילד/ה ("דניאל אבני" נשאר שם, "בעצם אני רוצה לרשום
+// עוד ילד" מתחיל רישום).
+function canSwitchFromFreeText(msg: string): boolean {
+  const t = msg.trim()
+  const words = t.split(/\s+/).filter(Boolean)
+  if (words.length < 3) return false
+  // *שאלה* אינה החלפת נושא — "כמה זה עולה?" באמצע רישום נשאר רישום,
+  // וה-LLM עונה על השאלה בלי להפיל את המסלול.
+  if (isLikelyQuestion(t)) return false
+  return !looksLikeChildName(t)
+}
 
 // הודעה קצרה (עד 3 מילים) שמכילה ספרה בודדת אחת → הספרה היא הבחירה מהתפריט.
 // "יש לי 2 ילדים" (4 מילים) לא נתפס — בכוונה.
@@ -288,6 +403,7 @@ async function handleActiveFlow(
   intent: BotIntent
 ): Promise<(BotResponse & { intent: BotIntent }) | null> {
   const flow = session.currentFlow!
+  const ownIntents = STEP_OWN_INTENTS[flow] ?? []
 
   // ── ספרה בתוך הודעה קצרה = בחירה ("נו כבר!!! 2", "אפשרות 2", "2 בבקשה") ──────
   if (CHOICE_STEPS.has(flow) && !isExplicitNumericChoice(userMessage)) {
@@ -295,33 +411,34 @@ async function handleActiveFlow(
     if (digit) userMessage = digit
   }
 
+  // ── בקשת נציג מכובדת בכל שלב, לא רק בתפריטים ─────────────────────────────
+  // אתגור 17.9 (S2): "תעבירי אותי לנציגה" בשלב שם-הילד נשמר כשם הילד/ה,
+  // ובשלב שעת האיסוף נבלע. עכשיו: בקשה מפורשת לנציג/ה מסלימה מכל שלב —
+  // למעט שלבים שהכוונה הזו *שייכת* להם (payment_fail_type = "תחזרו אלי").
+  if (!isExplicitNumericChoice(userMessage) && intent === 'בקשת_נציג' && !ownIntents.includes(intent)) {
+    session.currentFlow = undefined
+    return {
+      text: buildEscalationMessage(),
+      escalate: true,
+      intent,
+      createTask: {
+        type:        'שאלה כללית',
+        description: `ביקש/ה לדבר עם נציגה תוך כדי ${flow}: "${userMessage.slice(0, 80)}"`,
+        priority:    'גבוה',
+      },
+      isComplete: true,
+    }
+  }
+
   // ── תפריט שמכבד כוונה ─────────────────────────────────────────────────────
-  // לפני התיקון כל טקסט חופשי בתפריט קיבל "לא הבנתי, אנא בחרו" — כולל
-  // "תעביר אותי לנציג אנושי" (הכוונה זוהתה ונזרקה).
-  if (CHOICE_STEPS.has(flow) && !isExplicitNumericChoice(userMessage)) {
-    const ownIntents = STEP_OWN_INTENTS[flow] ?? []
-
-    if (intent === 'בקשת_נציג' && !ownIntents.includes(intent)) {
-      session.currentFlow = undefined
-      return {
-        text: buildEscalationMessage(),
-        escalate: true,
-        intent,
-        createTask: {
-          type:        'שאלה כללית',
-          description: `ביקש/ה לדבר עם נציגה תוך כדי ${flow}: "${userMessage.slice(0, 80)}"`,
-          priority:    'גבוה',
-        },
-        isComplete: true,
-      }
-    }
-
-    if (SWITCHABLE_INTENTS.has(intent) && !ownIntents.includes(intent)) {
-      session.currentFlow = undefined
-      const switched = await handleNewIntent(session, userMessage, intent)
-      if (switched) return switched
-      session.currentFlow = flow   // לא היה למה לעבור — נשארים בשלב
-    }
+  // לפני התיקון כל טקסט חופשי בתפריט קיבל "לא הבנתי, אנא בחרו".
+  if (!isExplicitNumericChoice(userMessage) &&
+      SWITCHABLE_INTENTS.has(intent) && !ownIntents.includes(intent) &&
+      (CHOICE_STEPS.has(flow) || canSwitchFromFreeText(userMessage))) {
+    session.currentFlow = undefined
+    const switched = await handleNewIntent(session, userMessage, intent)
+    if (switched) return switched
+    session.currentFlow = flow   // לא היה למה לעבור — נשארים בשלב
   }
 
   if (flow.startsWith('register_')) {
@@ -431,6 +548,10 @@ async function handleNewIntent(
       // ⚠️ startsWith('הי') החזיר את תפריט הפתיחה גם ל-"הי, מילאתי את הפרטים
       //    אבל זה יצא באמצע…" (3 פעמים ברצף לבודק מתוסכל). עכשיו: ברכה = הודעה
       //    *קצרה* שכולה ברכה, ובדיקת מילה שלמה (לא "היום").
+      // "תודה" / "תודה רבה" בסוף שיחה — לא צריך לזרוק שוב את כל התפריט
+      if (/^תודה( רבה| לך| ענקית)?[!.\s💛😊🙏❤️]*$/.test(userMessage.trim())) {
+        return { text: `בשמחה! אם צריך עוד משהו אני כאן 💛`, intent, isComplete: true }
+      }
       if (isShortGreeting(userMessage)) {
         return {
           text: buildWelcomeMessage(session.parentName),
@@ -483,17 +604,35 @@ async function llmFallback(
     const faqAnswer = await findFaqAnswer(userMessage)
     if (faqAnswer) {
       // גם תשובת FAQ באמצע מסלול לא אמורה לסיים אותו
-      return finishLLMTurn(session, faqAnswer, intent, opts, false)
+      return finishLLMTurn(session, faqAnswer, intent, opts)
     }
   }
 
   const llmResult = await callLLMFallback(session, userMessage)
 
+  // ── ה-LLM זיהה בקשה מפורשת לנציג/ה → הסלמה מלאה (הבוט נכנס ל-handoff) ────
+  if (llmResult.userWantsHuman) {
+    session.collectedData = {}
+    return {
+      text: buildEscalationMessage(),
+      intent,
+      escalate: true,
+      isComplete: true,
+      createTask: {
+        type:        'שאלה כללית',
+        description: llmResult.taskDescription || `ביקש/ה לדבר עם נציגה: "${userMessage.slice(0, 80)}"`,
+        priority:    'גבוה' as const,
+      },
+    }
+  }
+
   // ── ה-LLM הסלים לקורלי → פנייה נפתחת; אם היינו באמצע מסלול — המסלול נשמר
   //    (שאלת מחיר באמצע רישום לא אמורה להפיל את הרישום), אחרת השיחה מסתיימת.
+  //    ⚠️ יוצא דופן: שלב *אישור*. אם השיחה יצאה ממנו — מסיימים אותו, אחרת
+  //    "כן" שיגיע אחר כך היה מבצע ביטול שההורה כבר זנח (אתגור 17.9, S2).
   const escalated = !!llmResult.createTask && !opts.suppressTask
   if (escalated) {
-    const keep = opts.keepFlow
+    const keep = opts.keepFlow && !CONFIRM_STEPS.has(opts.keepFlow) ? opts.keepFlow : undefined
     if (!keep) { session.currentFlow = undefined; session.collectedData = {} }
     else session.currentFlow = keep
     const reminder = keep ? FLOW_REMINDERS[keep] : undefined
@@ -511,8 +650,10 @@ async function llmFallback(
     }
   }
 
-  // ── שמירת המסלול: keepFlow (היינו בתוך מסלול) או suggestFlow של ה-LLM ─────
-  return finishLLMTurn(session, llmResult.text, intent, opts, true, llmResult.suggestFlow)
+  // ── שמירת המסלול: רק keepFlow (היינו בתוך מסלול) ──────────────────────────
+  // ⚠️ אין יותר suggestFlow: ה-LLM לא מתחיל מסלול ולא "קופץ" לשלב פנימי —
+  //    זה הכניס הורים לאמצע מסלולים שלא ביקשו (אתגור 17.9).
+  return finishLLMTurn(session, llmResult.text, intent, opts)
 }
 
 // בונה את תשובת ה-LLM/FAQ עם שמירת המסלול (nextFlow) ותזכורת חזרה אם צריך
@@ -520,11 +661,9 @@ function finishLLMTurn(
   session: BotSession,
   text: string,
   intent: BotIntent,
-  opts: { keepFlow?: string; suppressTask?: boolean },
-  allowSuggest: boolean,
-  suggestFlow?: string
+  opts: { keepFlow?: string; suppressTask?: boolean }
 ): BotResponse & { intent: BotIntent } {
-  const nextFlow = opts.keepFlow ?? (allowSuggest ? suggestFlow || undefined : undefined)
+  const nextFlow = opts.keepFlow
 
   if (!nextFlow) {
     session.currentFlow = undefined

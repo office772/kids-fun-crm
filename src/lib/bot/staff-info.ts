@@ -192,7 +192,9 @@ export async function buildParentContext(phone: string): Promise<ParentContext |
 // ─── מסלול מהיר: "האם נרשמתי / האם זה נשמר?" ─────────────────────────────────
 // עונה ישירות מה-DB במקום להעביר לקורלי. מחזיר null כשאין מה לענות
 // (ואז ה-LLM עונה עם ההקשר של buildParentContext — בלי הסלמה).
-export async function buildRegistrationStatusAnswer(phone: string): Promise<string | null> {
+// question: ניסוח ההורה. אם נשאל על *קייטנה* — עונים רק על רישומי קייטנה,
+// אחרת ההורה קיבל "כן, נרשמת!" בזמן שהרישום שבידינו הוא לצהרון (אתגור 17.9).
+export async function buildRegistrationStatusAnswer(phone: string, question?: string): Promise<string | null> {
   if (!phone || phone === 'simulator') return null
   try {
     const parent = await loadParentByPhone(phone)
@@ -208,6 +210,36 @@ export async function buildRegistrationStatusAnswer(phone: string): Promise<stri
     const regs = (regsRaw ?? []) as Array<{
       child_id: string | null; type: string; status: string; area_label: string | null
     }>
+
+    // ── שאלה על קייטנה → רק רישומי קייטנה ────────────────────────────────────
+    const asksCamp = /קייטנ|קיטנ|קמפ/.test(question ?? '')
+    if (asksCamp) {
+      const campRegs = regs.filter(r => r.type === 'קייטנה')
+      if (campRegs.length === 0) {
+        const tzaharon = regs.filter(r => r.type === 'צהרון')
+        const names = kids
+          .filter(c => tzaharon.some(r => r.child_id === c.id))
+          .map(c => c.name)
+        return (
+          `בדקתי — *לא מצאתי רישום לקייטנה* על המספר הזה 🤔\n\n` +
+          (names.length
+            ? `לצהרון כן רשום/ים אצלנו: *${names.join(', ')}*.\n\n`
+            : '') +
+          `הרישום לקייטנה מתבצע דרך האתר. אם נרשמתם לאחרונה — כתבו לי ונבדוק שוב 💛`
+        )
+      }
+      const campBlocks = kids
+        .filter(c => campRegs.some(r => r.child_id === c.id))
+        .map(c => {
+          const r = campRegs.find(x => x.child_id === c.id)!
+          return `✅ *${c.name}* — קייטנה, סטטוס: *${r.status}*${r.area_label ? ` (${r.area_label})` : ''}`
+        })
+      return (
+        `בדקתי אצלנו — הרישום לקייטנה *נקלט* 💛\n\n` +
+        campBlocks.join('\n\n') +
+        `\n\nאם משהו לא נכון — כתבו לי ונתקן 😊`
+      )
+    }
 
     const blocks = kids.map(c => {
       const r = regs.find(x => x.child_id === c.id)

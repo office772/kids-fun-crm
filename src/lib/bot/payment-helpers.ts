@@ -509,9 +509,11 @@ export async function getPaymentStatusByChildName(childName: string): Promise<st
   }
 }
 
-// ─── מציאת הוראת קבע פעילה לחידוש כרטיס (לפי טלפון או שם ילד) ─────────────────
-// מזהה את ההורה לפי טלפון הפונה, ואם אין — לפי שם הילד (התאמה חד-משמעית).
-// מחזיר את ה-recurring_uid הפעיל, או null אם אין הוראת קבע במערכת.
+// ─── מציאת הוראת קבע פעילה לחידוש כרטיס ──────────────────────────────────────
+// ⚠️ S1 (אתגור 17.9): הזיהוי "טלפון *או* שם ילד" איפשר למספר זר שהקליד שם של
+// ילד מוכר לקבל קישור לעדכון הכרטיס בהוראת הקבע של משפחה אחרת.
+// מעכשיו: ההורה מזוהה *רק* לפי הטלפון, ואם נמסר שם ילד/ה — הוא חייב להיות
+// אחד מהילדים של אותו הורה. אין התאמה → null, ונציגה מטפלת ידנית.
 export async function findRecurringForRenewal(
   phone: string,
   childName?: string,
@@ -519,45 +521,34 @@ export async function findRecurringForRenewal(
   try {
     const { isDemoMode } = await import('@/lib/demo-data')
     if (isDemoMode()) return null
+    if (!phone || phone === 'simulator') return null
+
     const { createServiceClient } = await import('@/lib/supabase/server')
+    const { phoneVariants } = await import('@/lib/phone')
     const supabase = createServiceClient()
 
-    // 1) לפי טלפון הפונה
-    if (phone && phone !== 'simulator') {
-      const normalized = phone.replace(/\D/g, '').replace(/^972/, '0')
-      const intl       = '972' + normalized.replace(/^0/, '')
-      const { data: byPhone } = await supabase
-        .from('parents')
-        .select('id, payplus_recurring_uid, payplus_recurring_status')
-        .or(`phone.eq.${normalized},phone.eq.${intl},phone.eq.${phone}`)
-        .not('payplus_recurring_uid', 'is', null)
-        .maybeSingle()
-      if (byPhone?.payplus_recurring_uid && byPhone.payplus_recurring_status === 'active') {
-        return { uid: byPhone.payplus_recurring_uid, parentId: byPhone.id }
+    const { data: parent } = await supabase
+      .from('parents')
+      .select('id, payplus_recurring_uid, payplus_recurring_status')
+      .in('phone', phoneVariants(phone))
+      .limit(1)
+      .maybeSingle()
+
+    if (!parent?.payplus_recurring_uid || parent.payplus_recurring_status !== 'active') return null
+
+    // נמסר שם ילד/ה → חייב להיות של ההורה הזה (אחרת לא מחדשים כלום)
+    const name = childName?.trim()
+    if (name && name.length >= 2) {
+      const { data: kids } = await supabase
+        .from('children').select('id')
+        .eq('parent_id', parent.id).ilike('name', `%${name}%`).limit(1)
+      if (!kids?.length) {
+        console.warn('[findRecurringForRenewal] child name does not belong to the calling phone — refusing')
+        return null
       }
     }
 
-    // 2) לפי שם הילד (התאמה חד-משמעית בלבד — לא מנחשים)
-    const name = childName?.trim()
-    if (name && name.length >= 2) {
-      let { data: kids } = await supabase
-        .from('children').select('parent_id').ilike('name', name).limit(2)
-      if (!kids?.length) {
-        const res = await supabase.from('children').select('parent_id').ilike('name', `%${name}%`).limit(2)
-        kids = res.data
-      }
-      if (kids && kids.length === 1) {
-        const { data: parent } = await supabase
-          .from('parents')
-          .select('id, payplus_recurring_uid, payplus_recurring_status')
-          .eq('id', kids[0].parent_id)
-          .maybeSingle()
-        if (parent?.payplus_recurring_uid && parent.payplus_recurring_status === 'active') {
-          return { uid: parent.payplus_recurring_uid, parentId: parent.id }
-        }
-      }
-    }
-    return null
+    return { uid: parent.payplus_recurring_uid, parentId: parent.id }
   } catch (err) {
     console.error('[findRecurringForRenewal] error:', err)
     return null

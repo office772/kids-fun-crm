@@ -8,7 +8,7 @@
  * - עברית בלבד
  * - אסור לאסוף פרטי כרטיס אשראי
  * - אסור לקבוע בעצמו מדיניות
- * - אם ההורה נמצא באמצע זרימה — עזור לו לחזור לנקודה שבה היה (suggestFlow)
+ * - אסור *לבצע* או "לשמור" פעולות תפעוליות — אלה קורות רק במסלולים
  * - אם לא בטוח → מפנה לנציגה
  */
 
@@ -61,15 +61,24 @@ const SYSTEM_PROMPT_BASE = `את/ה העוזר/ת הדיגיטלי/ת של "Kids
 ✅ להסביר מדיניות ועלויות (כולל הנחות, תשלום מראש)
 ✅ להרגיע הורים מוטרדים
 ✅ לאסוף מידע ראשוני לפנייה
-✅ לעזור להורה לחזור לתהליך שהיה באמצעות suggestFlow
 ✅ לשאול שאלת הבהרה כשלא ברור מה ההורה צריך
 ✅ להעביר לקורלי (הנציגה) כשאין תשובה או שהנושא רגיש/חריג
 
+== ⛔ פעולות תפעוליות — אתה לא מבצע ולא מאשר ==
+אתה *לא יכול* לבצע, לשמור, לרשום, לבטל, לאשר או "לעדכן במערכת" שום דבר.
+זה כולל: איסוף מוקדם, רישום, ביטול, שינוי ימים/שעות, הנחה, זיכוי, החזר כספי, "הקפאה".
+❌ אסור לומר "רשמתי", "עדכנתי", "שמרתי", "הצוות עודכן", "יטופל אוטומטית".
+✅ במקום זה — הפנה למסלול: "כתבו 'איסוף מוקדם' ואקח את הפרטים" / "כתבו 'ביטול'".
+✅ או אמור שתעביר לקורלי — ואז createTask=true *חובה*.
+   כל תשובה שאומרת שמעבירים לקורלי/לנציגה חייבת לכלול createTask=true.
+• אין אצלנו שירות "הקפאה" של צהרון — לא להציע אותו.
+• החזרים כספיים/זיכויים חריגים — רק קורלי מטפלת, לא אתה.
+
 == מה אסור לך לעשות ==
 ❌ לקבוע מדיניות חדשה או לסטות מהתקנון
-❌ לבצע ביטול/רישום בעצמך ללא אישור נציגה
 ❌ לאסוף פרטי אשראי/בנק
 ❌ להעביר לנציגה שאלות שיש להן תשובה ידועה (עלויות, הנחות, מדיניות)
+❌ לנקוב בשעות/חגים/מחירים שלא הופיעו בהקשר שקיבלת, ואל תוסיף "מה כלול במחיר"
 ❌ *להמציא נתונים* — שם ילד/ה, סכום, סטטוס תשלום, רישום — שלא נמסרו לך במפורש בהקשר.
    אם חסר לך מידע מזהה (כמו שם הילד/ה), *בקש אותו בנימוס* — אל תניח ואל תמציא שם.
    אם ההורה מתלונן שכבר נתן מידע ואינך רואה אותו — התנצל ובקש שיחזור עליו, אל תנחש.
@@ -79,23 +88,82 @@ const SYSTEM_PROMPT_BASE = `את/ה העוזר/ת הדיגיטלי/ת של "Kids
 וצרף createTask=true בתשובתך. (עדיף זה על תשובה שגויה או לא-רלוונטית.)
 
 == פורמט התשובה ==
-ענה ב-JSON תקני בלבד (גרשיים כפולים, true/false באותיות קטנות — לא פורמט Python!):
+ענה ב-JSON תקני בלבד, בלי טקסט לפני או אחרי ובלי סימוני קוד
+(גרשיים כפולים, true/false באותיות קטנות — לא פורמט Python!):
 {
   "text": "הטקסט שישלח להורה בוואטסאפ (עברית, עם אמוג'ים ו*bold* לפי הצורך)",
   "createTask": false,
   "taskDescription": "",
-  "suggestFlow": ""
+  "userWantsHuman": false
 }
 
-שדה suggestFlow: אם ההורה נמצא באמצע תהליך וחרג ממנו, כתוב כאן את שם הזרימה שאליה כדאי לחזור.
-לדוגמה: אם המשתמש נמצא ב-register_child_name ושאל שאלה, החזר suggestFlow: "register_child_name".
-אם אין זרימה להציע — השאר ריק.`
+שדה userWantsHuman: true *רק* כשההורה מבקש במפורש לדבר עם בן אדם / נציגה / קורלי
+("תעבירי אותי לנציגה", "אני רוצה לדבר עם מישהו אמיתי"). לא כשהוא רק מתוסכל.
+עיצוב טקסט בוואטסאפ: *מודגש* בכוכבית אחת — לא ** ולא Markdown.`
 
 export interface LLMFallbackResult {
   text:             string
   createTask?:      boolean
   taskDescription?: string
-  suggestFlow?:     string   // ← חדש: לנווט חזרה לזרימה
+  userWantsHuman?:  boolean   // בקשה מפורשת לנציג/ה → הסלמה מלאה
+}
+
+// ─── ניקוי טקסט לוואטסאפ ─────────────────────────────────────────────────────
+// וואטסאפ לא מכיר Markdown: **מודגש** מגיע להורה עם הכוכביות. ממירים ל-*מודגש*.
+export function sanitizeForWhatsApp(text: string): string {
+  return (text || '')
+    .replace(/\*\*([^*\n]+)\*\*/g, '*$1*')
+    .replace(/^#{1,6}\s*/gm, '')
+    .trim()
+}
+
+// ─── פענוח תשובת ה-LLM ───────────────────────────────────────────────────────
+// ⚠️ כלל ברזל: *לעולם* לא לשלוח להורה JSON גולמי / ```json / dict בסגנון Python.
+// מקרים שנתפסו באתגור: JSON עטוף בגדרות קוד, JSON שנחתך באמצע (max_tokens),
+// וגרשיים בודדים. כל אלה חוזרים כטקסט נקי או כ-null (ואז הודעת הנפילה הגנרית).
+export function parseLLMResponse(raw: string): LLMFallbackResult | null {
+  const text = (raw || '').trim()
+  if (!text) return null
+
+  // 1. גדרות קוד — ```json { ... } ```
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)(?:```|$)/i)
+  const body   = (fenced?.[1] ?? text).trim()
+
+  // 2. JSON תקין
+  const braced = body.match(/\{[\s\S]*\}/)
+  if (braced) {
+    try {
+      const parsed = JSON.parse(braced[0]) as LLMFallbackResult
+      if (parsed && typeof parsed.text === 'string' && parsed.text.trim()) {
+        return {
+          text:            sanitizeForWhatsApp(parsed.text),
+          createTask:      !!parsed.createTask,
+          taskDescription: parsed.taskDescription,
+          userWantsHuman:  !!parsed.userWantsHuman,
+        }
+      }
+    } catch { /* ממשיכים לחילוץ ידני */ }
+  }
+
+  // 3. חילוץ ידני של שדה text — גם מ-JSON חתוך/פגום (גרשיים בודדים, בלי סוגר)
+  const looksLikeJson = /["']text["']\s*:/.test(body)
+  if (looksLikeJson) {
+    const closed = body.match(/["']text["']\s*:\s*(["'])([\s\S]*?)\1\s*(,|\}|$)/)
+    const open   = body.match(/["']text["']\s*:\s*(["'])([\s\S]*)$/)
+    const value  = (closed?.[2] ?? open?.[2] ?? '').replace(/\\n/g, '\n').replace(/\\"/g, '"').trim()
+    if (value.length > 2) {
+      const createTask = /["']createTask["']\s*:\s*true/i.test(body)
+      const wantsHuman = /["']userWantsHuman["']\s*:\s*true/i.test(body)
+      return { text: sanitizeForWhatsApp(value), createTask, userWantsHuman: wantsHuman }
+    }
+    return null   // JSON פגום בלי טקסט שמיש → הודעת נפילה גנרית
+  }
+
+  // 4. טקסט חופשי נקי (בלי סימני JSON/קוד) — נשלח כמו שהוא
+  if (!body.startsWith('{') && !body.includes('```') && body.length > 10) {
+    return { text: sanitizeForWhatsApp(body) }
+  }
+  return null
 }
 
 export async function callLLMFallback(
@@ -152,7 +220,19 @@ export async function callLLMFallback(
       : `מחירי צהרון חודשיים לפי מסגרת (אפשר לנקוב כשההורה אומר איזה גן/בי"ס): גלי עתלית 1150 ₪ · מתן כיתות א-ב 916 ₪, כיתה ג 1015 ₪ · חצב ואלמוג 1470 ₪ · גני תל אביב 946 ₪ או 991 ₪ לפי הגן. אם המסגרת לא ידועה — שאל/י באיזה גן/בי"ס הילד/ה, אל תעביר לנציגה.`)
   } catch { /* לא חוסם */ }
 
-  if (session.currentFlow) contextLines.push(`זרימה פעילה: ${session.currentFlow} — אם ההורה חרג ממנה, עזור לו לחזור ורשום suggestFlow`)
+  // שעות + חגים — מתוך ה-FAQ שהלקוחה עורכת בדשבורד. בלי זה ה-LLM המציא שעות
+  // או הסלים לקורלי על שאלה שיש לה תשובה שמורה.
+  try {
+    const { findFaqByTopic } = await import('./faq-search')
+    const [hours, holidays] = await Promise.all([
+      findFaqByTopic(['שעות', 'שעות פעילות']),
+      findFaqByTopic(['חג', 'חגים', 'חופש', 'חופשה']),
+    ])
+    if (hours)    contextLines.push(`שעות הפעילות (מקור רשמי — אפשר לצטט): ${hours}`)
+    if (holidays) contextLines.push(`חגים וחופשות (מקור רשמי — אפשר לצטט): ${holidays}`)
+  } catch { /* לא חוסם */ }
+
+  if (session.currentFlow) contextLines.push(`זרימה פעילה: ${session.currentFlow} — ההורה באמצע תהליך; ענה על שאלתו והזכר לו בעדינות איפה עצרנו. אל תתחיל תהליך אחר.`)
   if (Object.keys(session.collectedData || {}).length > 0) {
     const data = Object.entries(session.collectedData)
       .map(([k, v]) => `${k}: ${v}`)
@@ -176,11 +256,13 @@ export async function callLLMFallback(
     // המודל ניתן להחלפה ב-env (BOT_LLM_MODEL) — ברירת מחדל Haiku 4.5.
     // מודלים חדשים (Sonnet 5 / Opus 5) חושבים לפני התשובה: מאמץ נמוך + תקציב גדול יותר,
     // כדי לא לחרוג מה-timeout של uChat ולא להיחתך באמצע.
+    // max_tokens 900 ל-Haiku: ב-450 תשובות בעברית נחתכו באמצע ה-JSON
+    // וההורה קיבל חצי סוגר מסולסל (אתגור 17.9).
     const model  = process.env.BOT_LLM_MODEL || 'claude-haiku-4-5'
     const tuning = model.includes('haiku') ? {} : { max_tokens: 1500, output_config: { effort: 'low' } }
     const response = await anthropic.messages.create({
       model,
-      max_tokens: 450,
+      max_tokens: 900,
       ...(tuning as Record<string, unknown>),
       system:     systemWithContext,
       messages,
@@ -191,35 +273,15 @@ export async function callLLMFallback(
     const textBlock = response.content.find(b => b.type === 'text')
     const rawText = textBlock && textBlock.type === 'text' ? textBlock.text : ''
 
-    // נסה לפענח JSON
-    const jsonMatch = rawText.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[0]) as LLMFallbackResult
-        return {
-          text:             parsed.text || buildLLMErrorFallback(),
-          createTask:       !!parsed.createTask,
-          taskDescription:  parsed.taskDescription,
-          suggestFlow:      parsed.suggestFlow || undefined,
-        }
-      } catch {
-        // JSON לא תקין (למשל גרשיים בודדים בסגנון Python) —
-        // מחלצים את שדה text ידנית כדי שלא ידלוף dict גולמי להורה
-        const textField = jsonMatch[0].match(/['"]text['"]\s*:\s*(['"])([\s\S]*?)\1\s*[,}]/)
-        if (textField?.[2] && textField[2].trim().length > 2) {
-          return { text: textField[2].trim() }
-        }
-        console.error('[LLM fallback] Unparseable JSON-like response:', rawText.slice(0, 200))
-        return { text: buildLLMErrorFallback() }
-      }
+    const parsed = parseLLMResponse(rawText)
+    if (!parsed) {
+      console.error(
+        `[LLM fallback] Unusable response (stop_reason=${response.stop_reason}):`,
+        rawText.slice(0, 200)
+      )
+      return { text: buildLLMErrorFallback() }
     }
-
-    // אין JSON בכלל — אם זה טקסט נקי (לא נראה כמו dict), שלח אותו כמו שהוא
-    if (rawText.length > 10 && !rawText.trimStart().startsWith('{')) {
-      return { text: rawText }
-    }
-
-    return { text: buildLLMErrorFallback() }
+    return parsed
   } catch (err) {
     console.error('[LLM fallback] Claude API error:', err)
     return { text: buildLLMErrorFallback() }

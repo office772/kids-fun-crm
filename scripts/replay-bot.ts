@@ -13,6 +13,9 @@
 
 import { classifyIntent } from '@/lib/bot/intent-classifier'
 import { processMessage } from '@/lib/bot/handler'
+import { parsePickupTime, splitNameAndClass, scheduleFaqAnchors, isHolidayQuestion } from '@/lib/bot/flows'
+import { parseLLMResponse, sanitizeForWhatsApp } from '@/lib/bot/llm-fallback'
+import { detectMedia } from '@/lib/bot/media-handler'
 import type { BotIntent, BotSession } from '@/lib/types'
 
 const PHONE = '+972500000000'   // מספר שלא קיים ב-DB — "הורה לא מזוהה"
@@ -212,10 +215,297 @@ async function guardCases() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ספרינט 1.5 — תיקונים מתוך שלושת סבבי האתגור (17.9)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── S1: חשיפת מידע לפי שם ילד/ה ─────────────────────────────────────────────
+async function privacyCases() {
+  console.log('\n── S1: פרטיות — שם ילד/ה אינו זיהוי ──')
+  {
+    const s = makeSession('payment_status_child_name')
+    const r = await processMessage(s, 'נועם בירן')
+    check('payment_status_child_name — מספר לא מזוהה לא מקבל סטטוס תשלום',
+      !r.text.includes('מצאתי') && /קורלי/.test(r.text) && !!r.createTask && r.isComplete === true,
+      `text=${JSON.stringify(r.text.slice(0, 100))} task=${JSON.stringify(r.createTask)} isComplete=${r.isComplete}`)
+  }
+}
+
+// ─── S2 #2: בקשת נציג/ה בכל שלב ──────────────────────────────────────────────
+async function humanRequestCases() {
+  console.log('\n── S2: בקשת נציג/ה מכל שלב ──')
+  {
+    const s = makeSession('register_child_name', { area_code: 'sharon' })
+    const r = await processMessage(s, 'תעבירי אותי לנציגה')
+    check('register_child_name — "תעבירי אותי לנציגה" מסלימה',
+      r.escalate === true && r.nextFlow === 'handoff_paused' && !!r.createTask,
+      `escalate=${r.escalate} nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 70))}`)
+
+    const r2 = await processMessage(s, '1')
+    check('אחרי handoff — "1" מחזיר את ההורה לבוט',
+      r2.nextFlow !== 'handoff_paused' && r2.text.length > 0,
+      `nextFlow=${r2.nextFlow} text=${JSON.stringify(r2.text.slice(0, 60))}`)
+  }
+  {
+    const s = makeSession('pickup_time', { child_name: 'נועם בירן' })
+    const r = await processMessage(s, 'אני רוצה נציגה עכשיו')
+    check('pickup_time — "אני רוצה נציגה עכשיו" מסלימה',
+      r.escalate === true && r.nextFlow === 'handoff_paused',
+      `escalate=${r.escalate} nextFlow=${r.nextFlow}`)
+  }
+  {
+    const s = makeSession('handoff_paused')
+    const r = await processMessage(s, 'תפריט')
+    check('handoff — "תפריט" מחזיר את תפריט הפתיחה',
+      isWelcomeMenu(r.text), `text=${JSON.stringify(r.text.slice(0, 70))}`)
+  }
+}
+
+// ─── S2 #3: בטיחות שלב האישור בביטול ─────────────────────────────────────────
+async function cancelSafetyCases() {
+  console.log('\n── S2: אישור ביטול — הילד/ה הנכון/ה ──')
+  {
+    const s = makeSession('cancel_confirm_after15', { child_name: 'אורי כספי' })
+    const r = await processMessage(s, 'לא, זה לא הילד הזה')
+    check('cancel_confirm — "לא זה לא הילד הזה" חוזר לשאלת השם',
+      r.nextFlow === 'cancel_child' && s.collectedData.child_name === undefined,
+      `nextFlow=${r.nextFlow} child_name=${s.collectedData.child_name}`)
+
+    s.currentFlow = r.nextFlow ?? s.currentFlow
+    const r2 = await processMessage(s, 'כן')
+    check('cancel_child אחרי תיקון — "כן" לא מבצע ביטול',
+      !/הביטול בוצע|בקשת הביטול נקלטה/.test(r2.text),
+      `text=${JSON.stringify(r2.text.slice(0, 90))}`)
+  }
+  {
+    const s = makeSession('cancel_confirm_after15', { child_name: 'אורי כספי' })
+    const r = await processMessage(s, 'דניאל אבני')
+    check('cancel_confirm — שם חדש מחליף את שם הילד/ה ושואל שוב',
+      s.collectedData.child_name === 'דניאל אבני' && /דניאל אבני/.test(r.text) && /לאשר/.test(r.text),
+      `child_name=${s.collectedData.child_name} text=${JSON.stringify(r.text.slice(0, 90))}`)
+  }
+  {
+    // יציאה מצומת האישור (שומר התסכול) מנקה את הנתונים — "כן" מאוחר לא יבטל
+    const s = makeSession('cancel_confirm_after15', { child_name: 'אורי כספי' })
+    s.messages = [
+      { role: 'user', text: 'מה?', timestamp: new Date() },
+      { role: 'bot',  text: 'לא הצלחתי להבין, אפשר לנסח שוב?', timestamp: new Date() },
+    ]
+    const r = await processMessage(s, 'נמאס לי כבר!!!')
+    check('cancel_confirm — יציאה לקורלי מנקה את צומת האישור',
+      r.nextFlow === 'handoff_paused' && Object.keys(s.collectedData).length === 0,
+      `nextFlow=${r.nextFlow} data=${JSON.stringify(s.collectedData)}`)
+  }
+}
+
+// ─── S2 #4: החלפת נושא מפורשת בשלב טקסט חופשי ────────────────────────────────
+async function switchCases() {
+  console.log('\n── S2: החלפת נושא בשלב טקסט חופשי ──')
+  {
+    const s = makeSession('cancel_child')
+    const r = await processMessage(s, 'בעצם אני רוצה לרשום עוד ילד')
+    check('cancel_child — "בעצם אני רוצה לרשום עוד ילד" מתחיל רישום',
+      (r.nextFlow === 'register_area' || r.nextFlow === 'register_existing_parent') &&
+      s.collectedData.child_name === undefined,
+      `nextFlow=${r.nextFlow} child_name=${s.collectedData.child_name}`)
+  }
+  {
+    const s = makeSession('cancel_child')
+    const r = await processMessage(s, 'דניאל אבני')
+    check('cancel_child — "דניאל אבני" נשמר כשם הילד/ה',
+      s.collectedData.child_name === 'דניאל אבני' && /cancel_confirm/.test(r.nextFlow ?? ''),
+      `nextFlow=${r.nextFlow} child_name=${s.collectedData.child_name}`)
+  }
+}
+
+// ─── S2 #5: סיווג כוונה — תיקוני האתגור ──────────────────────────────────────
+function classifierCases() {
+  console.log('\n── S2: סיווג כוונה ──')
+  const longSalad =
+    'היי רציתי לשאול אתכם כמה שאלות חשובות לגבי הילד שלי שמתחיל אצלכם בשנה הבאה ' +
+    'ואני לא בטוחה מה בדיוק צריך להביא איתו ליום הראשון וגם מה קורה אם הוא חולה ' +
+    'ואם אפשר לאסוף אותו מוקדם יותר בימי שלישי ואיך משלמים ומתי מתחילים בכלל ' +
+    'ואם יש הנחה לאחים ומה לגבי החגים הקרובים תודה רבה לכם על הכל באמת'
+  const cases: Array<{ msg: string; expect?: BotIntent; notExpect?: BotIntent; label?: string }> = [
+    { msg: 'גן חובה',                    notExpect: 'בדיקת_תשלום' },
+    { msg: 'אני עובר לצהרון אחר',        expect:    'ביטול' },
+    { msg: 'יש צהרון בערב ראש השנה?',    expect:    'שאלת_לוז' },
+    { msg: 'רִישׁוּם לְצַהֲרוֹן',            expect:    'רישום_צהרון' },
+    { msg: '١',                           expect:    'רישום_צהרון' },
+    { msg: 'רישום ביטול תשלום',          expect:    'לא_ידוע' },
+    { msg: longSalad,                     expect:    'לא_ידוע', label: 'הודעה ארוכה ומעורבת (60+ מילים)' },
+    { msg: 'רוצה לשנות תאריך חיוב',      expect:    'כשל_תשלום' },
+  ]
+  for (const c of cases) {
+    const got = classifyIntent(c.msg)
+    const label = `"${(c.label ?? c.msg).slice(0, 40)}" → ${got}`
+    if (c.expect)    check(label, got === c.expect,    `ציפינו ל-${c.expect}`)
+    if (c.notExpect) check(label, got !== c.notExpect, `לא ציפינו ל-${c.notExpect}`)
+  }
+}
+
+// ─── S2 #6/#12/#13: מסלולים — חגים, תיקון אזור, איסוף מוקדם ──────────────────
+async function flowDetailCases() {
+  console.log('\n── S2: חגים / תיקון אזור / איסוף מוקדם ──')
+
+  check('שאלת חג מזוהה ("מה עם סוכות")',
+    isHolidayQuestion('מה עם סוכות') && scheduleFaqAnchors('מה עם סוכות').includes('חג'),
+    `anchors=${scheduleFaqAnchors('מה עם סוכות').join(',')}`)
+  check('שאלת שעות רגילה לא נחשבת חג',
+    !isHolidayQuestion('מה שעות הפעילות?') && scheduleFaqAnchors('מה שעות הפעילות?')[0] === 'שעות',
+    `anchors=${scheduleFaqAnchors('מה שעות הפעילות?').join(',')}`)
+
+  {
+    const s = makeSession('register_child_name', { area_code: 'carmel' })
+    const r = await processMessage(s, 'רגע טעיתי באזור, זה השרון')
+    check('register_child_name — תיקון אזור באמצע הרישום',
+      s.collectedData.area_code === 'sharon' && r.nextFlow === 'register_child_name',
+      `area_code=${s.collectedData.area_code} nextFlow=${r.nextFlow}`)
+  }
+  {
+    const s = makeSession('register_area')
+    const r = await processMessage(s, 'אתם יכולים להסביר לי איך זה עובד?')
+    check('register_area — שאלה חורגת הולכת ל-LLM והמסלול נשמר',
+      r.nextFlow === 'register_area' && !/מפעילים צהרונים/.test(r.text),
+      `nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 70))}`)
+  }
+  {
+    const split = splitNameAndClass('נועה כהן כיתה ב')
+    check('שם + כיתה בהודעה אחת → פיצול',
+      split?.name === 'נועה כהן' && split?.className === 'כיתה ב',
+      `split=${JSON.stringify(split)}`)
+    const s = makeSession('register_child_name')
+    await processMessage(s, 'דני לוי גן חובה')
+    check('register_child_name — "דני לוי גן חובה" נשמר כשם + כיתה',
+      s.collectedData.child_name === 'דני לוי',
+      `child_name=${s.collectedData.child_name}`)
+  }
+  {
+    check('parsePickupTime — "3 וחצי" → 15:30', parsePickupTime('3 וחצי') === '15:30', `got=${parsePickupTime('3 וחצי')}`)
+    check('parsePickupTime — "בשלוש" → 15:00',  parsePickupTime('בשלוש')  === '15:00', `got=${parsePickupTime('בשלוש')}`)
+    check('parsePickupTime — "15:30" → 15:30',  parsePickupTime('15:30')  === '15:30', `got=${parsePickupTime('15:30')}`)
+    check('parsePickupTime — "אמא של נועם" → null', parsePickupTime('אמא של נועם') === null,
+      `got=${parsePickupTime('אמא של נועם')}`)
+  }
+  {
+    const s = makeSession('pickup_time', { child_name: 'נועם בירן' })
+    const r = await processMessage(s, 'אמא של נועם')
+    check('pickup_time — טקסט שאינו שעה לא נשמר כשעה',
+      s.collectedData.pickup_time === undefined && r.nextFlow === 'pickup_time' && /שעה/.test(r.text),
+      `pickup_time=${s.collectedData.pickup_time} nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 60))}`)
+
+    const r2 = await processMessage(s, '3 וחצי')
+    check('pickup_time — "3 וחצי" מתקבל כ-15:30',
+      s.collectedData.pickup_time === '15:30' && r2.nextFlow === 'pickup_collector',
+      `pickup_time=${s.collectedData.pickup_time} nextFlow=${r2.nextFlow}`)
+  }
+}
+
+// ─── S2 #8/#9/#14/#15: בטיחות, תסכול, מדיה, תודה ─────────────────────────────
+async function miscCases() {
+  console.log('\n── S2: בטיחות / תסכול / מדיה / תודה ──')
+  {
+    const s = makeSession()
+    const r = await processMessage(s, 'הילד חזר עם חבורה בראש')
+    check('בטיחות — "חבורה בראש" פותח פנייה דחופה',
+      r.createTask?.priority === 'דחוף' && r.nextFlow !== 'handoff_paused',
+      `task=${JSON.stringify(r.createTask)} nextFlow=${r.nextFlow}`)
+  }
+  {
+    const s = makeSession('register_area')
+    const r = await processMessage(s, 'מישהו מציק לילד שלי בצהרון')
+    check('בטיחות — גם באמצע מסלול מסלים מיד',
+      r.createTask?.priority === 'דחוף', `task=${JSON.stringify(r.createTask)}`)
+  }
+  {
+    const s = makeSession()
+    s.messages = [
+      { role: 'user', text: 'אני צריך משהו',            timestamp: new Date() },
+      { role: 'bot',  text: 'רק שאדייק — התכוונת לרישום?', timestamp: new Date() },
+    ]
+    const r = await processMessage(s, 'לא יודע')
+    check('תסכול — שתי בקשות הבהרה ברצף → העברה לקורלי',
+      r.nextFlow === 'handoff_paused' && /קורלי/.test(r.text),
+      `nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 60))}`)
+  }
+  {
+    const s = makeSession()
+    s.messages = [
+      { role: 'user', text: 'בלה בלה', timestamp: new Date() },
+      { role: 'bot',  text: 'לא הבנתי 😊 אפשר לפרט?', timestamp: new Date() },
+    ]
+    const r = await processMessage(s, 'נו כבר אתה לא מבין!!!')
+    check('תסכול — "בלה בלה" ואז כעס → העברה לקורלי',
+      r.nextFlow === 'handoff_paused', `nextFlow=${r.nextFlow}`)
+  }
+  {
+    check('מדיה — קישור לחנות אינו קובץ', detectMedia('https://kidsandfun.co.il/shop/') === null,
+      `got=${JSON.stringify(detectMedia('https://kidsandfun.co.il/shop/'))}`)
+    check('מדיה — קובץ uChat כן מזוהה',
+      detectMedia('https://uchat.com.au/media/whatsapp/abc123')?.kind === 'other',
+      `got=${JSON.stringify(detectMedia('https://uchat.com.au/media/whatsapp/abc123'))}`)
+    check('מדיה — PDF מזוהה', detectMedia('https://x.co/form.pdf')?.kind === 'pdf',
+      `got=${JSON.stringify(detectMedia('https://x.co/form.pdf'))}`)
+  }
+  {
+    const s = makeSession()
+    const r = await processMessage(s, 'תודה רבה')
+    check('"תודה רבה" — תשובה קצרה, לא תפריט מלא',
+      !isWelcomeMenu(r.text) && r.text.length < 80,
+      `text=${JSON.stringify(r.text.slice(0, 70))}`)
+  }
+}
+
+// ─── S2 #7: פענוח תשובת ה-LLM ────────────────────────────────────────────────
+function llmParsingCases() {
+  console.log('\n── S2: פענוח תשובת LLM ──')
+  const clean = (t?: string) => !!t && !t.includes('```') && !t.includes('"text"') && !t.trim().startsWith('{')
+
+  {
+    const r = parseLLMResponse('```json\n{"text": "היי! **שמחה** לעזור", "createTask": false}\n```')
+    check('LLM — JSON בתוך גדרות קוד',
+      r?.text === 'היי! *שמחה* לעזור' && clean(r?.text), `got=${JSON.stringify(r)}`)
+  }
+  {
+    const r = parseLLMResponse('{"text": "אני בודקת עבורך ומעדכנת בהקדם', )
+    check('LLM — JSON חתוך באמצע (max_tokens)',
+      !!r && r.text.startsWith('אני בודקת') && clean(r.text), `got=${JSON.stringify(r)}`)
+  }
+  {
+    const r = parseLLMResponse('שלום! אשמח לעזור לך עם כל שאלה על הצהרון 😊')
+    check('LLM — טקסט חופשי נקי עובר כמו שהוא',
+      !!r?.text.startsWith('שלום!') && clean(r?.text), `got=${JSON.stringify(r)}`)
+  }
+  {
+    const r = parseLLMResponse("{'text': 'מעבירה את זה לקורלי 💛', 'createTask': True}")
+    check('LLM — dict בסגנון Python',
+      r?.text === 'מעבירה את זה לקורלי 💛' && r?.createTask === true, `got=${JSON.stringify(r)}`)
+  }
+  {
+    const r = parseLLMResponse('{"foo": 1}')
+    check('LLM — JSON בלי שדה text → נפילה גנרית', r === null, `got=${JSON.stringify(r)}`)
+  }
+  {
+    const r = parseLLMResponse('{"text": "בקשה לנציגה", "createTask": true, "userWantsHuman": true}')
+    check('LLM — userWantsHuman נקרא', r?.userWantsHuman === true, `got=${JSON.stringify(r)}`)
+  }
+  check('LLM — **מודגש** הופך ל-*מודגש*',
+    sanitizeForWhatsApp('זה **חשוב** מאוד') === 'זה *חשוב* מאוד',
+    `got=${sanitizeForWhatsApp('זה **חשוב** מאוד')}`)
+}
+
 async function main() {
   intentCases()
   await flowCases()
   await guardCases()
+  await privacyCases()
+  await humanRequestCases()
+  await cancelSafetyCases()
+  await switchCases()
+  classifierCases()
+  await flowDetailCases()
+  await miscCases()
+  llmParsingCases()
   console.log(`\n────────────\nעברו: ${passed} | נכשלו: ${failed}`)
   process.exit(failed === 0 ? 0 : 1)
 }

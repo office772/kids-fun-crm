@@ -42,7 +42,7 @@ const META_WORDS = new Set([
   'מצאת','שמצאת','הבנת','הבנתי','רוצה','צריך','צריכה','אפשר','תסביר','התכוונת',
   'אומר','אומרת','נכון','בעצם','הרי','שאמרת','שכתבת',
 ])
-function looksOffScript(text: string): boolean {
+export function looksOffScript(text: string): boolean {
   const t = text.trim()
   if (!t) return false
   if (t.includes('?')) return true
@@ -62,10 +62,13 @@ const NOT_A_NAME = new Set([
   'כן', 'לא', 'אולי', 'תודה', 'שלום', 'היי', 'הי', 'טוב', 'בסדר', 'אוקי', 'סבבה', 'רגע',
   // נושאי העסק (הורה שעונה על שאלה אחרת)
   'נציג', 'נציגה', 'קייטנה', 'צהרון', 'רישום', 'תשלום', 'חשבונית', 'קבלה', 'מחיר', 'שעות', 'חופש',
+  // מילות שעה/זמן — "בשלוש" נשמר כשם ילד/ה בשלב האיסוף (אתגור 17.9)
+  'בשלוש', 'שלוש', 'בארבע', 'ארבע', 'בחמש', 'חמש', 'בשתיים', 'שתיים', 'שתים', 'באחת', 'אחת',
+  'שש', 'בשש', 'וחצי', 'מחר', 'היום', 'עכשיו', 'מוקדם',
 ])
 
 // האם הקלט נראה כמו שם ילד/ה (לא בודק מול DB — רק צורנית)
-function looksLikeChildName(text: string): boolean {
+export function looksLikeChildName(text: string): boolean {
   const t = text.trim()
   if (t.length < 2 || t.length > 40) return false
   if (looksOffScript(t)) return false  // שאלות, משפטים ארוכים, מילות מטא
@@ -80,6 +83,104 @@ function buildNotAName(nextFlow: string): BotResponse {
   return {
     text: `זה לא נראה לי כמו שם 🤔\nאפשר בבקשה *שם פרטי + שם משפחה* של הילד/ה? (לדוגמה: נועה כהן)`,
     nextFlow,
+  }
+}
+
+// ─── תיקון אזור באמצע הרישום ─────────────────────────────────────────────────
+// "רגע טעיתי באזור, זה השרון" באמצע שלב השם — לפני התיקון זה נשמר כשם הילד/ה.
+const AREA_FIX_RE = /טעיתי|בעצם|שיניתי|לא,? ?(זה|האזור)/
+async function tryAreaCorrection(session: BotSession, msg: string): Promise<BotResponse | null> {
+  if (!AREA_FIX_RE.test(msg)) return null
+  const { areaFromMessage, areaFromSchoolName, AREAS } = await import('./registration-helpers')
+  const area = (await areaFromSchoolName(msg)) ?? areaFromMessage(msg)
+  if (!area) return null
+  session.collectedData.area_code = area
+  const label = AREAS[area]?.label ?? area
+  return {
+    text: `עדכנתי: אזור *${label}* ✅\n\n*מה שם הילד/ה?* (שם פרטי + שם משפחה)`,
+    nextFlow: 'register_child_name',
+  }
+}
+
+// ─── שעה בשפה חופשית → HH:MM ─────────────────────────────────────────────────
+// הורים כותבים "בשלוש", "3 וחצי", "15:30" — ולפני התיקון גם "אמא של נועם"
+// נשמרה כשעת איסוף ונשלחה לצוות (אתגור 17.9).
+// ⚠️ צירופים קודמים למילה בודדת ("אחת עשרה" לפני "אחת")
+const HOUR_WORDS: Record<string, number> = {
+  'אחת עשרה': 11, 'שתים עשרה': 12, 'שתיים עשרה': 12,
+  'אחת': 13, 'שתיים': 14, 'שתים': 14, 'שלוש': 15, 'ארבע': 16, 'חמש': 17, 'שש': 18,
+  'שמונה': 8, 'תשע': 9, 'עשר': 10,
+}
+
+export function parsePickupTime(input: string): string | null {
+  const t = (input || '').trim().replace(/[.,!]+$/g, '')
+  if (!t) return null
+  const half = /וחצי|:30|\.30/.test(t)
+
+  // 15:30 / 15.30
+  const hhmm = t.match(/(^|[^\d])([0-9]{1,2})[:.]([0-9]{2})([^\d]|$)/)
+  if (hhmm) {
+    const h = parseInt(hhmm[2], 10), m = parseInt(hhmm[3], 10)
+    if (h >= 0 && h <= 23 && m < 60) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+  }
+
+  // מספר בודד ("3", "3 וחצי", "בשעה 15")
+  const num = t.match(/(^|[^\d])([0-9]{1,2})([^\d]|$)/)
+  if (num) {
+    let h = parseInt(num[2], 10)
+    if (h >= 1 && h <= 23) {
+      if (h < 7) h += 12                       // "3" = 15:00 (צהרון מסתיים אחה"צ)
+      return `${String(h).padStart(2, '0')}:${half ? '30' : '00'}`
+    }
+  }
+
+  // מילים ("בשלוש", "שלוש וחצי")
+  for (const [word, hour] of Object.entries(HOUR_WORDS)) {
+    const re = word.includes(' ')
+      ? new RegExp(word)
+      : new RegExp(`(^|[^א-ת])[ולבהכמש]{0,2}${word}([^א-ת]|$)`)
+    if (re.test(t)) return `${String(hour).padStart(2, '0')}:${half ? '30' : '00'}`
+  }
+  return null
+}
+
+// ─── "נועה כהן כיתה ב" → שם + כיתה ───────────────────────────────────────────
+// הורים עונים על שתי השאלות בבת אחת. מפצלים לפי מילת הכיתה הראשונה.
+const CLASS_TOKEN_RE = /^(כיתה|כתה|גן)$/
+export function splitNameAndClass(text: string): { name: string; className: string } | null {
+  const words = text.trim().split(/\s+/).filter(Boolean)
+  const idx = words.findIndex(w => CLASS_TOKEN_RE.test(w.replace(/[.,!]/g, '')))
+  if (idx < 2) return null                       // צריך לפחות שם פרטי + משפחה לפני הכיתה
+  const name      = words.slice(0, idx).join(' ')
+  const className = words.slice(idx).join(' ')
+  if (!className || !looksLikeChildName(name)) return null
+  return { name, className }
+}
+
+// ─── בעלות: האם הילד/ה בשם הזה שייך/ת להורה שמזוהה לפי הטלפון? ──────────────
+// ⚠️ כלל S1: כל שליפה של מידע לפי *שם ילד/ה* חייבת לעבור כאן. בלי זה, מספר זר
+// שהקליד שם מוכר קיבל סטטוס תשלום, שם הורה וסכומים של משפחה אחרת (אתגור 17.9).
+async function findOwnChildByName(
+  phone: string,
+  nameInput: string
+): Promise<{ id: string; name: string; parent_id: string } | null> {
+  const name = (nameInput || '').trim().replace(/\s+/g, ' ')
+  if (!phone || phone === 'simulator' || name.length < 2) return null
+  try {
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const { phoneVariants } = await import('@/lib/phone')
+    const supabase = createServiceClient()
+    const { data: parent } = await supabase
+      .from('parents').select('id')
+      .in('phone', phoneVariants(phone)).limit(1).maybeSingle()
+    if (!parent?.id) return null
+    const { data: kids } = await supabase
+      .from('children').select('id, name, parent_id')
+      .eq('parent_id', parent.id).ilike('name', `%${name}%`).limit(2)
+    return kids?.length === 1 ? kids[0] : null
+  } catch (err) {
+    console.error('[findOwnChildByName] error:', err)
+    return null
   }
 }
 
@@ -298,6 +399,16 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
   // ─── הורה מזוהה — בחירה מה לעשות ───────────────────────────────────────
   if (step === 'register_existing_parent') {
     const msg = userMessage.trim()
+
+    // "הפרטים נשמרו?" — שאלת *סטטוס*, לא בקשה לעדכן פרטים (אפשרות 2).
+    // בלי זה ההורה נשלח למסלול עדכון פרטים ופתחנו פנייה מיותרת (אתגור 17.9).
+    if (msg.includes('?') && /נשמר|נקלט|הפרטים/.test(msg)) {
+      const { buildRegistrationStatusAnswer } = await import('./staff-info')
+      const answer = await buildRegistrationStatusAnswer(session.phone, msg)
+      if (answer) return { text: answer, isComplete: true }
+      return { text: '', useLLM: true }
+    }
+
     // מיפוי טקסט חופשי לאפשרויות — "אמרתי, אני רוצה לרשום ילד לצהרון" = אפשרות 1
     if (msg === '1' || /לרשום|רישום|להירשם|עוד ילד|ילד נוסף|נוסף|נוספת|אחות|אח שלו|אח שלה/i.test(msg)) {
       return {
@@ -366,6 +477,10 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
     if (!area) area = areaFromMessage(m)
 
     if (!area) {
+      // שאלה/משפט שאינו אזור ("למה אתם לא בהוד השרון?") → ל-LLM מיד, המסלול נשמר.
+      // רשימת האזורים כתשובה לשאלה נראתה כאילו הבוט לא הקשיב (אתגור 17.9).
+      if (looksOffScript(m)) return { text: '', useLLM: true }
+
       const misses = parseInt(session.collectedData._area_miss ?? '0', 10) + 1
       session.collectedData._area_miss = String(misses)
 
@@ -392,6 +507,20 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
   // ─── שלב שם ילד ──────────────────────────────────────────────────────────
   if (step === 'register_child_name') {
     const trimmed = userMessage.trim()
+
+    // "רגע טעיתי באזור, זה השרון" — תיקון אזור, לא שם ילד/ה
+    const areaFix = await tryAreaCorrection(session, trimmed)
+    if (areaFix) return areaFix
+
+    // שם + כיתה בהודעה אחת ("נועה כהן כיתה ב" / "דני לוי גן חובה") —
+    // מפצלים ועוברים ישר לשלב הכיתה במקום להיתקע על "זה לא נראה כמו שם".
+    const split = splitNameAndClass(trimmed)
+    if (split) {
+      session.collectedData.child_name = split.name
+      session.currentFlow = 'register_class'
+      return await handleRegistrationFlow(session, split.className)
+    }
+
     if (looksOffScript(trimmed)) return { text: '', useLLM: true }
     const parts = trimmed.split(/\s+/)
     if (parts.length < 2) {
@@ -480,6 +609,10 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
 
   // ─── שלב כיתה + בדיקת קיבולת ─────────────────────────────────────────────
   if (step === 'register_class') {
+    // תיקון אזור גם כאן ("רגע, בעצם זה חוף הכרמל")
+    const areaFix = await tryAreaCorrection(session, userMessage)
+    if (areaFix) return areaFix
+
     // בלי אזור אין למה לרשום — שואלים במקום ליפול ל-'sharon' (הורה מעתלית נרשם לשרון, 17.9)
     if (!session.collectedData.area_code) {
       return {
@@ -673,9 +806,64 @@ async function performCancellation(
   }
 }
 
+// ─── שלב האישור: בניית השאלה מחדש (גם אחרי תיקון שם) ───────────────────────
+function buildCancelConfirm(childName: string, dayOfMonth: number): BotResponse {
+  if (dayOfMonth <= 15) {
+    return {
+      text: `📅 היום ה-${dayOfMonth} לחודש — אתם *בתוך חלון הביטול* ✅\n\n` +
+        `*${childName}* יכול/ה להמשיך עד סוף החודש הנוכחי.\n` +
+        `תקבלו זיכוי מלא לחודש הבא.\n\n` +
+        `*לאשר את הביטול?* (כן / לא)`,
+      nextFlow: 'cancel_confirm_before15',
+    }
+  }
+  return {
+    text: `📅 היום ה-${dayOfMonth} לחודש.\n\n` +
+      `לפי תקנון הצהרון, ביטול לאחר ה-15 — *ממשיכים חודש נוסף* ` +
+      `ומפסיקים מהחודש שלאחריו.\n\n` +
+      `הביטול שיירשם הוא עבור *${childName}*.\n\n` +
+      `*לאשר?* (כן / לא)\n\n` +
+      `_אם יש נסיבות מיוחדות — כתבו ואנחנו נבדוק_`,
+    nextFlow: 'cancel_confirm_after15',
+  }
+}
+
+// ─── "לא, זה לא הילד הזה" בשלב האישור ────────────────────────────────────────
+// ⚠️ זו שלילה על *הילד/ה*, לא על הביטול. לפני התיקון היא נקראה כ-"לא" (או נפלה
+// ל-LLM) והשם השגוי נשאר — ו"כן" מאוחר יותר היה מבטל את הילד הלא נכון.
+const WRONG_CHILD_RE = /לא[, ]+(זה )?לא הילד|לא זה|ילד אחר|ילדה אחרת|טעיתי בשם|לא הילד הזה|לא הילדה|שם אחר/
+
+// תיקון שם בשלב האישור: 2-3 מילים שנראות כמו שם, ואינן אישור/שלילה.
+// שמרני בכוונה — בספק *לא* מחליפים את מי שמבטלים.
+const NOT_A_CORRECTION_RE = /כן|לא|מאשר|מסכימ|ממשיכ|בטוח|תודה|בסדר|אוקי|סבבה|בטל|ביטול|נכון|רוצה/
+function correctedChildName(msg: string): string | null {
+  const t = msg.trim()
+  const words = t.split(/\s+/).filter(Boolean)
+  if (words.length < 2 || words.length > 3) return null
+  if (isYes(t) || isNo(t) || NOT_A_CORRECTION_RE.test(t)) return null
+  return looksLikeChildName(t) ? t : null
+}
+
 export async function handleCancellationFlow(session: BotSession, userMessage: string): Promise<BotResponse> {
   const step = session.currentFlow
   const dayOfMonth = israelNow().getDate()  // כלל ה-15 לפי שעון ישראל
+
+  // ── בשלבי האישור: קודם בודקים שמדובר בילד/ה הנכון/ה ──────────────────────
+  if (step === 'cancel_confirm_before15' || step === 'cancel_confirm_after15') {
+    if (WRONG_CHILD_RE.test(userMessage)) {
+      delete session.collectedData.child_name
+      session.currentFlow = 'cancel_child'
+      return {
+        text: `אוקיי — *מה שם הילד/ה הנכון?* (שם פרטי + שם משפחה)`,
+        nextFlow: 'cancel_child',
+      }
+    }
+    const fixed = correctedChildName(userMessage)
+    if (fixed && fixed !== session.collectedData.child_name) {
+      session.collectedData.child_name = fixed
+      return buildCancelConfirm(fixed, dayOfMonth)
+    }
+  }
 
   if (!step || step === 'cancel_start') {
     return {
@@ -1116,20 +1304,35 @@ export function handleLateCampFlow(session: BotSession, userMessage: string): Bo
 // מסלול 4: שעות / חגים / לו"ז — מקור יחיד הוא ה-FAQ (נערך מהדשבורד).
 // אין יותר ערכים קשיחים כאן: כל תוכן השעות/חגים/חופשות חי ב-faqs, וכך
 // הלקוחה מעדכנת אותו מלשונית "תוכן הבוט" בלי נגיעה בקוד.
+// שאלה על חג/חופשה — לא על שעות רגילות ("הצהרון פתוח בסוכות?")
+const HOLIDAY_QUESTION_RE =
+  /ראש השנה|כיפור|סוכות|שמחת תורה|חנוכה|פורים|פסח|שבועות|ל["׳']?ג בעומר|יום העצמאות|חג|חגים|חופש|חופשה|חופשות|שבתון|ערב חג/
+
+export function isHolidayQuestion(message: string): boolean {
+  return HOLIDAY_QUESTION_RE.test((message || '').toLowerCase())
+}
+
+// עוגני ה-FAQ לפי תת-הנושא של השאלה (מיוצא לבדיקות)
+export function scheduleFaqAnchors(message: string): string[] {
+  if (isHolidayQuestion(message)) {
+    return ['חג', 'חגים', 'חופש', 'חופשה', 'סוכות', 'ראש השנה', 'holidays_closed', 'vacations']
+  }
+  return ['שעות', 'שעות פעילות']
+}
+
 export async function handleScheduleFlow(message: string): Promise<BotResponse> {
   const { findFaqAnswer, findFaqByTopic } = await import('./faq-search')
+  const anchors = scheduleFaqAnchors(message)
 
-  // קודם — ניסוח ההורה עצמו (FAQ fuzzy)
-  let answer = await findFaqAnswer(message)
+  // שאלת חג/חופשה → קודם ה-FAQ של החגים. חיפוש ה-fuzzy החזיר כאן את שעות
+  // הפעילות הרגילות ("8:00-17:00") — תשובה שגויה לשאלה "פתוח בסוכות?" (אתגור 17.9).
+  let answer = isHolidayQuestion(message) ? await findFaqByTopic(anchors) : null
+
+  // ניסוח ההורה עצמו (FAQ fuzzy)
+  if (!answer) answer = await findFaqAnswer(message)
 
   // נפילה — עוגן לפי תת-נושא, כדי שגם "שעות"/"חגים"/"4" יחזירו את ה-FAQ הנכון
-  if (!answer) {
-    const lower = message.toLowerCase()
-    const anchors = /חג|סגור/.test(lower)        ? ['חג', 'חגים']
-      : /חופש|קיץ|חופשה/.test(lower)             ? ['חופש', 'חופשה', 'קיץ']
-      : ['שעות', 'שעות פעילות']
-    answer = await findFaqByTopic(anchors)
-  }
+  if (!answer) answer = await findFaqByTopic(anchors)
 
   if (answer) return { text: answer, isComplete: true }
 
@@ -1158,6 +1361,9 @@ export function handleEarlyPickupFlow(session: BotSession, userMessage: string):
   }
 
   if (step === 'pickup_child') {
+    // משפט/שאלה ארוכה ("הוא צריך לצאת מוקדם כי יש לו רופא, מה עושים?") → LLM,
+    // המסלול נשמר. קודם זה נפסל כ"לא שם" והורה קיבל את אותה הודעה שוב ושוב.
+    if (looksOffScript(userMessage)) return { text: '', useLLM: true }
     if (!looksLikeChildName(userMessage)) return buildNotAName('pickup_child')
     session.collectedData.child_name = userMessage
     return {
@@ -1167,9 +1373,21 @@ export function handleEarlyPickupFlow(session: BotSession, userMessage: string):
   }
 
   if (step === 'pickup_time') {
-    session.collectedData.pickup_time = userMessage
+    // ⚠️ חייבים שעה אמיתית: "אמא של נועם" נשמר כשעת איסוף ונשלח לצוות (אתגור 17.9)
+    const time = parsePickupTime(userMessage)
+    if (!time) {
+      const misses = parseInt(session.collectedData._pickup_time_miss ?? '0', 10) + 1
+      session.collectedData._pickup_time_miss = String(misses)
+      if (misses >= 2) return { text: '', useLLM: true }
+      return {
+        text: `רק כדי לא לטעות — *באיזו שעה* לאסוף? 🕒\n_(לדוגמה: 15:00, "בשלוש", "3 וחצי")_`,
+        nextFlow: 'pickup_time',
+      }
+    }
+    delete session.collectedData._pickup_time_miss
+    session.collectedData.pickup_time = time
     return {
-      text: `שעה *${userMessage}* ✅\n\n*מי יאסוף?*\n(שם + קרבה, למשל: "אבא דני" / "סבתא שרה")`,
+      text: `שעה *${time}* ✅\n\n*מי יאסוף?*\n(שם + קרבה, למשל: "אבא דני" / "סבתא שרה")`,
       nextFlow: 'pickup_collector'
     }
   }
@@ -1317,22 +1535,41 @@ async function handlePaymentStatusChildName(
     }
   }
 
-  const statusText = await getPaymentStatusByChildName(nameInput)
+  // ⚠️ S1 — חשיפת מידע: שם ילד/ה *לבדו* אינו זיהוי. כל מספר שהקליד שם מוכר
+  // קיבל סטטוס תשלום, סכום ושם ההורה של משפחה אחרת (אתגור 17.9).
+  // מעכשיו: מזהים ילד/ה רק בתוך המשפחה של הטלפון הפונה.
+  const ownChild = await findOwnChildByName(session.phone, nameInput)
+  if (!ownChild) {
+    return {
+      text:
+        `המספר הזה לא מופיע אצלנו במערכת 🤔\n\n` +
+        `העברתי לקורלי, הנציגה שלנו, שתבדוק ותחזור אליך 💛`,
+      isComplete: true,
+      createTask: {
+        type:        'שאלה כללית',
+        description: `בדיקת סטטוס תשלום ממספר לא מזוהה (${session.phone}) — נמסר השם "${nameInput}". ` +
+                     `⚠️ לא נחשף מידע. לבדוק מי הפונה ולחזור.`,
+        priority:    'גבוה',
+      },
+    }
+  }
+
+  const statusText = await getPaymentStatusByChildName(ownChild.name)
   if (statusText) {
     return { text: statusText, isComplete: true }
   }
 
-  // לא נמצא / לא חד-משמעי → נציגה תבדוק
+  // הילד/ה של ההורה אותר/ה אך אין נתוני תשלום → נציגה תבדוק
   return {
     text:
-      `🔍 לא הצלחתי לאתר את *${nameInput}* באופן חד-משמעי.\n\n` +
+      `🔍 לא הצלחתי לאתר את פרטי התשלום של *${ownChild.name}*.\n\n` +
       `${isBusinessHours()
         ? 'נציגה שלנו תבדוק את החשבון ותחזור אליך מיד 😊'
         : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) עם הפרטים 💛'}`,
     isComplete: true,
     createTask: {
       type:        'שאלה כללית',
-      description: `בדיקת סטטוס תשלום — ילד/ה: ${nameInput} | טלפון פונה: ${session.phone} | לא אותר אוטומטית`,
+      description: `בדיקת סטטוס תשלום — ילד/ה: ${ownChild.name} | טלפון פונה: ${session.phone} | לא אותר אוטומטית`,
       priority:    'רגיל',
     },
   }

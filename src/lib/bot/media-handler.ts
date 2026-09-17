@@ -24,21 +24,23 @@ export interface MediaInfo {
   caption: string   // טקסט חופשי שנשלח לצד הקובץ (אם יש)
 }
 
+// כתובות של מדיה נכנסת (uChat / WhatsApp) — רק הן "קובץ" בלי סיומת מוכרת
+const MEDIA_HOST = /(uchat\.com\.au\/media\/|mmg\.whatsapp\.net|media\.whatsapp|lookaside\.fbsbx\.com)/i
+
 // מזהה אם ההודעה היא קובץ/תמונה. מחזיר null אם זו הודעת טקסט רגילה.
+// ⚠️ קישור רגיל (למשל kidsandfun.co.il/shop) הוא *טקסט*: קודם הוא נחשב "קובץ",
+// וכשהורה שאל "נרשמתי דרך הקישור הזה?" הוא קיבל "קיבלתי את הקובץ 🙏" (אתגור 17.9).
 export function detectMedia(messageText: string): MediaInfo | null {
   const urlMatch = messageText.match(/https?:\/\/\S+/)
   if (!urlMatch) return null
   const url = urlMatch[0]
   const caption = messageText.replace(url, '').trim()
 
-  const isUchatMedia = /uchat\.com\.au\/media\//i.test(url)
   if (IMAGE_EXT.test(url)) return { url, kind: 'image', caption }
   if (PDF_EXT.test(url))   return { url, kind: 'pdf', caption }
-  if (OTHER_DOC_EXT.test(url) || isUchatMedia) return { url, kind: 'other', caption }
+  if (OTHER_DOC_EXT.test(url) || MEDIA_HOST.test(url)) return { url, kind: 'other', caption }
 
-  // קישור רגיל (אתר, Google Drive וכו') — לא מדיה להורדה, אבל גם לא טקסט שאפשר
-  // לסווג ממנו כוונה. מטפלים בו כ"קובץ אחר" כדי שלא ייפול לתפריט אקראי.
-  return { url, kind: 'other', caption }
+  return null   // קישור רגיל → ממשיך לסיווג כוונה / LLM כמו כל טקסט
 }
 
 const MEDIA_SYSTEM_PROMPT = `את/ה העוזר/ת הדיגיטלי/ת של "Kids & Fun" (צהרונים וקייטנות). הורה שלח/ה קובץ בוואטסאפ.

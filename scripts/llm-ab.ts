@@ -27,7 +27,7 @@ const cases: Array<{ name: string; msg: string; flow?: string; data?: Record<str
       const t0 = Date.now()
       const r = await callLLMFallback(s, c.msg)
       const ms = Date.now() - t0
-      console.log(`\n▸ ${c.name} — ${ms} ms | task=${!!r.createTask} | suggestFlow=${r.suggestFlow ?? '-'}\n  ${r.text.replace(/\n+/g, ' ⏎ ').slice(0, 260)}`)
+      console.log(`\n▸ ${c.name} — ${ms} ms | task=${!!r.createTask} | wantsHuman=${!!r.userWantsHuman}\n  ${r.text.replace(/\n+/g, ' ⏎ ').slice(0, 260)}`)
     }
   }
 })()
