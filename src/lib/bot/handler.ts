@@ -86,8 +86,9 @@ export async function processMessage(
 
   const result = await processMessageCore(session, userMessage)
 
-  // תשובה שכבר מסלימה (בקשת נציג / LLM שהעביר לקורלי) → מעבר למצב handoff
-  if (result.escalate || (result.createTask?.priority === 'גבוה' && /קורלי/.test(result.text))) {
+  // בקשת נציג מפורשת (escalate) → מעבר למצב handoff. הסלמה "רכה" של ה-LLM
+  // ("מעבירה לקורלי את שאלת המחיר") פותחת פנייה אבל *לא* משתיקה את הבוט.
+  if (result.escalate) {
     session.currentFlow = HANDOFF_FLOW
     session.collectedData = {}
     return { ...result, nextFlow: HANDOFF_FLOW, isComplete: false }
@@ -488,15 +489,19 @@ async function llmFallback(
 
   const llmResult = await callLLMFallback(session, userMessage)
 
-  // ── ה-LLM הסלים לקורלי → המסלול נסגר (אין טעם לחזור לשלב) ─────────────────
+  // ── ה-LLM הסלים לקורלי → פנייה נפתחת; אם היינו באמצע מסלול — המסלול נשמר
+  //    (שאלת מחיר באמצע רישום לא אמורה להפיל את הרישום), אחרת השיחה מסתיימת.
   const escalated = !!llmResult.createTask && !opts.suppressTask
   if (escalated) {
-    session.currentFlow = undefined
-    session.collectedData = {}
+    const keep = opts.keepFlow
+    if (!keep) { session.currentFlow = undefined; session.collectedData = {} }
+    else session.currentFlow = keep
+    const reminder = keep ? FLOW_REMINDERS[keep] : undefined
     return {
-      text: llmResult.text,
+      text: reminder ? `${llmResult.text}\n\n_${reminder}_` : llmResult.text,
       intent,
-      isComplete: true,
+      isComplete: !keep,
+      ...(keep ? { nextFlow: keep } : {}),
       // הבוט לא ידע לענות והעביר לקורלי → עדיפות גבוהה (מפעיל התראה + מייל לאדמין)
       createTask: {
         type: 'שאלה כללית',

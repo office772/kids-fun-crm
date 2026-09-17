@@ -142,6 +142,16 @@ export async function callLLMFallback(
     if (staffCtx) { contextLines.push(staffCtx); knowsParentFromPhone = true }
   } catch { /* לא חוסם — אם נכשל, ממשיכים בלי ההקשר */ }
 
+  // מחירים — מקור האמת הוא pricing.ts (ה-FAQ מכיל placeholder). כשהמסגרת ידועה — מחיר מדויק.
+  try {
+    const { resolveMonthlyFee } = await import('./pricing')
+    const cd = session.collectedData || {}
+    const fee = resolveMonthlyFee({ area_code: cd.area_code, school: cd.school, class_name: cd.class_name })
+    contextLines.push(fee
+      ? `מחיר הצהרון החודשי למסגרת של ההורה: ${fee} ₪ (אפשר לנקוב בו; אל תוסיף מה כלול במחיר — לא ידוע לך).`
+      : `מחירי צהרון חודשיים לפי מסגרת (אפשר לנקוב כשההורה אומר איזה גן/בי"ס): גלי עתלית 1150 ₪ · מתן כיתות א-ב 916 ₪, כיתה ג 1015 ₪ · חצב ואלמוג 1470 ₪ · גני תל אביב 946 ₪ או 991 ₪ לפי הגן. אם המסגרת לא ידועה — שאל/י באיזה גן/בי"ס הילד/ה, אל תעביר לנציגה.`)
+  } catch { /* לא חוסם */ }
+
   if (session.currentFlow) contextLines.push(`זרימה פעילה: ${session.currentFlow} — אם ההורה חרג ממנה, עזור לו לחזור ורשום suggestFlow`)
   if (Object.keys(session.collectedData || {}).length > 0) {
     const data = Object.entries(session.collectedData)
@@ -163,14 +173,23 @@ export async function callLLMFallback(
     : SYSTEM_PROMPT_BASE
 
   try {
+    // המודל ניתן להחלפה ב-env (BOT_LLM_MODEL) — ברירת מחדל Haiku 4.5.
+    // מודלים חדשים (Sonnet 5 / Opus 5) חושבים לפני התשובה: מאמץ נמוך + תקציב גדול יותר,
+    // כדי לא לחרוג מה-timeout של uChat ולא להיחתך באמצע.
+    const model  = process.env.BOT_LLM_MODEL || 'claude-haiku-4-5'
+    const tuning = model.includes('haiku') ? {} : { max_tokens: 1500, output_config: { effort: 'low' } }
     const response = await anthropic.messages.create({
-      model:      'claude-haiku-4-5',
+      model,
       max_tokens: 450,
+      ...(tuning as Record<string, unknown>),
       system:     systemWithContext,
       messages,
     })
 
-    const rawText = response.content[0].type === 'text' ? response.content[0].text : ''
+    // בלוק הטקסט הראשון — לא content[0]: במודלים עם thinking הבלוק הראשון הוא 'thinking'
+    // (זה גרם ל-Sonnet/Opus להחזיר תמיד את ה-fallback הגנרי).
+    const textBlock = response.content.find(b => b.type === 'text')
+    const rawText = textBlock && textBlock.type === 'text' ? textBlock.text : ''
 
     // נסה לפענח JSON
     const jsonMatch = rawText.match(/\{[\s\S]*\}/)
