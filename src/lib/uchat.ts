@@ -18,10 +18,20 @@ async function uchatPost(path: string, body: Record<string, unknown>): Promise<b
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body:    JSON.stringify(body),
     })
+    const raw = await res.text().catch(() => '')
     if (!res.ok) {
-      console.error(`[uchat] ${path} HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 160)}`)
+      console.error(`[uchat] ${path} HTTP ${res.status}: ${raw.slice(0, 160)}`)
       return false
     }
+    // ⚠️ uChat מחזיר HTTP 200 גם על כשל — {"status":"error","message":"..."}
+    // (למשל "The allowed messaging window has closed" — אומת 17.9).
+    try {
+      const json = JSON.parse(raw) as { status?: string; message?: string }
+      if (json?.status === 'error') {
+        console.error(`[uchat] ${path} error: ${json.message ?? raw.slice(0, 160)}`)
+        return false
+      }
+    } catch { /* לא JSON — מתייחסים כהצלחה */ }
     return true
   } catch (err) {
     console.error(`[uchat] ${path} error:`, err)
@@ -41,10 +51,12 @@ export function pauseBot(userNs: string): Promise<boolean> {
   return uchatPost('/subscriber/pause-bot', { user_ns: userNs })
 }
 
-/** שליחת טקסט לפונה לפי user_ns */
+/** שליחת טקסט לפונה לפי user_ns.
+ *  ⚠️ שם השדה ב-API הוא `content` (לא `text`) — אומת מול ה-API ב-17.9;
+ *  עם `text` התקבל 422 "The content field is required". */
 export function sendText(userNs: string, text: string): Promise<boolean> {
   if (!userNs || !text) return Promise.resolve(false)
-  return uchatPost('/subscriber/send-text', { user_ns: userNs, text })
+  return uchatPost('/subscriber/send-text', { user_ns: userNs, content: text })
 }
 
 // ─── עזר: שליפת user_ns של הורה לפי טלפון ────────────────────────────────────

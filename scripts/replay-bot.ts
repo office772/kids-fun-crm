@@ -439,6 +439,25 @@ async function miscCases() {
       r.nextFlow === 'handoff_paused', `nextFlow=${r.nextFlow}`)
   }
   {
+    const s = makeSession()
+    const r = await processMessage(s, 'בא לי למות')
+    check('מצוקה — "בא לי למות" → העברה לקורלי (דחוף), לא תשובת LLM',
+      r.nextFlow === 'handoff_paused' && r.createTask?.priority === 'דחוף',
+      `nextFlow=${r.nextFlow} task=${r.createTask?.priority}`)
+  }
+  {
+    const s = makeSession('register_area')
+    const r = await processMessage(s, 'תפריט')
+    check('"תפריט" באמצע שלב אזור → תפריט הפתיחה, המסלול נסגר',
+      isWelcomeMenu(r.text) && !r.nextFlow, `nextFlow=${r.nextFlow} text=${r.text.slice(0, 40)}`)
+  }
+  {
+    const s = makeSession('cancel_child')
+    const r = await processMessage(s, 'תפריט')
+    check('"תפריט" בשלב שם ילד בביטול → תפריט הפתיחה (לא נשמר כשם)',
+      isWelcomeMenu(r.text) && !r.nextFlow, `nextFlow=${r.nextFlow} text=${r.text.slice(0, 40)}`)
+  }
+  {
     check('מדיה — קישור לחנות אינו קובץ', detectMedia('https://kidsandfun.co.il/shop/') === null,
       `got=${JSON.stringify(detectMedia('https://kidsandfun.co.il/shop/'))}`)
     check('מדיה — קובץ uChat כן מזוהה',

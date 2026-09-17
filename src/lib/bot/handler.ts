@@ -100,6 +100,14 @@ const SAFETY_WORDS = [
 ]
 const SAFETY_PHRASES = ['לא חזר', 'לא חזרה', 'חולה בבית']
 
+// ─── ביטויי מצוקה של ההורה עצמו ("בא לי למות") ──────────────────────────────
+// בדיקת עשן 17.9: ה-LLM ענה בעצמו עם "קווי סיוע" ומספרים מומצאים (1221, 101).
+// זה לא תפקיד הבוט — מעבירים מיד לקורלי (דחוף) ושותקים, כמו בקשת נציג.
+const DISTRESS_RE = /בא לי למות|רוצה למות|אין לי כוח לחיות|לא רוצה לחיות|להתאבד|מתאבד/
+function isDistress(msg: string): boolean {
+  return DISTRESS_RE.test((msg || '').trim())
+}
+
 function isSafetyCritical(msg: string): boolean {
   const t = (msg || '').trim()
   if (!t) return false
@@ -198,6 +206,24 @@ async function processMessageCore(
       createTask: {
         type:        'שאלה כללית',
         description: `⚠️ פנייה דחופה מהורה (שלום/בטיחות הילד/ה): "${userMessage.slice(0, 120)}" | טלפון: ${session.phone}`,
+        priority:    'דחוף',
+      },
+    }
+  }
+
+  // ── ביטוי מצוקה של ההורה → העברה מיידית לקורלי (דחוף) ושתיקה ─────────────
+  if (isDistress(userMessage)) {
+    console.log('[safety] distress phrase → handoff to Corli (דחוף)')
+    session.currentFlow = undefined
+    session.collectedData = {}
+    return {
+      text: buildEscalationMessage(),
+      intent,
+      escalate: true,
+      isComplete: true,
+      createTask: {
+        type:        'שאלה כללית',
+        description: `⚠️ ביטוי מצוקה מהורה — לחזור אליו/ה אישית: "${userMessage.slice(0, 120)}" | טלפון: ${session.phone}`,
         priority:    'דחוף',
       },
     }
@@ -409,6 +435,14 @@ async function handleActiveFlow(
   if (CHOICE_STEPS.has(flow) && !isExplicitNumericChoice(userMessage)) {
     const digit = shortDigitChoice(userMessage)
     if (digit) userMessage = digit
+  }
+
+  // ── "תפריט" / "בוט" באמצע כל שלב → תפריט הפתיחה ─────────────────────────────
+  // בדיקת עשן 17.9: "תפריט" בשלב האזור נקרא כשם אזור ("לא הצלחתי לזהות את האזור").
+  if (isMenuWord(normalizeMessage(userMessage)) && !flow.startsWith('admin')) {
+    session.currentFlow = undefined
+    session.collectedData = {}
+    return { text: buildWelcomeMessage(session.parentName), intent: 'שאלה_כללית', isComplete: true }
   }
 
   // ── בקשת נציג מכובדת בכל שלב, לא רק בתפריטים ─────────────────────────────

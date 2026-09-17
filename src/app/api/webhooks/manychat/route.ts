@@ -23,6 +23,10 @@ import { processMessage } from '@/lib/bot/handler'
 import { isTestPhone as isAllowedPhone, TEST_PHONES } from '@/lib/bot/test-phones'
 import { isAllowedPhoneAsync } from '@/lib/bot/test-phones-db'
 import { phoneVariants } from '@/lib/phone'
+import { HANDOFF_FLOW } from '@/lib/bot/handler'
+import { detectMedia, handleMediaMessage, type MediaInfo } from '@/lib/bot/media-handler'
+import { getUserNsByPhone, sendText } from '@/lib/uchat'
+import { waitUntil } from '@vercel/functions'
 import type { BotSession, TaskPriority } from '@/lib/types'
 
 // ─── Auth ──────────────────────────────────────────────────────────────────────
@@ -320,6 +324,52 @@ async function createTask(
   }
 }
 
+// ─── A7: קובץ/תמונה — אישור מיידי, ניתוח ברקע, הודעה שנייה דרך uChat API ────
+// uChat מנתק את ה-External Request אחרי ~12 שניות. ניתוח PDF/תמונה (הורדה + Claude)
+// לקח יותר, והתשובה לא נמסרה להורה (uChat Error Logs, 17.9). לכן: עונים מיד
+// "קיבלתי", והניתוח ממשיך ברקע (waitUntil) ונשלח כהודעה נפרדת ל-user_ns של הפונה.
+const MEDIA_ACK = 'קיבלתי את הקובץ 🙏 רגע, אני עוברת עליו…'
+
+async function finishMediaInBackground(
+  supabase: ReturnType<typeof createServiceClient>,
+  opts: {
+    session: BotSession
+    media: MediaInfo
+    userNs: string
+    phone: string
+    parentId?: string
+    parentName?: string | null
+  }
+) {
+  const { session, media, userNs, phone, parentId, parentName } = opts
+  try {
+    const result = await handleMediaMessage(session, media)
+    const sent = await sendText(userNs, result.text)
+    if (!sent) console.error(`[media-bg] send-text failed for ${phone} — parent got only the ack`)
+    await logConversation(supabase, {
+      phone, parentId, direction: 'יוצא',
+      text: (sent ? '' : '⚠️ (לא נמסר להורה) ') + result.text,
+      intent: 'לא_ידוע', sessionId: session.sessionId,
+    })
+    if (result.createTask || !sent) {
+      await createTask(supabase, {
+        parentId,
+        type:        result.createTask?.type ?? 'שאלה כללית',
+        description: (result.createTask?.description ?? `הורה שלח/ה קובץ — לפתוח ולטפל.`) +
+                     (sent ? '' : ' | ⚠️ תשובת הבוט על הקובץ לא נמסרה בוואטסאפ (uChat send-text נכשל).'),
+        priority:    result.createTask?.priority ?? 'גבוה',
+        parentName:  parentName ?? undefined,
+        parentPhone: phone,
+      })
+    }
+    // מדיה מסיימת את המסלול — כמו בנתיב הסינכרוני (isComplete)
+    await clearSession(supabase, phone)
+    console.log(`[media-bg] phone=${phone} kind=${media.kind} sent=${sent}`)
+  } catch (err) {
+    console.error('[media-bg] failed:', err)
+  }
+}
+
 // ─── POST ──────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   if (!isAuthorized(req)) {
@@ -424,6 +474,26 @@ export async function POST(req: NextRequest) {
     idMessage: messageId,
   })
 
+  // 3.5 קובץ/תמונה שדורשים ניתוח → ack מיידי + המשך ברקע (A7). קבצים שלא
+  //     מנתחים (וורד/אקסל/אודיו) נשארים בנתיב הרגיל — האישור שלהם מיידי ממילא.
+  //     אחרי העברה לקורלי (שתיקה) — לא מגיבים גם לקבצים.
+  const media = detectMedia(messageText)
+  if (media && media.kind !== 'other' && session.currentFlow !== HANDOFF_FLOW) {
+    const ns = userNs || await getUserNsByPhone(phone)
+    if (ns) {
+      await logConversation(supabase, {
+        phone, parentId: parent.id, direction: 'יוצא', text: MEDIA_ACK,
+        intent: 'לא_ידוע', sessionId: session.sessionId,
+      })
+      waitUntil(finishMediaInBackground(supabase, {
+        session, media, userNs: ns, phone, parentId: parent.id, parentName: parent.name,
+      }))
+      console.log(`[manychat] phone=${phone} media=${media.kind} → ack now, analysis in background`)
+      return NextResponse.json({ reply: MEDIA_ACK, intent: 'לא_ידוע', deferred: true }, { status: 200 })
+    }
+    console.log(`[manychat] phone=${phone} media=${media.kind} but no user_ns — synchronous path`)
+  }
+
   // 4. עיבוד ההודעה (async — כולל LLM fallback)
   const result = await processMessage(session, messageText)
 
@@ -500,6 +570,6 @@ export async function GET() {
     status: 'ok',
     endpoint: 'POST /api/webhooks/manychat',
     description: 'Kids & Fun WhatsApp bot webhook (ManyChat / uchat)',
-    version: '2.1.0',
+    version: '2.1.1',
   })
 }
