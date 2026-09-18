@@ -29,6 +29,12 @@ export const BOT_MESSAGE_REGISTRY: Record<string, BotMessageDef> = {
       `*5* — תשלומים\n` +
       `*6* — איסוף מוקדם`,
   },
+  welcome: {
+    label: 'ברכת פתיחה',
+    category: 'כללי',
+    vars: ['ברכה', 'שם_בוט', 'תפריט'],
+    default: `{ברכה}כאן {שם_בוט}! איך אפשר לעזור?\n\n{תפריט}\n\nאו פשוט כתוב/י מה צריך 💬`,
+  },
   did_not_understand: {
     label: 'כשהבוט לא הבין',
     category: 'כללי',
@@ -40,6 +46,21 @@ export const BOT_MESSAGE_REGISTRY: Record<string, BotMessageDef> = {
     category: 'העברה לנציגה',
     vars: [],
     default: `העברתי את פנייתך לקורלי, הנציגה שלנו — היא תחזור אליך בהקדם 💛`,
+  },
+  safety_escalation: {
+    label: 'פנייה דחופה/בטיחות → קורלי',
+    category: 'העברה לנציגה',
+    vars: [],
+    default:
+      `זה נשמע חשוב 💛\n\n` +
+      `העברתי את זה *עכשיו* לקורלי, הנציגה שלנו, והיא תחזור אליך בהקדם.\n` +
+      `אם זה דחוף ממש — אפשר להתקשר ישירות למסגרת.`,
+  },
+  thanks_reply: {
+    label: 'תשובה ל"תודה"',
+    category: 'כללי',
+    vars: [],
+    default: `בשמחה! אם צריך עוד משהו אני כאן 💛`,
   },
   escalation_after_hours: {
     label: 'העברה לנציגה (מחוץ לשעות)',

@@ -257,10 +257,7 @@ function menuText(): string { return botText('menu') }
 // ─── ברכה ─────────────────────────────────────────────────────────────────────
 export function buildWelcomeMessage(parentName?: string): string {
   const greeting = parentName ? `היי ${parentName.split(' ')[0]} 😊\n\n` : `שלום! 😊\n\n`
-  return greeting +
-    `כאן ${BOT_NAME}! איך אפשר לעזור?\n\n` +
-    menuText() +
-    `\n\nאו פשוט כתוב/י מה צריך 💬`
+  return botText('welcome', { 'ברכה': greeting, 'שם_בוט': BOT_NAME, 'תפריט': menuText() })
 }
 
 // ─── לא הבנתי ─────────────────────────────────────────────────────────────────

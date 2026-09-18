@@ -21,6 +21,7 @@ import {
   handleWaitingListSpotFlow,
   handleCostInfoFlow,
 } from './flows'
+import { botText } from './bot-messages-db'
 import { callLLMFallback } from './llm-fallback'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -197,10 +198,7 @@ async function processMessageCore(
     session.currentFlow = undefined
     session.collectedData = {}
     return {
-      text:
-        `זה נשמע חשוב 💛\n\n` +
-        `העברתי את זה *עכשיו* לקורלי, הנציגה שלנו, והיא תחזור אליך בהקדם.\n` +
-        `אם זה דחוף ממש — אפשר להתקשר ישירות למסגרת.`,
+      text: botText('safety_escalation'),
       intent,
       isComplete: true,
       createTask: {
@@ -596,7 +594,7 @@ async function handleNewIntent(
       //    *קצרה* שכולה ברכה, ובדיקת מילה שלמה (לא "היום").
       // "תודה" / "תודה רבה" בסוף שיחה — לא צריך לזרוק שוב את כל התפריט
       if (/^תודה( רבה| לך| ענקית)?[!.\s💛😊🙏❤️]*$/.test(userMessage.trim())) {
-        return { text: `בשמחה! אם צריך עוד משהו אני כאן 💛`, intent, isComplete: true }
+        return { text: botText('thanks_reply'), intent, isComplete: true }
       }
       if (isShortGreeting(userMessage)) {
         return {
