@@ -375,6 +375,59 @@ async function finishMediaInBackground(
   }
 }
 
+// ─── תשובה איטית → "רק רגע, בודקת" + המשך ברקע ──────────────────────────────
+// uChat מנתק את ה-External Request אחרי ~12ש'. מודל חכם/איטי יותר (Sonnet) עונה
+// לפעמים 11-13ש' על שאלות חופשיות — בדיוק "הרגעים האנושיים". כדי לא לאבד מסירה:
+// אם התשובה לא חזרה תוך LLM_DEFER_TIMEOUT_MS (ברירת מחדל 8000) — ack מיידי, והתשובה
+// האמיתית נשלחת כהודעה שנייה דרך uChat send-text (בלי מגבלת ה-12ש'). דורש user_ns.
+const DEFER_MS = () => parseInt(process.env.LLM_DEFER_TIMEOUT_MS || '8000', 10)
+const checkingAck = () => 'רק רגע, בודקת עבורך… 😊'
+
+type ProcResult = Awaited<ReturnType<typeof processMessage>>
+
+// עדכון session + task לפי תוצאת processMessage (בלי רישום ההודעה היוצאת — הקורא רושם).
+async function applyResult(
+  supabase: ReturnType<typeof createServiceClient>,
+  session: BotSession,
+  parent: { id?: string; name?: string | null },
+  phone: string,
+  result: ProcResult,
+) {
+  if (result.nextFlow) {
+    session.currentFlow = result.nextFlow
+  } else if (result.isComplete) {
+    session.currentFlow = undefined
+    session.collectedData = {}
+  }
+  if (result.isComplete && !result.nextFlow) {
+    await clearSession(supabase, phone)
+  } else {
+    await saveSession(supabase, session)
+  }
+  if (result.createTask) {
+    let frameworkCtx: { area_code: string; school?: string; type?: 'צהרון'|'קייטנה' } | undefined
+    if (result.notifyFramework?.byChildName) {
+      const { data: kid } = await supabase
+        .from('children').select('area_code, school, framework')
+        .ilike('name', result.notifyFramework.byChildName).limit(1).maybeSingle()
+      if (kid?.area_code) {
+        frameworkCtx = { area_code: kid.area_code, school: kid.school ?? undefined, type: (kid.framework === 'קייטנה' ? 'קייטנה' : 'צהרון') }
+      }
+    } else if (result.notifyFramework?.area_code) {
+      frameworkCtx = { area_code: result.notifyFramework.area_code, school: result.notifyFramework.school, type: result.notifyFramework.type }
+    }
+    await createTask(supabase, {
+      parentId: parent.id,
+      type: result.createTask.type,
+      description: result.createTask.description,
+      priority: result.createTask.priority,
+      framework: frameworkCtx,
+      parentName: parent.name ?? undefined,
+      parentPhone: phone,
+    })
+  }
+}
+
 // ─── POST ──────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   if (!isAuthorized(req)) {
@@ -504,73 +557,54 @@ export async function POST(req: NextRequest) {
     console.log(`[manychat] phone=${phone} media=${media.kind} but no user_ns — synchronous path`)
   }
 
-  // 4. עיבוד ההודעה (async — כולל LLM fallback)
-  const result = await processMessage(session, messageText)
+  // 4. עיבוד ההודעה — עם ack "רק רגע, בודקת" אם איטי מדי (ראו DEFER_MS למעלה).
+  const resultP = processMessage(session, messageText)
+  const DEFER = Symbol('defer')
+  const deferP = new Promise<typeof DEFER>(r => setTimeout(() => r(DEFER), DEFER_MS()))
+  const raced = await Promise.race([resultP, deferP])
 
-  // 5. עדכון session לפי התוצאה
-  if (result.nextFlow) {
-    session.currentFlow = result.nextFlow
-  } else if (result.isComplete) {
-    session.currentFlow = undefined
-    session.collectedData = {}
-  }
-
-  // 6. שמירת / מחיקת session
-  if (result.isComplete && !result.nextFlow) {
-    await clearSession(supabase, phone)
-  } else {
-    await saveSession(supabase, session)
-  }
-
-  // 7. רישום תשובת הבוט (תשובה ריקה = שתיקה מכוונת אחרי העברה לקורלי — לא נרשמת)
-  if (result.text) {
-    await logConversation(supabase, {
-      phone,
-      parentId: parent.id,
-      direction: 'יוצא',
-      text: result.text,
-      intent: result.intent,
-      sessionId: session.sessionId,
-    })
-  }
-
-  // 8. יצירת task אם נדרש — והתראה לצוות המסגרת אם הוגדר notifyFramework
-  if (result.createTask) {
-    // אם הפנייה דורשת צוות מסגרת — מאתרים את בית הספר/אזור של הילד
-    let frameworkCtx: { area_code: string; school?: string; type?: 'צהרון'|'קייטנה' } | undefined
-    if (result.notifyFramework?.byChildName) {
-      const { data: kid } = await supabase
-        .from('children').select('area_code, school, framework')
-        .ilike('name', result.notifyFramework.byChildName).limit(1).maybeSingle()
-      if (kid?.area_code) {
-        frameworkCtx = {
-          area_code: kid.area_code,
-          school: kid.school ?? undefined,
-          type: (kid.framework === 'קייטנה' ? 'קייטנה' : 'צהרון'),
-        }
-      }
-    } else if (result.notifyFramework?.area_code) {
-      frameworkCtx = {
-        area_code: result.notifyFramework.area_code,
-        school: result.notifyFramework.school,
-        type: result.notifyFramework.type,
-      }
+  // ── תשובה מהירה (רוב המקרים) — נתיב רגיל ──────────────────────────────────
+  if (raced !== DEFER) {
+    const result = raced
+    await applyResult(supabase, session, parent, phone, result)
+    if (result.text) {
+      await logConversation(supabase, { phone, parentId: parent.id, direction: 'יוצא', text: result.text, intent: result.intent, sessionId: session.sessionId })
     }
-
-    await createTask(supabase, {
-      parentId: parent.id,
-      type: result.createTask.type,
-      description: result.createTask.description,
-      priority: result.createTask.priority,
-      framework: frameworkCtx,
-      parentName: parent.name ?? undefined,
-      parentPhone: phone,
-    })
+    console.log(`[manychat] phone=${phone} intent=${result.intent} flow=${session.currentFlow ?? 'done'}`)
+    return NextResponse.json({ reply: result.text, intent: result.intent }, { status: 200 })
   }
 
-  console.log(`[manychat] phone=${phone} intent=${result.intent} flow=${session.currentFlow ?? 'done'}`)
+  // ── תשובה איטית (>DEFER_MS) — ack מיידי + המשך ברקע (צריך user_ns) ─────────
+  const ns = userNs || await getUserNsByPhone(phone)
+  if (ns) {
+    await logConversation(supabase, { phone, parentId: parent.id, direction: 'יוצא', text: checkingAck(), intent: 'לא_ידוע', sessionId: session.sessionId })
+    waitUntil((async () => {
+      try {
+        const result = await resultP
+        await applyResult(supabase, session, parent, phone, result)
+        if (result.text) {
+          const sent = await sendText(ns, result.text)
+          await logConversation(supabase, { phone, parentId: parent.id, direction: 'יוצא', text: (sent ? '' : '⚠️ (לא נמסר להורה) ') + result.text, intent: result.intent, sessionId: session.sessionId })
+          if (!sent) {
+            await createTask(supabase, { parentId: parent.id, type: 'שאלה כללית', description: `תשובת הבוט לא נמסרה בוואטסאפ (send-text נכשל). ההודעה: "${result.text.slice(0, 120)}"`, priority: 'גבוה', parentName: parent.name ?? undefined, parentPhone: phone })
+          }
+        }
+        console.log(`[manychat] phone=${phone} deferred answer sent (intent=${result.intent})`)
+      } catch (err) {
+        console.error('[manychat] deferred processing failed:', err)
+      }
+    })())
+    console.log(`[manychat] phone=${phone} slow (>${DEFER_MS()}ms) → ack now, answer in background`)
+    return NextResponse.json({ reply: checkingAck(), intent: 'לא_ידוע', deferred: true }, { status: 200 })
+  }
 
-  // 9. תשובה ל-ManyChat — שולח בחזרה { reply }
+  // ── אין user_ns — נתיב סינכרוני (מחכים לתשובה גם אם איטית) ─────────────────
+  const result = await resultP
+  await applyResult(supabase, session, parent, phone, result)
+  if (result.text) {
+    await logConversation(supabase, { phone, parentId: parent.id, direction: 'יוצא', text: result.text, intent: result.intent, sessionId: session.sessionId })
+  }
+  console.log(`[manychat] phone=${phone} slow, no user_ns — synchronous (intent=${result.intent})`)
   return NextResponse.json({ reply: result.text, intent: result.intent }, { status: 200 })
 }
 
@@ -580,6 +614,6 @@ export async function GET() {
     status: 'ok',
     endpoint: 'POST /api/webhooks/manychat',
     description: 'Kids & Fun WhatsApp bot webhook (ManyChat / uchat)',
-    version: '2.1.2',
+    version: '2.2.0',
   })
 }
