@@ -323,11 +323,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
           session.collectedData.placeholder_child_id = placeholderKid.id
           const firstName = parent?.name?.split(' ')[0] ?? ''
           return {
-            text:
-              `היי${firstName ? ' ' + firstName : ''}! 💛\n\n` +
-              `אני רואה שיש אצלנו תשלום פעיל בשמך, אבל חסר אצלנו שם הילד/ה שלכם 🤔\n\n` +
-              `*מה שם הילד/ה? (שם פרטי + שם משפחה)*\n\n` +
-              `_(זה יישמר אצלנו פעם אחת בלבד, מהפעם הבאה כבר נזהה אתכם)_`,
+            text: botText('register_placeholder_ask_name', { 'ברכה': firstName ? ' ' + firstName : '' }),
             nextFlow: 'register_complete_placeholder',
           }
         }
@@ -338,13 +334,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
               `• *${k.name}*${k.class_name ? ` (כיתה ${k.class_name})` : ''}`).join('\n')
           const firstName = parent?.name?.split(' ')[0] ?? ''
           return {
-            text:
-              `היי${firstName ? ' ' + firstName : ''}! 💛\n\nראיתי שיש לכם כבר רישום אצלנו:\n${kidsText}\n\n` +
-              `*במה אפשר לעזור?*\n` +
-              `*1* — לרשום ילד/ה נוסף/ת מהמשפחה\n` +
-              `*2* — לעדכן פרטים של ילד קיים\n` +
-              `*3* — לבדוק סטטוס תשלום\n` +
-              `*4* — שאלה אחרת`,
+            text: botText('register_existing_menu', { 'ברכה': firstName ? ' ' + firstName : '', 'ילדים': kidsText }),
             nextFlow: 'register_existing_parent',
           }
         }
@@ -355,12 +345,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
 
     // הורה לא מזוהה / חדש → תהליך רישום רגיל
     return {
-      text:
-        `שמחים שאתם רוצים להצטרף למשפחת Kids & Fun! 🎉\n\n` +
-        `*לאיזה אזור מבקשים רישום לצהרון?*\n\n` +
-        `*1* — דרום השרון / חוף השרון\n` +
-        `*2* — חוף הכרמל\n` +
-        `*3* — גני ילדים תל אביב`,
+      text: botText('register_new_parent_area'),
       nextFlow: 'register_area',
     }
   }
@@ -371,9 +356,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
     const words = name.split(' ').filter(w => w.length >= 2)
     if (words.length < 2 || /\d/.test(name) || name.length > 60) {
       return {
-        text:
-          `אנא כתבו *שם פרטי + שם משפחה* של הילד/ה 😊\n` +
-          `_(לדוגמה: נועה כהן)_`,
+        text: botText('register_placeholder_invalid'),
         nextFlow: 'register_complete_placeholder',
       }
     }
@@ -390,13 +373,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
     }
 
     return {
-      text:
-        `מעולה, תודה! ✅ עדכנתי את *${name}* אצלנו.\n\n` +
-        `*במה אפשר לעזור?*\n` +
-        `*1* — לרשום ילד/ה נוסף/ת מהמשפחה\n` +
-        `*2* — לעדכן פרטים של ${name}\n` +
-        `*3* — לבדוק סטטוס תשלום\n` +
-        `*4* — שאלה אחרת`,
+      text: botText('register_placeholder_done', { 'ילד': name }),
       nextFlow: 'register_existing_parent',
     }
   }
@@ -417,13 +394,13 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
     // מיפוי טקסט חופשי לאפשרויות — "אמרתי, אני רוצה לרשום ילד לצהרון" = אפשרות 1
     if (msg === '1' || /לרשום|רישום|להירשם|עוד ילד|ילד נוסף|נוסף|נוספת|אחות|אח שלו|אח שלה/i.test(msg)) {
       return {
-        text: `מעולה! 🌟\n\nלאיזה אזור מבקשים לרשום?\n\n*1* — דרום השרון / חוף השרון\n*2* — חוף הכרמל\n*3* — גני ילדים תל אביב`,
+        text: botText('register_existing_new_child_area'),
         nextFlow: 'register_area',
       }
     }
     if (msg === '2' || /עדכון|לעדכן|פרטים|לשנות/i.test(msg)) {
       return {
-        text: `בסדר 😊\n\n*מה תרצו לעדכן?* (לדוגמה: "להעביר את שם הילד לגלי עתלית", "אלרגיה חדשה", "שינוי בית ספר")`,
+        text: botText('register_update_prompt'),
         nextFlow: 'register_update_details',
       }
     }
@@ -433,7 +410,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
     }
     if (msg === '4' || /שאלה|אחר/i.test(msg)) {
       return {
-        text: `בסדר גמור 😊\n\nכתבו את שאלתכם ונציגה תחזור אליכם בהקדם 💛`,
+        text: botText('register_existing_question_prompt'),
         nextFlow: 'register_existing_question',
       }
     }
@@ -444,7 +421,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
   // עדכון פרטים → משימה לנציגה
   if (step === 'register_update_details') {
     return {
-      text: `קיבלתי 💛\n\nנציגה תטפל בעדכון ותחזור אליכם לאישור!`,
+      text: botText('register_update_ack'),
       isComplete: true,
       createTask: {
         type:        'שאלה כללית',
@@ -456,7 +433,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
 
   if (step === 'register_existing_question') {
     return {
-      text: `תודה! נציגה תחזור אליכם בהקדם 💛`,
+      text: botText('register_existing_question_ack'),
       isComplete: true,
       createTask: {
         type:        'שאלה כללית',
@@ -493,18 +470,14 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
       if (misses >= 2) return { text: '', useLLM: true }
 
       return {
-        text:
-          `לא הצלחתי לזהות את האזור 🤔\n\n` +
-          `אנחנו מפעילים צהרונים ב:\n${servedAreasText()}\n\n` +
-          `אפשר לבחור מספר, או פשוט לכתוב את *שם הגן / בית הספר* של הילד/ה.\n` +
-          `ואם האזור שלכם לא ברשימה — כתבו לי ואעביר את הפרטים לקורלי שתחזור אליכם 💛`,
+        text: botText('register_area_not_recognized', { 'אזורים': servedAreasText() }),
         nextFlow: 'register_area',
       }
     }
     delete session.collectedData._area_miss
     session.collectedData.area_code = area
     return {
-      text: `מצוין! 💛\n\n*מה שם הילד/ה?* (שם פרטי + שם משפחה)`,
+      text: botText('register_ask_child_name'),
       nextFlow: 'register_child_name',
     }
   }
@@ -530,7 +503,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
     const parts = trimmed.split(/\s+/)
     if (parts.length < 2) {
       return {
-        text: `אנא כתבו *שם פרטי ושם משפחה* ביחד (לדוגמה: נועה כהן) 😊`,
+        text: botText('register_name_need_full'),
         nextFlow: 'register_child_name',
       }
     }
@@ -590,13 +563,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
           ].filter(Boolean).join('\n')
 
           return {
-            text:
-              `מצאתי! 💛\n\n*${kid.name}* כבר רשום/ה אצלנו:\n${lines}\n\n` +
-              `*במה אפשר לעזור?*\n` +
-              `*1* — לרשום ילד/ה נוסף/ת מהמשפחה\n` +
-              `*2* — לעדכן פרטים של ${kid.name}\n` +
-              `*3* — לבדוק סטטוס תשלום\n` +
-              `*4* — שאלה אחרת`,
+            text: botText('register_found_existing_child', { 'ילד': kid.name, 'פרטים': lines }),
             nextFlow: 'register_existing_parent',
           }
         }
@@ -607,7 +574,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
 
     // ילד חדש — המשך לשלב הכיתה
     return {
-      text: `שם יפה 😊\n\n*באיזו כיתה לומד/ת ${trimmed}?*\n_(לדוגמה: א׳, ב׳, גן חובה)_`,
+      text: botText('register_child_new_ask_class', { 'ילד': trimmed }),
       nextFlow: 'register_class',
     }
   }
@@ -621,7 +588,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
     // בלי אזור אין למה לרשום — שואלים במקום ליפול ל-'sharon' (הורה מעתלית נרשם לשרון, 17.9)
     if (!session.collectedData.area_code) {
       return {
-        text: `לפני שנמשיך — *לאיזה אזור מבקשים רישום לצהרון?*\n\n*1* — דרום השרון / חוף השרון\n*2* — חוף הכרמל\n*3* — גני ילדים תל אביב`,
+        text: botText('register_class_need_area'),
         nextFlow: 'register_area',
       }
     }
@@ -641,11 +608,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
         phone:     session.phone,
       })
       return {
-        text:
-          `בדקתי — *יש מקום* עבור ${childName} ב${areaLabel}! 🎉\n\n` +
-          `📋 *למילוי הטופס הרשמי:*\n${formUrl}\n\n` +
-          `בסיום מילוי הטופס יופיע קישור להסדרת התשלום 💳\n` +
-          `(אפשר גם לשלם אחרת — פשוט כתבו לנו אחרי הרישום)`,
+        text: botText('register_has_spot', { 'ילד': childName, 'אזור': areaLabel, 'קישור': formUrl }),
         isComplete: true,
         createTask: {
           type:        'רישום',
@@ -655,11 +618,11 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
       }
     } else {
       return {
-        text:
-          `כרגע *אין מקום פנוי* לצהרון ב${areaLabel} 😔\n\n` +
-          `אבל לא הכל אבוד! אפשר להוסיף את *${childName}* לרשימת ההמתנה — ` +
-          `אתם מספר *${capacity.waitingListPosition}* ברשימה 💛\n\n` +
-          `ברגע שיתפנה מקום ניצור קשר.\n\n*להצטרף לרשימת ההמתנה?* (כן / לא)`,
+        text: botText('register_no_spot', {
+          'אזור': areaLabel,
+          'ילד': childName,
+          'מיקום': String(capacity.waitingListPosition),
+        }),
         nextFlow: 'register_waiting_confirm',
       }
     }
@@ -683,10 +646,11 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
         })
         const areaLabel = AREAS[areaCode]?.label ?? areaCode
         return {
-          text:
-            `✅ *נוסף לרשימת ההמתנה!*\n\n` +
-            `*${childName}* ב${areaLabel} — מיקום *${result.position}* ברשימה 🌟\n\n` +
-            `ברגע שיתפנה מקום נצור קשר. תודה! 💛`,
+          text: botText('register_waitlist_added', {
+            'ילד': childName,
+            'אזור': areaLabel,
+            'מיקום': String(result.position),
+          }),
           isComplete: true,
           createTask: {
             type:        'רשימת המתנה',
@@ -696,21 +660,19 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
         }
       } catch {
         return {
-          text:
-            `✅ *נרשמת לרשימת ההמתנה!*\n\n` +
-            `ברגע שיתפנה מקום ל*${childName}* ניצור קשר 🌟`,
+          text: botText('register_waitlist_added_fallback', { 'ילד': childName }),
           isComplete: true,
         }
       }
     } else {
       return {
-        text: `בסדר גמור 😊 אם תשנו דעתכם — כתבו לנו בכל עת!`,
+        text: botText('register_waitlist_declined'),
         isComplete: true,
       }
     }
   }
 
-  return { text: '😊 כתבו *"רישום לצהרון"* להתחיל מחדש.' }
+  return { text: botText('register_restart') }
 }
 
 
