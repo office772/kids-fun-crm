@@ -47,7 +47,7 @@ function check(name: string, ok: boolean, detail: string) {
 }
 
 // ─── עוזרים לזיהוי תגובות "רעות" ─────────────────────────────────────────────
-const isWelcomeMenu   = (t: string) => t.includes('*1* — רישום לצהרון') && t.includes('*6* — איסוף מוקדם')
+const isWelcomeMenu   = (t: string) => t.includes('*1* - רישום לצהרון') && t.includes('*6* - איסוף מוקדם')
 const isNotUnderstood = (t: string) => /לא הבנתי|לא הצלחתי להבין/.test(t)
 
 // ─── 1. סיווג כוונה (A1) ─────────────────────────────────────────────────────
@@ -468,7 +468,7 @@ async function miscCases() {
     const s = makeSession('camp_problem_desc')
     const r = await processMessage(s, 'האתר לא נותן לי לשלם')
     check('camp_problem_desc — תיאור בעיה עם "לשלם" לא קופץ לתפריט תשלומים',
-      !/\*1\* — סטטוס התשלום/.test(r.text) && r.intent !== 'בדיקת_תשלום' || r.createTask != null,
+      !/\*1\* - סטטוס התשלום/.test(r.text) && r.intent !== 'בדיקת_תשלום' || r.createTask != null,
       `text=${r.text.slice(0, 60)} intent=${r.intent}`)
   }
   {
@@ -599,7 +599,7 @@ function botMessagesCases() {
   check('botText — תפריט = ברירת המחדל בלי cache',
     botText('menu') === BOT_MESSAGE_REGISTRY.menu.default, 'צריך את ברירת המחדל')
   check('buildDidNotUnderstand — עדיין מכיל "לא הצלחתי להבין" + התפריט',
-    /לא הצלחתי להבין/.test(buildDidNotUnderstand()) && buildDidNotUnderstand().includes('*1* — רישום לצהרון'),
+    /לא הצלחתי להבין/.test(buildDidNotUnderstand()) && buildDidNotUnderstand().includes('*1* - רישום לצהרון'),
     buildDidNotUnderstand().slice(0, 40))
   check('buildEscalationMessage — מחזיר טקסט הסלמה (לפי שעה)',
     /קורלי/.test(buildEscalationMessage()), buildEscalationMessage().slice(0, 40))
@@ -627,6 +627,12 @@ function botMessagesCases() {
   }
   check(`משתנים — כל ${Object.keys(BOT_MESSAGE_REGISTRY).length} ההודעות עקביות (default ↔ vars)`,
     badKeys.length === 0, `לא עקבי: ${badKeys.join(', ')}`)
+
+  // העדפת עינת: בלי מקפים ארוכים (— / –) בהודעות — רק מקף רגיל.
+  const dashKeys = Object.entries(BOT_MESSAGE_REGISTRY)
+    .filter(([, def]) => /[—–]/.test(def.default)).map(([k]) => k)
+  check('סגנון — אין מקפים ארוכים בהודעות',
+    dashKeys.length === 0, `מקף ארוך ב: ${dashKeys.join(', ')}`)
 
   // ברכת פתיחה ובטיחות — ברירת המחדל בלי cache.
   check('welcome — {ברכה}/{שם_בוט}/{תפריט} מוזרקים',

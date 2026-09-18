@@ -1,14 +1,14 @@
-// ─── "קול הבוט" — הפרסונה והטון של תשובות ה-LLM ───────────────────────────────
+// ─── "קול הבוט" - הפרסונה והטון של תשובות ה-LLM ───────────────────────────────
 // הלקוח מגדיר את קול הבוט במסך "הגדרות → קול הבוט". הערכים נשמרים בטבלת `settings`
 // (מפתחות bot_*). הם מוזרקים ל-system prompt של ה-LLM (llm-fallback + media-handler).
 //
-// ⚠️ עיקרון קריטי: כל עוד הלקוח לא מילא כלום — buildVoicePromptBlock מחזיר '' והפרומפט
+// ⚠️ עיקרון קריטי: כל עוד הלקוח לא מילא כלום - buildVoicePromptBlock מחזיר '' והפרומפט
 //    זהה *בדיוק* להיום. כך אנחנו לא נוגעים בטון עד שהלקוח מחליט על פרסונה.
 import { getAllSettings } from './settings-db'
 
 // המפתחות שהמסך עורך (הכל טקסט חופשי; ריק = לא מוגדר).
 export const BOT_VOICE_KEYS = [
-  'bot_persona_name',   // שם הפרסונה, למשל "ג'וני" (ברירת מחדל: אין — "העוזר/ת")
+  'bot_persona_name',   // שם הפרסונה, למשל "ג'וני" (ברירת מחדל: אין - "העוזר/ת")
   'bot_gender',         // male | female | neutral (ריק = כמו היום, נקבה)
   'bot_formality',      // תיאור חופשי: "חמה ולא רשמית" / "רשמית ומקצועית"
   'bot_emoji_level',    // none | low | high
@@ -66,7 +66,7 @@ export async function getBotVoice(settings?: Record<string, string>): Promise<Bo
   }
 }
 
-// האם הוגדר משהו בכלל? (אם לא — לא מזריקים כלום ל-prompt.)
+// האם הוגדר משהו בכלל? (אם לא - לא מזריקים כלום ל-prompt.)
 export function isVoiceConfigured(v: BotVoice): boolean {
   return Boolean(
     v.personaName || v.gender || v.formality || v.emojiLevel ||
@@ -91,7 +91,7 @@ const EMOJI_GUIDE: Record<'none' | 'low' | 'high', string> = {
 export function buildVoicePromptBlock(v: BotVoice): string {
   if (!isVoiceConfigured(v)) return ''
 
-  const lines: string[] = ['== קול הבוט (הגדרת הלקוח — גובר על הנחיות הטון הכלליות) ==']
+  const lines: string[] = ['== קול הבוט (הגדרת הלקוח - גובר על הנחיות הטון הכלליות) ==']
 
   if (v.personaName) lines.push(`• שמך: "${v.personaName}". הצג/י את עצמך כך אם צריך.`)
   if (v.gender)      lines.push(`• מגדר: ${GENDER_GUIDE[v.gender]}`)

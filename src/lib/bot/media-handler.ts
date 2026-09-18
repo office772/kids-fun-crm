@@ -11,7 +11,7 @@ import type { BotResponse } from './flows'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-const MAX_FILE_BYTES = 8 * 1024 * 1024 // 8MB — מעבר לזה לא מורידים
+const MAX_FILE_BYTES = 8 * 1024 * 1024 // 8MB - מעבר לזה לא מורידים
 
 // סיומות מוכרות לפי סוג טיפול
 const IMAGE_EXT = /\.(jpe?g|png|webp|gif)(\?|$)/i
@@ -24,7 +24,7 @@ export interface MediaInfo {
   caption: string   // טקסט חופשי שנשלח לצד הקובץ (אם יש)
 }
 
-// כתובות של מדיה נכנסת (uChat / WhatsApp) — רק הן "קובץ" בלי סיומת מוכרת
+// כתובות של מדיה נכנסת (uChat / WhatsApp) - רק הן "קובץ" בלי סיומת מוכרת
 const MEDIA_HOST = /(uchat\.com\.au\/media\/|mmg\.whatsapp\.net|media\.whatsapp|lookaside\.fbsbx\.com)/i
 
 // מזהה אם ההודעה היא קובץ/תמונה. מחזיר null אם זו הודעת טקסט רגילה.
@@ -48,10 +48,11 @@ const MEDIA_SYSTEM_PROMPT = `את/ה העוזר/ת הדיגיטלי/ת של "Kid
 
 כללים:
 • תאר/י בקצרה מה זיהית בקובץ (למשל: "קיבלתי את האישור הרפואי של דנה 🙏").
-• אם זה מסמך שנוגע לרישום/תשלום/אישור רפואי — אמור/י שמעבירים לקורלי (הנציגה) לטיפול, וצרף/י createTask=true עם תיאור מדויק של מה שיש בקובץ.
-• אם לא ברור למה הקובץ נשלח — שאל/י בעדינות במה לעזור.
+• אם זה מסמך שנוגע לרישום/תשלום/אישור רפואי - אמור/י שמעבירים לקורלי (הנציגה) לטיפול, וצרף/י createTask=true עם תיאור מדויק של מה שיש בקובץ.
+• אם לא ברור למה הקובץ נשלח - שאל/י בעדינות במה לעזור.
 • אל תמציא/י פרטים שלא מופיעים בקובץ. אל תיתן/י ייעוץ רפואי/משפטי.
 • קצר וחם: 1-3 משפטים + אמוג'י אחד-שניים.
+• השתמש/י במקף רגיל (-) בלבד. בלי מקפים ארוכים.
 
 ענה/י ב-JSON תקני בלבד:
 {"text": "ההודעה להורה", "createTask": false, "taskDescription": ""}`
@@ -73,17 +74,17 @@ async function downloadAsBase64(url: string): Promise<{ base64: string; mediaTyp
   }
 }
 
-// ניסוח ברירת מחדל כשאי אפשר לנתח — אישור קבלה + העברה לקורלי
+// ניסוח ברירת מחדל כשאי אפשר לנתח - אישור קבלה + העברה לקורלי
 function buildFallbackAck(caption: string): BotResponse {
   return {
     text:
       `קיבלתי את הקובץ 🙏\n\n` +
       `אני מעבירה אותו לקורלי, הנציגה שלנו, שתעבור עליו ותחזור אליך בהקדם 💛\n` +
-      `אם תרצו לזרז — אפשר לכתוב לי כאן במילים במה מדובר 😊`,
+      `אם תרצו לזרז - אפשר לכתוב לי כאן במילים במה מדובר 😊`,
     isComplete: true,
     createTask: {
       type: 'שאלה כללית',
-      description: `הורה שלח/ה קובץ בוואטסאפ${caption ? ` עם הכיתוב: "${caption.slice(0, 80)}"` : ''} — הבוט לא ניתח (סוג קובץ לא נתמך). לפתוח ולטפל.`,
+      description: `הורה שלח/ה קובץ בוואטסאפ${caption ? ` עם הכיתוב: "${caption.slice(0, 80)}"` : ''} - הבוט לא ניתח (סוג קובץ לא נתמך). לפתוח ולטפל.`,
       priority: 'גבוה',
     },
   }
@@ -94,7 +95,7 @@ export async function handleMediaMessage(
   session: BotSession,
   media: MediaInfo
 ): Promise<BotResponse> {
-  // קבצים שאי אפשר לנתח (וורד/אקסל/אודיו/וידאו/קישורים) — אישור קבלה + קורלי
+  // קבצים שאי אפשר לנתח (וורד/אקסל/אודיו/וידאו/קישורים) - אישור קבלה + קורלי
   if (media.kind === 'other') return buildFallbackAck(media.caption)
 
   const file = await downloadAsBase64(media.url)
@@ -131,7 +132,7 @@ export async function handleMediaMessage(
   try {
     const { getBotVoice, buildVoicePromptBlock } = await import('./bot-voice')
     voiceBlock = buildVoicePromptBlock(await getBotVoice())
-  } catch { /* לא חוסם — ממשיכים עם הפרומפט הרגיל */ }
+  } catch { /* לא חוסם - ממשיכים עם הפרומפט הרגיל */ }
 
   try {
     const response = await anthropic.messages.create({
@@ -166,7 +167,7 @@ export async function handleMediaMessage(
             ? {
                 createTask: {
                   type: 'שאלה כללית',
-                  description: parsed.taskDescription || `הורה שלח/ה קובץ — דורש טיפול (ראה שיחה)`,
+                  description: parsed.taskDescription || `הורה שלח/ה קובץ - דורש טיפול (ראה שיחה)`,
                   priority: 'גבוה' as const,
                 },
               }
@@ -174,7 +175,7 @@ export async function handleMediaMessage(
         }
       }
     }
-    // תשובה טקסטואלית נקייה בלי JSON — נשלח כמו שהיא
+    // תשובה טקסטואלית נקייה בלי JSON - נשלח כמו שהיא
     if (rawText.length > 10 && !rawText.trimStart().startsWith('{')) {
       return { text: rawText, isComplete: true }
     }

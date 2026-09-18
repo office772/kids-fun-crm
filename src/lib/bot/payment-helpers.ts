@@ -1,7 +1,7 @@
 // ─── PayPlus Integration ───────────────────────────────────────────────────
-// PayPlus REST API — https://docs.payplus.co.il/
+// PayPlus REST API - https://docs.payplus.co.il/
 //
-// Auth: נפרד — 'api-key' + 'secret-key' כ-HTTP headers (לא JSON)
+// Auth: נפרד - 'api-key' + 'secret-key' כ-HTTP headers (לא JSON)
 // Endpoint: POST https://restapi.payplus.co.il/api/v1.0/PaymentPages/generateLink
 // Sandbox:  POST https://restapidev.payplus.co.il/api/v1.0/PaymentPages/generateLink
 //
@@ -20,12 +20,12 @@ import { resolveMonthlyFee } from './pricing'
 import { getCachedSettings } from './settings-db'
 
 export type PaymentMethod =
-  | 'credit'           // 💳 כרטיס אשראי — חיוב חודשי דרך PayPlus
-  | 'standing_order'   // 🏦 הוראת קבע — PayPlus recurring
-  | 'cash'             // 💵 מזומן — תשלום ידני בתחילת כל חודש
-  | 'checks'           // 📝 צ׳קים — מראש
+  | 'credit'           // 💳 כרטיס אשראי - חיוב חודשי דרך PayPlus
+  | 'standing_order'   // 🏦 הוראת קבע - PayPlus recurring
+  | 'cash'             // 💵 מזומן - תשלום ידני בתחילת כל חודש
+  | 'checks'           // 📝 צ׳קים - מראש
   | 'bank_transfer'    // 🏛️ העברה בנקאית
-  | 'invoice_link'     // 🔗 קישור תשלום מיידי — חשבונית ירוקה
+  | 'invoice_link'     // 🔗 קישור תשלום מיידי - חשבונית ירוקה
 
 export interface PayPlusOrderParams {
   registrationId: string
@@ -55,7 +55,7 @@ function getPayPlusBase(): string {
 }
 
 // ─── לינקי תשלום PayPlus סטטיים ──────────────────────────────────────────────
-// generateLink API חסום בחשבון זה — משתמשים בלינקים קיימים מהדשבורד.
+// generateLink API חסום בחשבון זה - משתמשים בלינקים קיימים מהדשבורד.
 // עדכן כתובות לפי אזור אם תקבלי לינקים מתאימים יותר.
 export const PAYPLUS_STATIC_LINKS: Record<string, string> = {
   carmel:  'https://payments.payplus.co.il/l/743bc04a-0e38-4968-afce-24ddcc2d3a4f', // עתלית ₪935
@@ -83,7 +83,7 @@ export async function createPayPlusPaymentLink(
 ): Promise<PayPlusOrderResult> {
   const { isDemoMode } = await import('@/lib/demo-data')
 
-  // ─── דמו מוד (demo data בלבד) — סימולציה ─────────────────────────────────
+  // ─── דמו מוד (demo data בלבד) - סימולציה ─────────────────────────────────
   if (isDemoMode()) {
     return simulatePayPlusResponse(params)
   }
@@ -92,25 +92,25 @@ export async function createPayPlusPaymentLink(
   const secretKey = process.env.PAYPLUS_SECRET_KEY
   const pageUid   = process.env.PAYPLUS_PAGE_UID
 
-  // ─── אין מפתחות API — fallback ללינקים סטטיים (כמו לפני הפתיחה) ─────────
+  // ─── אין מפתחות API - fallback ללינקים סטטיים (כמו לפני הפתיחה) ─────────
   if (!apiKey || !secretKey || !pageUid) {
     const staticUrl = PAYPLUS_STATIC_LINKS[params.areaCode] ?? PAYPLUS_STATIC_LINKS.default
     if (staticUrl) {
-      console.log(`[PayPlus] No API keys — static link for area=${params.areaCode}`)
+      console.log(`[PayPlus] No API keys - static link for area=${params.areaCode}`)
       return { success: true, paymentUrl: staticUrl }
     }
-    return { success: false, error: 'PayPlus לא מוגדר — בדוק .env.local' }
+    return { success: false, error: 'PayPlus לא מוגדר - בדוק .env.local' }
   }
 
   // ─── מכאן והלאה: קריאה אמיתית ל-API (sandbox או prod לפי PAYPLUS_SANDBOX) ─
 
   try {
     // ⚠️ refURL של PayPlus (success/fail/callback) חייבים להצביע לאפליקציית Next עצמה,
-    // ולא ל-NEXT_PUBLIC_APP_URL שמצביע לאתר WordPress (kidsandfun.co.il) ומחזיר 404 —
+    // ולא ל-NEXT_PUBLIC_APP_URL שמצביע לאתר WordPress (kidsandfun.co.il) ומחזיר 404 -
     // מה שגרם גם ל-404 אחרי תשלום וגם לכך שה-webhook לא נקרא (תשלומים/רישומים לא נרשמו).
     const appUrl = process.env.PAYPLUS_RETURN_BASE_URL ?? 'https://kids-fun-app-psi.vercel.app'
 
-    // ─── בסביבת Sandbox — סכום מקסימלי 5 ₪ לעסקה (כך PayPlus דורשים, אחרת חסימת החשבון).
+    // ─── בסביבת Sandbox - סכום מקסימלי 5 ₪ לעסקה (כך PayPlus דורשים, אחרת חסימת החשבון).
     // הסכום המקורי נשמר ב-description כדי שיהיה גלוי בבדיקות.
     const isSandbox  = process.env.PAYPLUS_SANDBOX === 'true'
     const realAmount = params.amount
@@ -129,13 +129,13 @@ export async function createPayPlusPaymentLink(
       sendEmailApproval:  true,
       sendEmailFailure:   true,
       send_failure_callback: true,   // קריטי: callback גם על כשלי חיוב, לא רק הצלחות
-      // refURL_callback מקבל את האיוונט בכל חיוב חדש — כולל חיובים חודשיים מתחדשים
+      // refURL_callback מקבל את האיוונט בכל חיוב חדש - כולל חיובים חודשיים מתחדשים
       refURL_success:  `${appUrl}/payment-success?reg=${params.registrationId}`,
       refURL_failure:  `${appUrl}/payment-fail?reg=${params.registrationId}`,
       refURL_cancel:   `${appUrl}/payment-fail?reg=${params.registrationId}&cancelled=1`,
-      // אם הוגדר PAYPLUS_WEBHOOK_SECRET — מצרפים אותו ל-callback כדי שיעבור אימות בצד שלנו
+      // אם הוגדר PAYPLUS_WEBHOOK_SECRET - מצרפים אותו ל-callback כדי שיעבור אימות בצד שלנו
       refURL_callback: `${appUrl}/api/webhooks/payplus${process.env.PAYPLUS_WEBHOOK_SECRET ? `?secret=${encodeURIComponent(process.env.PAYPLUS_WEBHOOK_SECRET)}` : ''}`,
-      // לקוח + פריטים — פותחים את כרטיס הלקוח ב-PayPlus ומופיע בחשבונית
+      // לקוח + פריטים - פותחים את כרטיס הלקוח ב-PayPlus ומופיע בחשבונית
       customer: {
         customer_name: params.parentName,
         phone:         params.phone.replace(/\D/g, '').replace(/^0/, '972'),
@@ -146,7 +146,7 @@ export async function createPayPlusPaymentLink(
         price:    amount,
         vat_type: 1,                 // 1 = כולל מע"מ
       }],
-      // external_uid — המזהה שלנו לזיהוי הרישום, מוחזר בכל callback
+      // external_uid - המזהה שלנו לזיהוי הרישום, מוחזר בכל callback
       order: {
         external_uid: params.registrationId,
         description:  params.description,
@@ -155,11 +155,11 @@ export async function createPayPlusPaymentLink(
       lang:       'he',
     }
 
-    // ─── הוראת קבע — הגדרות חיוב חוזר (לפי דוק PayPlus) ─────────────────
+    // ─── הוראת קבע - הגדרות חיוב חוזר (לפי דוק PayPlus) ─────────────────
     // recurring_type: 0=Daily, 1=Weekly, 2=Monthly | range: כל כמה (1=כל חודש)
     // number_of_charges: 0 = ללא הגבלה
     if (params.paymentType === 'standing_order') {
-      // start_date — יום בחודש (1-31) לא תאריך מלא! PayPlus יחייב בכל חודש ביום הזה.
+      // start_date - יום בחודש (1-31) לא תאריך מלא! PayPlus יחייב בכל חודש ביום הזה.
       // נבדק מול ה-API ב-2026-06-15: ערך 16 → success, "2026-06-16" → integer error.
       const tomorrow = new Date()
       tomorrow.setDate(tomorrow.getDate() + 1)
@@ -171,7 +171,7 @@ export async function createPayPlusPaymentLink(
       }
     }
 
-    // ─── PayPlus auth — headers נפרדים (לא JSON) ──────────────────────────
+    // ─── PayPlus auth - headers נפרדים (לא JSON) ──────────────────────────
     const res = await fetch(`${getPayPlusBase()}/PaymentPages/generateLink`, {
       method:  'POST',
       headers: {
@@ -190,7 +190,7 @@ export async function createPayPlusPaymentLink(
     // תגובת PayPlus:
     // { results: { status: 'success'|'error', code: 0|1, description: '...' }, data: {...} }
     // 🔑 status הוא 'success'/'error' (string), code הוא 0=הצלחה / 1=כשל.
-    //    בעבר הקוד בדק status === '1' — זה היה שגוי וגרם לכל הקישורים להיכשל!
+    //    בעבר הקוד בדק status === '1' - זה היה שגוי וגרם לכל הקישורים להיכשל!
     const data = await res.json()
 
     if (data?.results?.code !== 0) {
@@ -212,7 +212,7 @@ export async function createPayPlusPaymentLink(
   }
 }
 
-// ─── חשבונית ירוקה — קישור תשלום מיידי ─────────────────────────────────────
+// ─── חשבונית ירוקה - קישור תשלום מיידי ─────────────────────────────────────
 // בדמו: מחזיר URL לדוגמה
 // בפרודקשן: יוצר מסמך ב-API ומחזיר קישור אמיתי
 export async function getInvoiceLink(params?: {
@@ -241,7 +241,7 @@ export async function getInvoiceLink(params?: {
     }
   }
 
-  // ─── fallback — קישור שמור ב-bot_assets ──────────────────────────────────
+  // ─── fallback - קישור שמור ב-bot_assets ──────────────────────────────────
   try {
     const { createServiceClient } = await import('@/lib/supabase/server')
     const supabase = createServiceClient()
@@ -257,7 +257,7 @@ export async function getInvoiceLink(params?: {
   }
 }
 
-// ─── פרסונליזציה — טעינת נתוני רישום ההורה ─────────────────────────────────
+// ─── פרסונליזציה - טעינת נתוני רישום ההורה ─────────────────────────────────
 // נקרא בתחילת payment_setup_start כדי לאכלס את session.collectedData
 export async function loadParentRegistrationContext(
   phone: string,
@@ -338,7 +338,7 @@ export async function loadParentRegistrationContext(
       school    = child.school ?? null
       className = child.class_name ?? null
     } else {
-      // אין רישום פורמלי — לחפש ילד צהרון אצל ההורה (ייבוא היסטורי)
+      // אין רישום פורמלי - לחפש ילד צהרון אצל ההורה (ייבוא היסטורי)
       const { data: kid } = await supabase
         .from('children')
         .select('id, name, area_code, school, class_name')
@@ -359,14 +359,14 @@ export async function loadParentRegistrationContext(
     if (className) session.collectedData.child_class  = className
 
     // ─── מחיר דינמי לפי בית-ספר/כיתה (מודל קורלי) ─────────────────────────────
-    // resolveMonthlyFee מחזיר null כשאי-אפשר לקבוע בוודאות — אז לא קובעים
+    // resolveMonthlyFee מחזיר null כשאי-אפשר לקבוע בוודאות - אז לא קובעים
     // סכום מנוחש; זרימת התשלום תזהה זאת ותפנה לנציגה במקום לחייב סכום שגוי.
     const fee = resolveMonthlyFee({ area_code: session.collectedData.area_code, school, class_name: className })
     if (fee != null) {
       session.collectedData.monthly_fee = String(fee)
     } else {
       session.collectedData.fee_unresolved = '1'
-      console.log(`[pricing] לא נקבע מחיר לבי"ס="${school}" כיתה="${className}" — נדרשת נציגה`)
+      console.log(`[pricing] לא נקבע מחיר לבי"ס="${school}" כיתה="${className}" - נדרשת נציגה`)
     }
 
   } catch (err) {
@@ -408,17 +408,17 @@ function formatPaymentStatusText(parentName: string | null, payments: PaymentRow
       : ''
 
   let text =
-    `🔍 *סטטוס תשלום${parentName ? ` — ${parentName}` : ''}*\n\n` +
+    `🔍 *סטטוס תשלום${parentName ? ` - ${parentName}` : ''}*\n\n` +
     `${emoji} *${latest.status}*` +
-    `${latest.amount ? ` — ₪${Number(latest.amount).toLocaleString()}` : ''}` +
+    `${latest.amount ? ` - ₪${Number(latest.amount).toLocaleString()}` : ''}` +
     `${latest.payment_type ? ` (${latest.payment_type})` : ''}` +
     progress +
     `${dateStr ? `\nעדכון אחרון: ${dateStr}` : ''}`
 
   if (latest.status === 'נכשל') {
-    text += `\n\n⚠️ נראה שיש חיוב שלא עבר — כתבו *"כשל תשלום"* ונסדר את זה ביחד 💛`
+    text += `\n\n⚠️ נראה שיש חיוב שלא עבר - כתבו *"כשל תשלום"* ונסדר את זה ביחד 💛`
   } else if (latest.status === 'ממתין') {
-    text += `\n\nכדי להסדיר את התשלום — כתבו *"אפשרויות תשלום"* 💛`
+    text += `\n\nכדי להסדיר את התשלום - כתבו *"אפשרויות תשלום"* 💛`
   } else {
     text += `\n\nהכל מסודר! יש שאלה? כתבו לנו 💛`
   }
@@ -451,11 +451,11 @@ export async function getPaymentStatusByPhone(phone: string): Promise<string | n
       .order('created_at', { ascending: false })
       .limit(1)
 
-    // נמצא הורה אך אין רשומת תשלום — לומר זאת במפורש (לא "לא נמצא")
+    // נמצא הורה אך אין רשומת תשלום - לומר זאת במפורש (לא "לא נמצא")
     if (!payments?.length) {
-      return `🔍 *סטטוס תשלום${parent.name ? ` — ${parent.name}` : ''}*\n\n` +
+      return `🔍 *סטטוס תשלום${parent.name ? ` - ${parent.name}` : ''}*\n\n` +
         `מצאתי אתכם במערכת, אבל *אין עדיין רשומת תשלום פעילה*.\n\n` +
-        `אם תרצו להסדיר תשלום — כתבו *"הסדרת תשלום"* ונתחיל יחד 💛`
+        `אם תרצו להסדיר תשלום - כתבו *"הסדרת תשלום"* ונתחיל יחד 💛`
     }
     return formatPaymentStatusText(parent.name, payments as PaymentRow[])
   } catch (err) {
@@ -472,7 +472,7 @@ export async function getPaymentStatusByChildName(childName: string): Promise<st
     const { createServiceClient } = await import('@/lib/supabase/server')
     const supabase = createServiceClient()
 
-    // התאמה מדויקת לשם הילד; אם אין — חיפוש מכיל
+    // התאמה מדויקת לשם הילד; אם אין - חיפוש מכיל
     let { data: children } = await supabase
       .from('children').select('id, name, parent_id')
       .ilike('name', childName.trim()).limit(2)
@@ -484,7 +484,7 @@ export async function getPaymentStatusByChildName(childName: string): Promise<st
       children = res.data
     }
 
-    // דורשים התאמה חד-משמעית — אם יש כמה ילדים עם אותו שם, לא מנחשים
+    // דורשים התאמה חד-משמעית - אם יש כמה ילדים עם אותו שם, לא מנחשים
     if (!children || children.length !== 1) return null
 
     const { data: parent } = await supabase
@@ -498,10 +498,10 @@ export async function getPaymentStatusByChildName(childName: string): Promise<st
       .order('created_at', { ascending: false })
       .limit(1)
 
-    // נמצא הילד/ה אך אין רשומת תשלום — לומר זאת (במקום "לא אותר חד-משמעית")
+    // נמצא הילד/ה אך אין רשומת תשלום - לומר זאת (במקום "לא אותר חד-משמעית")
     if (!payments?.length) {
       return `🔍 מצאתי את *${children[0].name}* במערכת, אבל *אין עדיין רשומת תשלום פעילה*.\n\n` +
-        `אם תרצו להסדיר תשלום — כתבו *"הסדרת תשלום"* ונתחיל 💛`
+        `אם תרצו להסדיר תשלום - כתבו *"הסדרת תשלום"* ונתחיל 💛`
     }
     return formatPaymentStatusText(parent?.name ?? children[0].name, payments as PaymentRow[])
   } catch (err) {
@@ -513,7 +513,7 @@ export async function getPaymentStatusByChildName(childName: string): Promise<st
 // ─── מציאת הוראת קבע פעילה לחידוש כרטיס ──────────────────────────────────────
 // ⚠️ S1 (אתגור 17.9): הזיהוי "טלפון *או* שם ילד" איפשר למספר זר שהקליד שם של
 // ילד מוכר לקבל קישור לעדכון הכרטיס בהוראת הקבע של משפחה אחרת.
-// מעכשיו: ההורה מזוהה *רק* לפי הטלפון, ואם נמסר שם ילד/ה — הוא חייב להיות
+// מעכשיו: ההורה מזוהה *רק* לפי הטלפון, ואם נמסר שם ילד/ה - הוא חייב להיות
 // אחד מהילדים של אותו הורה. אין התאמה → null, ונציגה מטפלת ידנית.
 export async function findRecurringForRenewal(
   phone: string,
@@ -544,7 +544,7 @@ export async function findRecurringForRenewal(
         .from('children').select('id')
         .eq('parent_id', parent.id).ilike('name', `%${name}%`).limit(1)
       if (!kids?.length) {
-        console.warn('[findRecurringForRenewal] child name does not belong to the calling phone — refusing')
+        console.warn('[findRecurringForRenewal] child name does not belong to the calling phone - refusing')
         return null
       }
     }
@@ -574,7 +574,7 @@ export function formatBankTransferMessage(): string {
     `חשבון: *${b.accountNumber}*\n` +
     `שם חשבון: *${b.accountName}*\n\n` +
     `⚠️ ${b.note}\n\n` +
-    `לאחר ביצוע ההעברה — שלחו צילום מסך אישור`
+    `לאחר ביצוע ההעברה - שלחו צילום מסך אישור`
   )
 }
 
@@ -588,19 +588,19 @@ export function buildSpotOfferMessage(
   return (
     `היי ${parentFirstName}! 🎉\n\n` +
     `*יש לנו מקום פנוי!*\n\n` +
-    `*${childName}* ב${areaLabel} — אתם במקום *${waitingPosition}* ברשימת ההמתנה ` +
+    `*${childName}* ב${areaLabel} - אתם במקום *${waitingPosition}* ברשימת ההמתנה ` +
     `וכעת יש מקום זמין! 🌟\n\n` +
     `האם תרצו לאשר את הרישום ולסדר תשלום?\n\n` +
-    `*כן* — אשר/י ונתקדם לסידור תשלום 💛\n` +
-    `*לא* — תודה, נעבור לאדם הבא ברשימה`
+    `*כן* - אשר/י ונתקדם לסידור תשלום 💛\n` +
+    `*לא* - תודה, נעבור לאדם הבא ברשימה`
   )
 }
 
 // ─── עלות חודשית ברירת מחדל ─────────────────────────────────────────────────
-// ⚠️ זו נפילה אחרונה בלבד — כמעט תמיד מתמחרים לפי מסגרת (resolveMonthlyFee).
-export const DEFAULT_MONTHLY_FEE = 799  // ₪ — הקשיח (fallback סופי)
+// ⚠️ זו נפילה אחרונה בלבד - כמעט תמיד מתמחרים לפי מסגרת (resolveMonthlyFee).
+export const DEFAULT_MONTHLY_FEE = 799  // ₪ - הקשיח (fallback סופי)
 
-// המחיר ברירת המחדל מ-settings (מפתח default_monthly_fee) — עם fallback לקשיח 799.
+// המחיר ברירת המחדל מ-settings (מפתח default_monthly_fee) - עם fallback לקשיח 799.
 // נקרא מה-cache הסינכרוני (primeSettingsCache הוזרק בתחילת הבקשה); לא הוזרק → 799.
 export function getDefaultMonthlyFee(): number {
   const raw = parseInt(getCachedSettings().default_monthly_fee || '', 10)

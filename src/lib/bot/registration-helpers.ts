@@ -75,7 +75,7 @@ export async function areaFromSchoolName(text: string): Promise<string | null> {
 
 // רשימת האזורים שאנחנו מפעילים בהם — לתשובה כשלא זיהינו את מה שההורה כתב
 export function servedAreasText(): string {
-  return Object.values(AREAS).map((a, i) => `*${i + 1}* — ${a.label}`).join('\n')
+  return Object.values(AREAS).map((a, i) => `*${i + 1}* - ${a.label}`).join('\n')
 }
 
 // ─── בדיקת קיבולת ──────────────────────────────────────────────────────────

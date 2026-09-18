@@ -5,7 +5,7 @@
 //   פקודות בזק מכל מצב: "החזר 05..." / "השתק 05..."
 //
 // הפרדת מצבים: מצב הניהול חי ב-bot_sessions (current_flow = admin_*). כל עוד
-// קורלי בתוך מצב ניהול — שום הודעה לא מגיעה למסלולי ההורה. כל תשובת ניהול
+// קורלי בתוך מצב ניהול - שום הודעה לא מגיעה למסלולי ההורה. כל תשובת ניהול
 // מסומנת 👩‍💼 כדי שתמיד יהיה ברור באיזה מצב היא.
 
 import type { createServiceClient } from '@/lib/supabase/server'
@@ -15,27 +15,27 @@ type Supa = ReturnType<typeof createServiceClient>
 const SITE_BASE = 'https://kids-fun-app-psi.vercel.app'
 
 const ADMIN_MENU =
-  `👩‍💼 *מסלול ניהול — Kids & Fun*\n\n` +
-  `*1* — 📋 פניות פתוחות\n` +
-  `*2* — 🔍 מצב הורה (טלפון או שם)\n` +
-  `*3* — 📊 סיכום היום\n` +
-  `*4* — 🔇 השתקת בוט לפונה\n` +
-  `*5* — ▶️ החזרת בוט לפונה\n\n` +
-  `*יציאה* — חזרה למצב הורה-בודקת 🧪`
+  `👩‍💼 *מסלול ניהול - Kids & Fun*\n\n` +
+  `*1* - 📋 פניות פתוחות\n` +
+  `*2* - 🔍 מצב הורה (טלפון או שם)\n` +
+  `*3* - 📊 סיכום היום\n` +
+  `*4* - 🔇 השתקת בוט לפונה\n` +
+  `*5* - ▶️ החזרת בוט לפונה\n\n` +
+  `*יציאה* - חזרה למצב הורה-בודקת 🧪`
 
 // ⚠️ "מנהל" הוסר מהכניסה (אתגור 07/2026): הורה-בודק שכותב "מנהל" מתכוון
-//    לדבר עם מנהל — לא לפתוח תפריט ניהול. נשארות מילים שהן חד-משמעית פקודה.
+//    לדבר עם מנהל - לא לפתוח תפריט ניהול. נשארות מילים שהן חד-משמעית פקודה.
 const ENTRY_RE = /^(ניהול|אדמין|תפריט ניהול)$/
 const EXIT_RE  = /^(יציאה|סיום|חזרה|exit)$/i
 
 // ─── עזרי פורמט ───────────────────────────────────────────────────────────────
 function fmtPhone(p?: string | null): string {
-  if (!p) return '—'
+  if (!p) return '-'
   return p.replace(/^\+?972/, '0')
 }
 
 function fmtDate(iso?: string | null): string {
-  if (!iso) return '—'
+  if (!iso) return '-'
   return new Date(iso).toLocaleString('he-IL', {
     timeZone: 'Asia/Jerusalem', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
   })
@@ -86,7 +86,7 @@ async function saveAdminState(supabase: Supa, phone: string, state: AdminState |
 
 // ─── פעולות ───────────────────────────────────────────────────────────────────
 
-// 1 — פניות פתוחות (ממוינות: דחוף → גבוה → רגיל, חדשות קודם)
+// 1 - פניות פתוחות (ממוינות: דחוף → גבוה → רגיל, חדשות קודם)
 async function listOpenTasks(supabase: Supa, phone: string): Promise<string> {
   const { data: tasks } = await supabase
     .from('tasks')
@@ -97,7 +97,7 @@ async function listOpenTasks(supabase: Supa, phone: string): Promise<string> {
 
   if (!tasks?.length) {
     await saveAdminState(supabase, phone, { flow: 'admin_menu' })
-    return `👩‍💼 אין פניות פתוחות — הכל טופל! 🎉\n\n${ADMIN_MENU}`
+    return `👩‍💼 אין פניות פתוחות - הכל טופל! 🎉\n\n${ADMIN_MENU}`
   }
 
   const weight = (p: string) => (p === 'דחוף' ? 0 : p === 'גבוה' ? 1 : 2)
@@ -108,7 +108,7 @@ async function listOpenTasks(supabase: Supa, phone: string): Promise<string> {
     const dot = t.priority === 'דחוף' ? '🔴' : t.priority === 'גבוה' ? '🟠' : '🔵'
     const who = parent?.name ? `${parent.name} (${fmtPhone(parent.phone)})` : 'ללא הורה מזוהה'
     const desc = (t.description ?? '').replace(/\n/g, ' ').slice(0, 60)
-    return `*${i + 1}* ${dot} ${t.type} — ${who}\n${desc}${(t.description?.length ?? 0) > 60 ? '…' : ''}`
+    return `*${i + 1}* ${dot} ${t.type} - ${who}\n${desc}${(t.description?.length ?? 0) > 60 ? '…' : ''}`
   })
 
   await saveAdminState(supabase, phone, { flow: 'admin_tasks', taskIds: sorted.map(t => t.id) })
@@ -116,7 +116,7 @@ async function listOpenTasks(supabase: Supa, phone: string): Promise<string> {
   return (
     `👩‍💼 *פניות פתוחות* (${tasks.length} סה"כ, מציגה עד 8):\n\n` +
     lines.join('\n\n') +
-    `\n\n✏️ לסגירת פנייה: *סגור 1* (לפי המספר)\n*תפריט* — חזרה · *יציאה* — סיום`
+    `\n\n✏️ לסגירת פנייה: *סגור 1* (לפי המספר)\n*תפריט* - חזרה · *יציאה* - סיום`
   )
 }
 
@@ -133,7 +133,7 @@ async function closeTask(supabase: Supa, phone: string, state: AdminState, msg: 
     : `👩‍💼 ✅ פנייה ${m[1]} נסגרה (סומנה "טופל").\n\nכתבי *1* לרשימה מעודכנת, *תפריט* לתפריט, או *יציאה*.`
 }
 
-// 2 — מצב הורה לפי טלפון או שם
+// 2 - מצב הורה לפי טלפון או שם
 async function parentStatus(supabase: Supa, adminPhone: string, query: string): Promise<string> {
   const digits = query.replace(/\D/g, '')
   let parent: { id: string; name: string | null; phone: string | null; payplus_recurring_status: string | null } | null = null
@@ -168,18 +168,18 @@ async function parentStatus(supabase: Supa, adminPhone: string, query: string): 
 
   const kidsLine = children.data?.length
     ? children.data.map((c: { name: string | null; school: string | null }) => `${c.name}${c.school ? ` (${c.school})` : ''}`).join(', ')
-    : '—'
+    : '-'
   const regsLine = regs.data?.length
     ? regs.data.map((r: { type: string | null; status: string | null }) => `${r.type}: ${r.status}`).join(' · ')
     : 'אין רישומים'
   const pay = lastPayment.data?.[0]
   const payLine = pay
-    ? `${pay.status}${pay.amount ? ` ₪${pay.amount}` : ''} (${fmtDate(pay.paid_at ?? pay.created_at)})${pay.failure_reason ? ` — ${pay.failure_reason}` : ''}`
+    ? `${pay.status}${pay.amount ? ` ₪${pay.amount}` : ''} (${fmtDate(pay.paid_at ?? pay.created_at)})${pay.failure_reason ? ` - ${pay.failure_reason}` : ''}`
     : 'אין תשלומים רשומים'
   const hokLine = parent.payplus_recurring_status === 'active' ? 'פעילה ✅'
     : parent.payplus_recurring_status === 'failed' ? 'כשל חיוב 🔴'
     : parent.payplus_recurring_status === 'expired' ? 'כרטיס פג תוקף 🟡'
-    : '—'
+    : '-'
 
   return (
     `👩‍💼 *${parent.name ?? 'ללא שם'}* · ${fmtPhone(parent.phone)}\n\n` +
@@ -189,11 +189,11 @@ async function parentStatus(supabase: Supa, adminPhone: string, query: string): 
     `🏦 הוראת קבע: ${hokLine}\n` +
     `📌 פניות פתוחות: ${openTasks.count ?? 0}\n\n` +
     `💬 לשיחה המלאה: ${SITE_BASE}/c/${parent.id}\n\n` +
-    `*תפריט* — חזרה · *יציאה* — סיום`
+    `*תפריט* - חזרה · *יציאה* - סיום`
   )
 }
 
-// 3 — סיכום היום (שעון ישראל)
+// 3 - סיכום היום (שעון ישראל)
 async function dailySummary(supabase: Supa, phone: string): Promise<string> {
   const since = startOfTodayIsraelISO()
 
@@ -217,12 +217,12 @@ async function dailySummary(supabase: Supa, phone: string): Promise<string> {
     `✅ פניות שנסגרו: ${closedTasks.count ?? 0}\n` +
     `📝 רישומים חדשים: ${regs.count ?? 0}\n` +
     `💳 כשלי תשלום פתוחים (סה"כ): ${failures.count ?? 0}\n\n` +
-    `*תפריט* — חזרה · *יציאה* — סיום`
+    `*תפריט* - חזרה · *יציאה* - סיום`
   )
 }
 
-// 4/5 — השתקה/החזרה של הבוט לפונה.
-// ⚠️ פקודת בזק — לא נוגעת במצב ה-session: אם קורלי באמצע בדיקת-הורה היא נשארת שם,
+// 4/5 - השתקה/החזרה של הבוט לפונה.
+// ⚠️ פקודת בזק - לא נוגעת במצב ה-session: אם קורלי באמצע בדיקת-הורה היא נשארת שם,
 //    ואם היא במצב ניהול היא נשארת בו. כך "החזר 05..." לא גורר אותה לתפריט בלי כוונה.
 async function muteOrResume(supabase: Supa, adminPhone: string, targetRaw: string, action: 'mute' | 'resume'): Promise<string> {
   const phoneMatch = targetRaw.match(/972\d{8,9}|0\d{8,9}/)
@@ -237,12 +237,12 @@ async function muteOrResume(supabase: Supa, adminPhone: string, targetRaw: strin
   const ok = action === 'mute' ? await pauseBot(targetNs) : await resumeBot(targetNs)
   if (!ok) return `👩‍💼 הייתה תקלה מול uChat 😕 אפשר לנסות שוב או דרך המערכת.`
   return action === 'mute'
-    ? `👩‍💼 🔇 הבוט הושתק עבור ${phoneMatch[0]} — עכשיו את מדברת איתו ישירות.\nלהחזרה: *החזר ${phoneMatch[0]}*`
+    ? `👩‍💼 🔇 הבוט הושתק עבור ${phoneMatch[0]} - עכשיו את מדברת איתו ישירות.\nלהחזרה: *החזר ${phoneMatch[0]}*`
     : `👩‍💼 ▶️ הבוט חזר לפעולה עבור ${phoneMatch[0]} 💛`
 }
 
-// ─── עוזרת AI לניהול — שאלות חופשיות בתוך מצב ניהול ──────────────────────────
-// משוב עינת (05/07): התפריט לבד "לא חכם" — "תפרט לי מה ההודעות?" נתקל ב"לא הבנתי".
+// ─── עוזרת AI לניהול - שאלות חופשיות בתוך מצב ניהול ──────────────────────────
+// משוב עינת (05/07): התפריט לבד "לא חכם" - "תפרט לי מה ההודעות?" נתקל ב"לא הבנתי".
 // כל קלט שאינו מספר/פקודה נשלח ל-Claude עם תמונת-מצב חיה של המערכת.
 
 async function buildAdminContext(supabase: Supa): Promise<string> {
@@ -263,7 +263,7 @@ async function buildAdminContext(supabase: Supa): Promise<string> {
   const tasks = [...(tasksRes.data ?? [])].sort((a, b) => weight(a.priority) - weight(b.priority))
   const taskLines = tasks.map((t, i) => {
     const parent = (Array.isArray(t.parents) ? t.parents[0] : t.parents) as { name?: string; phone?: string } | null
-    return `${i + 1}. [${t.priority}] ${t.type} — ${parent?.name ?? 'ללא הורה'} (${fmtPhone(parent?.phone)}): ${(t.description ?? '').replace(/\n/g, ' ').slice(0, 120)} (${fmtDate(t.created_at)})`
+    return `${i + 1}. [${t.priority}] ${t.type} - ${parent?.name ?? 'ללא הורה'} (${fmtPhone(parent?.phone)}): ${(t.description ?? '').replace(/\n/g, ' ').slice(0, 120)} (${fmtDate(t.created_at)})`
   })
 
   const convLines = (convsRes.data ?? []).map((c: { phone: string | null; message_text: string | null; created_at: string; parents: unknown }) => {
@@ -293,16 +293,16 @@ async function adminLLM(supabase: Supa, phone: string, question: string, current
         `את עוזרת הניהול של "Kids & Fun" (צהרונים וקייטנות), עונה לנציגה קורלי בוואטסאפ.\n` +
         `כללים:\n` +
         `• עברית בלבד, קצר וברור, פתיחה ב-👩‍💼. מותר אמוג'י מדוד.\n` +
-        `• פורמט וואטסאפ בלבד: הדגשה עם *כוכבית בודדת* (לא **כפולה**), בלי כותרות #, בלי טבלאות. ענייני ותמציתי — עד ~12 שורות.\n` +
-        `• עני *רק* לפי נתוני המערכת שלמטה — אל תמציאי כלום. אם אין תשובה בנתונים, אמרי בכנות והפני לדשבורד.\n` +
-        `• לשאלה על הורה ספציפי שלא בנתונים — הציעי לכתוב את הטלפון או השם המלא (אפשרות 2 בתפריט).\n` +
+        `• פורמט וואטסאפ בלבד: הדגשה עם *כוכבית בודדת* (לא **כפולה**), בלי כותרות #, בלי טבלאות. ענייני ותמציתי - עד ~12 שורות.\n` +
+        `• עני *רק* לפי נתוני המערכת שלמטה - אל תמציאי כלום. אם אין תשובה בנתונים, אמרי בכנות והפני לדשבורד.\n` +
+        `• לשאלה על הורה ספציפי שלא בנתונים - הציעי לכתוב את הטלפון או השם המלא (אפשרות 2 בתפריט).\n` +
         `• מספרי הפניות ברשימה תואמים ל"סגור N".\n\n` +
         `== נתוני המערכת (עדכני לעכשיו) ==\n${context}`,
       messages: [{ role: 'user', content: question }],
     })
 
     const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : ''
-    if (text) return `${text}\n\n*תפריט* — חזרה · *יציאה* — סיום`
+    if (text) return `${text}\n\n*תפריט* - חזרה · *יציאה* - סיום`
   } catch (err) {
     console.error('[admin-llm] failed:', err)
   }
@@ -315,8 +315,8 @@ export async function handleAdminFlow(supabase: Supa, phone: string, message: st
   const msg = message.trim()
   const state = await loadAdminState(supabase, phone)
 
-  // פקודות בזק — עובדות מכל מצב, בלי להיכנס לתפריט.
-  // ⚠️ לא להשתמש ב-\b אחרי עברית — word boundary ב-JS הוא ASCII בלבד ולא נתפס.
+  // פקודות בזק - עובדות מכל מצב, בלי להיכנס לתפריט.
+  // ⚠️ לא להשתמש ב-\b אחרי עברית - word boundary ב-JS הוא ASCII בלבד ולא נתפס.
   // ⚠️ תנאי (אתגור 07/2026): רק אם יש מספר טלפון בהודעה או שאנחנו במצב ניהול.
   //    אחרת "החזר לי את הכסף" מהורה-בודק היה נתפס כפקודת אדמין (קטגוריה 21).
   const hasPhone = /972\d{8,9}|0\d{8,9}/.test(msg)
@@ -327,9 +327,9 @@ export async function handleAdminFlow(supabase: Supa, phone: string, message: st
     return muteOrResume(supabase, phone, msg, 'mute')
   }
 
-  // "סגור N" אחרי שמצב הניהול פג (30 דק') — הכוונה ברורה, לא שולחים למסלול הורה
+  // "סגור N" אחרי שמצב הניהול פג (30 דק') - הכוונה ברורה, לא שולחים למסלול הורה
   if (!state && /^סגור\s+\d{1,2}$/.test(msg)) {
-    return `👩‍💼 מצב הניהול הסתיים (עברו 30 דקות) ⏳\nכתבי *ניהול*, ואז *1* להצגת הרשימה מחדש — ואז אפשר לסגור.`
+    return `👩‍💼 מצב הניהול הסתיים (עברו 30 דקות) ⏳\nכתבי *ניהול*, ואז *1* להצגת הרשימה מחדש - ואז אפשר לסגור.`
   }
 
   // כניסה למצב ניהול
@@ -344,7 +344,7 @@ export async function handleAdminFlow(supabase: Supa, phone: string, message: st
   // יציאה ממצב ניהול
   if (EXIT_RE.test(msg)) {
     await saveAdminState(supabase, phone, null)
-    return `✅ יצאת ממצב ניהול — חזרת למצב הורה-בודקת 🧪\nלחזרה: כתבי *ניהול*`
+    return `✅ יצאת ממצב ניהול - חזרת למצב הורה-בודקת 🧪\nלחזרה: כתבי *ניהול*`
   }
 
   // חזרה לתפריט
@@ -381,6 +381,6 @@ export async function handleAdminFlow(supabase: Supa, phone: string, message: st
   }
 
   // שאלה חופשית בתוך מצב ניהול → עוזרת ה-AI עם נתוני המערכת החיים
-  // (לא דולף למסלול הורה; משוב עינת 05/07 — "חייב מסלול שהוא גם חכם")
+  // (לא דולף למסלול הורה; משוב עינת 05/07 - "חייב מסלול שהוא גם חכם")
   return adminLLM(supabase, phone, msg, state.flow)
 }

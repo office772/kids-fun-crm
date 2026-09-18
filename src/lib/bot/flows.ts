@@ -859,7 +859,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
 
       if (result) {
         const payplusLine = result.payplusCancelled
-          ? `\n💳 *הוראת הקבע ב-PayPlus בוטלה אוטומטית* — לא יבוצעו חיובים נוספים.\n`
+          ? `\n💳 *הוראת הקבע ב-PayPlus בוטלה אוטומטית* - לא יבוצעו חיובים נוספים.\n`
           : `\n`
         return {
           text: botText('cancel_done_before15', { 'ילד': result.childName, 'תשלום': payplusLine }),
@@ -926,7 +926,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
 
       if (result) {
         const payplusLine = result.payplusCancelled
-          ? `\n💳 *הוראת הקבע ב-PayPlus בוטלה אוטומטית* — לא יבוצעו חיובים נוספים אחרי החודש הבא.\n`
+          ? `\n💳 *הוראת הקבע ב-PayPlus בוטלה אוטומטית* - לא יבוצעו חיובים נוספים אחרי החודש הבא.\n`
           : `\n`
         return {
           text: botText('cancel_done_after15', { 'ילד': result.childName, 'תשלום': payplusLine }),
@@ -1968,7 +1968,7 @@ async function resolvePaymentSchool(session: BotSession): Promise<BotResponse> {
     }
     session.collectedData.payment_setup_school_list = names.join('||')
     return {
-      text: botText('payset_school_menu', { 'מסגרות': names.map((s, i) => `*${i + 1}* — ${s}`).join('\n') }),
+      text: botText('payset_school_menu', { 'מסגרות': names.map((s, i) => `*${i + 1}* - ${s}`).join('\n') }),
       nextFlow: 'payment_setup_school',
     }
   } catch {
@@ -2017,8 +2017,8 @@ async function finalizePaymentLink(session: BotSession): Promise<BotResponse> {
   const firstName   = session.parentName?.split(' ')[0] ?? ''
   const isStanding  = session.collectedData.payment_method === 'standing_order'
   const description = isStanding
-    ? `הוראת קבע — צהרון Kids & Fun | ${childName}`
-    : `תשלום חודשי — צהרון Kids & Fun | ${childName}`
+    ? `הוראת קבע - צהרון Kids & Fun | ${childName}`
+    : `תשלום חודשי - צהרון Kids & Fun | ${childName}`
 
   if (!amount || amount <= 0) return paymentToStaff(session, 'סכום לא נקבע')
 
@@ -2081,12 +2081,12 @@ export async function handlePaymentSetupFlow(
 
     // ── intro מותאם אישית ─────────────────────────────────────────────────
     const personalInfo = childName
-      ? `עבור *${childName}*${areaLabel ? ` (${areaLabel})` : ''} — *${amount}₪/חודש*\n\n`
+      ? `עבור *${childName}*${areaLabel ? ` (${areaLabel})` : ''} - *${amount}₪/חודש*\n\n`
       : ''
 
     const intro = fromSpot
       ? `מעולה! 🎉 נסדר עכשיו את התשלום עבור *${childName}*${areaLabel ? ` ב${areaLabel}` : ''} (${amount}₪/חודש).\n\n`
-      : `*הסדרת תשלום — Kids & Fun* 💛\n\n${personalInfo}`
+      : `*הסדרת תשלום - Kids & Fun* 💛\n\n${personalInfo}`
 
     return {
       text: botText('payset_intro_menu', { 'פתיחה': intro }),
@@ -2261,7 +2261,7 @@ export async function handlePaymentSetupFlow(
       : (list.find(s => m.length >= 2 && s.includes(m)) ?? null)
     if (!chosen) {
       return {
-        text: botText('payset_school_reselect', { 'מסגרות': list.map((s, i) => `*${i + 1}* — ${s}`).join('\n') }),
+        text: botText('payset_school_reselect', { 'מסגרות': list.map((s, i) => `*${i + 1}* - ${s}`).join('\n') }),
         nextFlow: 'payment_setup_school',
       }
     }
