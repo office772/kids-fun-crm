@@ -24,7 +24,7 @@ import { isTestPhone as isAllowedPhone, TEST_PHONES } from '@/lib/bot/test-phone
 import { isAllowedPhoneAsync } from '@/lib/bot/test-phones-db'
 import { primeSettingsCache } from '@/lib/bot/settings-db'
 import { primeSchoolsCache } from '@/lib/bot/schools-db'
-import { primeBotMessagesCache } from '@/lib/bot/bot-messages-db'
+import { primeBotMessagesCache, botText } from '@/lib/bot/bot-messages-db'
 import { phoneVariants } from '@/lib/phone'
 import { HANDOFF_FLOW } from '@/lib/bot/handler'
 import { detectMedia, handleMediaMessage, type MediaInfo } from '@/lib/bot/media-handler'
@@ -331,7 +331,9 @@ async function createTask(
 // uChat מנתק את ה-External Request אחרי ~12 שניות. ניתוח PDF/תמונה (הורדה + Claude)
 // לקח יותר, והתשובה לא נמסרה להורה (uChat Error Logs, 17.9). לכן: עונים מיד
 // "קיבלתי", והניתוח ממשיך ברקע (waitUntil) ונשלח כהודעה נפרדת ל-user_ns של הפונה.
-const MEDIA_ACK = 'קיבלתי את הקובץ 🙏 רגע, אני עוברת עליו…'
+// טקסט האישור נקרא מ-bot_messages (מפתח 'media_ack') עם fallback לקשיח.
+// הקאש מוזרק בתחילת ה-POST לפני נתיב המדיה, כך שעריכה מהדשבורד תיכנס לתוקף.
+const mediaAck = () => botText('media_ack')
 
 async function finishMediaInBackground(
   supabase: ReturnType<typeof createServiceClient>,
@@ -480,27 +482,29 @@ export async function POST(req: NextRequest) {
   // 3.5 קובץ/תמונה שדורשים ניתוח → ack מיידי + המשך ברקע (A7). קבצים שלא
   //     מנתחים (וורד/אקסל/אודיו) נשארים בנתיב הרגיל — האישור שלהם מיידי ממילא.
   //     אחרי העברה לקורלי (שתיקה) — לא מגיבים גם לקבצים.
+  // טעינת settings + מסגרות + טקסטים פעם אחת לבקשה (שעות/מחיר/מחיר-מסגרת/הודעות) —
+  // flows וה-media-ack קוראים סינכרונית מה-cache. כשל DB → cache ריק → fallback קשיח.
+  // מוזרק כאן (לפני נתיב המדיה) כדי שגם הודעת ה-ack תיקרא מ-bot_messages.
+  await Promise.all([primeSettingsCache(), primeSchoolsCache(), primeBotMessagesCache()])
+
   const media = detectMedia(messageText)
   if (media && media.kind !== 'other' && session.currentFlow !== HANDOFF_FLOW) {
     const ns = userNs || await getUserNsByPhone(phone)
     if (ns) {
       await logConversation(supabase, {
-        phone, parentId: parent.id, direction: 'יוצא', text: MEDIA_ACK,
+        phone, parentId: parent.id, direction: 'יוצא', text: mediaAck(),
         intent: 'לא_ידוע', sessionId: session.sessionId,
       })
       waitUntil(finishMediaInBackground(supabase, {
         session, media, userNs: ns, phone, parentId: parent.id, parentName: parent.name,
       }))
       console.log(`[manychat] phone=${phone} media=${media.kind} → ack now, analysis in background`)
-      return NextResponse.json({ reply: MEDIA_ACK, intent: 'לא_ידוע', deferred: true }, { status: 200 })
+      return NextResponse.json({ reply: mediaAck(), intent: 'לא_ידוע', deferred: true }, { status: 200 })
     }
     console.log(`[manychat] phone=${phone} media=${media.kind} but no user_ns — synchronous path`)
   }
 
   // 4. עיבוד ההודעה (async — כולל LLM fallback)
-  // טעינת settings + מסגרות פעם אחת לבקשה (שעות/מחיר/מחיר-מסגרת) — flows קורא
-  // סינכרונית מה-cache. כשל DB → cache ריק → fallback קשיח (בלי שינוי התנהגות).
-  await Promise.all([primeSettingsCache(), primeSchoolsCache(), primeBotMessagesCache()])
   const result = await processMessage(session, messageText)
 
   // 5. עדכון session לפי התוצאה

@@ -62,6 +62,12 @@ export const BOT_MESSAGE_REGISTRY: Record<string, BotMessageDef> = {
     vars: [],
     default: `בשמחה! אם צריך עוד משהו אני כאן 💛`,
   },
+  media_ack: {
+    label: 'קבלת קובץ/תמונה (אישור מיידי)',
+    category: 'כללי',
+    vars: [],
+    default: `קיבלתי את הקובץ 🙏 רגע, אני עוברת עליו…`,
+  },
   escalation_after_hours: {
     label: 'העברה לנציגה (מחוץ לשעות)',
     category: 'העברה לנציגה',

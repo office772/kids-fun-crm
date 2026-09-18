@@ -617,6 +617,22 @@ function botMessagesCases() {
     placeholdersMatch('שלום {אזור} {חדש}', ['אזור']) === false, 'צריך false')
   check('משתנים — הודעה בלי משתנים לא מקבלת {…}',
     placeholdersMatch('טקסט עם {משתנה}', []) === false, 'צריך false')
+
+  // ⚠️ עקביות כל הרג'יסטרי: לכל הודעה, ה-{משתנים} בברירת המחדל = בדיוק vars המוצהר.
+  // תופס טעות העתקה שבה default מכיל {משתנה} שלא הוצהר (או להפך) — שהיתה גורמת
+  // ל-botText ליפול ל-fallback או להשאיר {…} לא-מוזרק בהודעה להורה.
+  let badKeys: string[] = []
+  for (const [key, def] of Object.entries(BOT_MESSAGE_REGISTRY)) {
+    if (!placeholdersMatch(def.default, def.vars)) badKeys.push(key)
+  }
+  check(`משתנים — כל ${Object.keys(BOT_MESSAGE_REGISTRY).length} ההודעות עקביות (default ↔ vars)`,
+    badKeys.length === 0, `לא עקבי: ${badKeys.join(', ')}`)
+
+  // ברכת פתיחה ובטיחות — ברירת המחדל בלי cache.
+  check('welcome — {ברכה}/{שם_בוט}/{תפריט} מוזרקים',
+    (() => { const t = botText('welcome', { 'ברכה': 'היי דנה 😊\n\n', 'שם_בוט': 'ג׳וני', 'תפריט': 'X' })
+             return t.includes('היי דנה') && t.includes('ג׳וני') && !t.includes('{') })(),
+    'צריך הזרקה מלאה')
 }
 
 async function main() {
