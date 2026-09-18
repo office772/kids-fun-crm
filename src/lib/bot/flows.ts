@@ -1543,14 +1543,7 @@ export async function handlePaymentFailureParentFlow(session: BotSession, userMe
   if (!step || step === 'payment_fail_start') {
     const firstName = session.parentName ? session.parentName.split(' ')[0] : ''
     return {
-      text: `היי${firstName ? ' ' + firstName : ''}! 😊\n\n` +
-        `שם לב שהיתה בעיה בתשלום — אין מה לדאוג, מטפלים ביחד 💛\n\n` +
-        `*מה המצב?*\n\n` +
-        `*1* — החלפתי כרטיס, יש לי פרטים חדשים\n` +
-        `*2* — רוצה לעבור לאמצעי תשלום אחר\n` +
-        `*3* — רוצה לשנות את תאריך החיוב\n` +
-        `*4* — עוד לא מסודר, תחזרו אלי בעוד כמה ימים\n` +
-        `*5* — אחר`,
+      text: botText('payfail_start', { 'ברכה': firstName ? ' ' + firstName : '' }),
       nextFlow: 'payment_fail_type'
     }
   }
@@ -1570,7 +1563,7 @@ export async function handlePaymentFailureParentFlow(session: BotSession, userMe
     // ענף 5 (אחר) — לא דורש זיהוי, מועבר לנציגה
     if (branch === 'other') {
       return {
-        text: `מבינים 💛\n\n*ספר/י לי מה קורה* ואנחנו נמצא פתרון ביחד:`,
+        text: botText('payfail_other_describe'),
         nextFlow: 'payment_fail_describe'
       }
     }
@@ -1581,14 +1574,13 @@ export async function handlePaymentFailureParentFlow(session: BotSession, userMe
     if (existingChild) {
       // הטלפון זוהה אוטומטית + יש שם ילד מהמערכת → לאישור לפני המשך
       return {
-        text: `קודם כל וידוא קצר — ההורה של *${existingChild}*?\n\n` +
-              `*כן* — ממשיכים\n*לא* — נזהה אחרת`,
+        text: botText('payfail_confirm_child', { 'ילד': existingChild }),
         nextFlow: 'payment_fail_confirm_child',
       }
     }
     // טלפון לא מזוהה → לבקש שם ילד
     return {
-      text: `לפני שנמשיך, לזיהוי:\n\n*מה שם הילד/ה? (שם פרטי + שם משפחה)*`,
+      text: botText('payfail_ask_child'),
       nextFlow: 'payment_fail_child_name',
     }
   }
@@ -1601,12 +1593,12 @@ export async function handlePaymentFailureParentFlow(session: BotSession, userMe
     if (isNo(userMessage)) {
       session.collectedData.child_name = ''
       return {
-        text: `אין בעיה 😊\n\n*מה שם הילד/ה? (שם פרטי + שם משפחה)*`,
+        text: botText('payfail_reidentify'),
         nextFlow: 'payment_fail_child_name',
       }
     }
     return {
-      text: `כתבי *כן* או *לא* בבקשה 😊`,
+      text: botText('payfail_confirm_yesno'),
       nextFlow: 'payment_fail_confirm_child',
     }
   }
@@ -1617,7 +1609,7 @@ export async function handlePaymentFailureParentFlow(session: BotSession, userMe
     if (looksOffScript(name)) return { text: '', useLLM: true }
     if (name.split(' ').filter(w => w.length >= 2).length < 2 || /\d/.test(name)) {
       return {
-        text: `אנא כתבו *שם פרטי + שם משפחה* (לדוגמה: נועה כהן) 😊`,
+        text: botText('payfail_name_invalid'),
         nextFlow: 'payment_fail_child_name',
       }
     }
@@ -1629,8 +1621,7 @@ export async function handlePaymentFailureParentFlow(session: BotSession, userMe
   if (step === 'payment_fail_card_link_sent') {
     // הוראות לאחר השליחה — כשההורה כותב שוב משהו
     return {
-      text: `כשתסיימי את התשלום בקישור — הוראת הקבע הישנה תבוטל אוטומטית 💛\n\n` +
-            `יש שאלה נוספת? כתבי *תשלום* / *ביטול* / *שעות* / *איסוף מוקדם*.`,
+      text: botText('payfail_card_link_sent'),
       isComplete: true,
     }
   }
@@ -1653,10 +1644,11 @@ export async function handlePaymentFailureParentFlow(session: BotSession, userMe
   // ─── תיאור חופשי (ענף "אחר") — נציגה ─────────────────────────────────────
   if (step === 'payment_fail_describe') {
     return {
-      text: `תודה שפירטת 💛\n\n` +
-        `${isBusinessHours()
+      text: botText('payfail_describe_ack', {
+        'המשך': isBusinessHours()
           ? 'נציגה שלנו תחזור אליך בהקדם לטפל בבקשה.'
-          : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) 📬'}`,
+          : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) 📬',
+      }),
       isComplete: true,
       createTask: {
         type: 'כשל תשלום',
@@ -1666,7 +1658,7 @@ export async function handlePaymentFailureParentFlow(session: BotSession, userMe
     }
   }
 
-  return { text: '😊 כתבו *"בעיה בתשלום"* להתחיל מחדש.' }
+  return { text: botText('payfail_restart') }
 }
 
 // ─── מנתב את ההורה לזרימה הנכונה אחרי שזיהוי הילד הושלם ─────────────────────
@@ -1689,10 +1681,7 @@ async function routePaymentFailBranch(session: BotSession): Promise<BotResponse>
         // אם חזר לינק — שולחים בוואטסאפ (העדפה); אחרת PayPlus שלח ללקוח מייל חידוש
         if (r.data?.paymentUrl) {
           return {
-            text:
-              `מצוין! 💳 הכנתי קישור מאובטח לעדכון הכרטיס *בהוראת הקבע הקיימת*:\n\n` +
-              `🔗 ${r.data.paymentUrl}\n\n` +
-              `אחרי שתעדכני — החיוב החודשי ימשיך כרגיל, בלי לפתוח הוראה חדשה 💛`,
+            text: botText('payfail_card_link_whatsapp', { 'קישור': r.data.paymentUrl }),
             nextFlow: 'payment_fail_card_link_sent',
             createTask: {
               type: 'כשל תשלום',
@@ -1702,9 +1691,7 @@ async function routePaymentFailBranch(session: BotSession): Promise<BotResponse>
           }
         }
         return {
-          text:
-            `מצוין! 📧 שלחנו לך *למייל* קישור מאובטח לעדכון הכרטיס בהוראת הקבע הקיימת.\n\n` +
-            `בדקי את תיבת המייל (כולל ספאם) — אחרי העדכון החיוב החודשי ימשיך כרגיל, בלי לפתוח הוראה חדשה 💛`,
+          text: botText('payfail_card_link_email'),
           isComplete: true,
           createTask: {
             type: 'כשל תשלום',
@@ -1715,7 +1702,7 @@ async function routePaymentFailBranch(session: BotSession): Promise<BotResponse>
       }
       // קריאת ה-API נכשלה ממש (נדיר) → נציגה
       return {
-        text: `אני מעבירה את הבקשה לנציגה שתעדכן את הכרטיס ותחזור אליך בהקדם 💛`,
+        text: botText('payfail_card_to_staff'),
         isComplete: true,
         createTask: {
           type: 'כשל תשלום',
@@ -1727,9 +1714,7 @@ async function routePaymentFailBranch(session: BotSession): Promise<BotResponse>
 
     // אין מזהה הוראת קבע במערכת (הוקמה דרך הדשבורד / ייבוא) → לא יוצרים חדשה!
     return {
-      text:
-        `הבנתי 💛 כדי לעדכן את הכרטיס בהוראת הקבע שלך — נציגה תיצור איתך קשר בהקדם ` +
-        `ותסדר את זה איתך אישית.`,
+      text: botText('payfail_card_no_recurring'),
       isComplete: true,
       createTask: {
         type: 'כשל תשלום',
@@ -1741,33 +1726,26 @@ async function routePaymentFailBranch(session: BotSession): Promise<BotResponse>
 
   if (branch === 'method') {
     return {
-      text: `*באיזה אמצעי תשלום תרצי להמשיך?*\n\n` +
-            `*1* — 🏦 הוראת קבע (אשראי) — מומלץ\n` +
-            `*2* — 💳 כרטיס אשראי חודשי\n` +
-            `*3* — 💵 מזומן\n` +
-            `*4* — 📝 צ׳קים\n` +
-            `*5* — 🏛️ העברה בנקאית`,
+      text: botText('payfail_method_menu'),
       nextFlow: 'payment_fail_method_choice',
     }
   }
 
   if (branch === 'date') {
     return {
-      text: `בטח! *באיזה יום בחודש* יתאים לך החיוב? (1-28)\n` +
-            `_(לדוגמה: 1, 5, 10, 15...)_`,
+      text: botText('payfail_ask_date'),
       nextFlow: 'payment_fail_new_date',
     }
   }
 
   if (branch === 'remind') {
     return {
-      text: `בסדר גמור 😊\n\n*מתי לחזור אליך?*\n` +
-            `(לדוגמה: "עוד 3 ימים", "ב-25 לחודש", "בעוד שבוע")`,
+      text: botText('payfail_ask_remind'),
       nextFlow: 'payment_fail_remind_when',
     }
   }
 
-  return { text: '😊 כתבו *"בעיה בתשלום"* להתחיל מחדש.' }
+  return { text: botText('payfail_restart') }
 }
 
 // ─── ענף 2: אמצעי אחר ────────────────────────────────────────────────────────
@@ -1782,9 +1760,7 @@ async function handlePaymentFailMethodChoice(session: BotSession, msg: string): 
   // אמצעים ידניים — הוראות אוטומטיות + תיעוד
   if (m === '3' || /מזומן/.test(m)) {
     return {
-      text: `💵 *תשלום במזומן*\n\n` +
-            `העבירי לרכזת המסגרת בתחילת כל חודש את הסכום החודשי.\n\n` +
-            `נעדכן את המערכת שעברתם למזומן — הוראת הקבע הקיימת תבוטל.`,
+      text: botText('payfail_cash'),
       isComplete: true,
       createTask: {
         type: 'כשל תשלום',
@@ -1795,10 +1771,7 @@ async function handlePaymentFailMethodChoice(session: BotSession, msg: string): 
   }
   if (m === '4' || /צ.?ק|שיק/.test(m)) {
     return {
-      text: `📝 *תשלום בצ׳קים*\n\n` +
-            `הכיני צ׳קים על שם *"קידס אנד פאן הפקות בע״מ"* — צ׳ק לכל חודש שנותר.\n` +
-            `העבירי לרכזת המסגרת.\n\n` +
-            `נעדכן את המערכת — הוראת הקבע הקיימת תבוטל.`,
+      text: botText('payfail_check'),
       isComplete: true,
       createTask: {
         type: 'כשל תשלום',
@@ -1809,10 +1782,7 @@ async function handlePaymentFailMethodChoice(session: BotSession, msg: string): 
   }
   if (m === '5' || /העברה|בנק/.test(m)) {
     return {
-      text:
-        `🏛️ *העברה בנקאית*\n\n` +
-        formatBankTransferMessage() + `\n\n` +
-        `אחרי כל העברה — שלחי אישור בצ׳אט ונתעד 💛`,
+      text: botText('payfail_bank', { 'פרטי_בנק': formatBankTransferMessage() }),
       isComplete: true,
       createTask: {
         type: 'כשל תשלום',
@@ -1822,7 +1792,7 @@ async function handlePaymentFailMethodChoice(session: BotSession, msg: string): 
     }
   }
   return {
-    text: `לא הבנתי 😊 בחרי 1-5`,
+    text: botText('payfail_method_invalid'),
     nextFlow: 'payment_fail_method_choice',
   }
 }
@@ -1834,7 +1804,7 @@ async function handlePaymentFailNewDate(session: BotSession, msg: string): Promi
   const day       = dayMatch ? parseInt(dayMatch[0], 10) : NaN
   if (isNaN(day) || day < 1 || day > 28) {
     return {
-      text: `התאריך לא תקין. *בחרי יום בחודש בין 1 ל-28* 😊\n_(אחרי ה-28 לא בטוח שיהיה תאריך כזה כל חודש)_`,
+      text: botText('payfail_date_invalid'),
       nextFlow: 'payment_fail_new_date',
     }
   }
@@ -1861,7 +1831,7 @@ async function handlePaymentFailNewDate(session: BotSession, msg: string): Promi
             performed_by: 'בוט',
           })
           return {
-            text: `✅ *בוצע!* תאריך החיוב החודשי של *${childName}* עודכן ל-${day} לכל חודש.\n\nיש שאלה נוספת? כתבי לנו 💛`,
+            text: botText('payfail_date_done', { 'ילד': childName, 'יום': String(day) }),
             isComplete: true,
             createTask: {
               type: 'כשל תשלום',
@@ -1878,7 +1848,7 @@ async function handlePaymentFailNewDate(session: BotSession, msg: string): Promi
 
   // לא הצלחנו אוטומטית → נציגה
   return {
-    text: `✅ *רשמנו — תאריך ${day}*\n\nנציגה תוודא את העדכון ותחזור אליך באישור 💛`,
+    text: botText('payfail_date_received', { 'יום': String(day) }),
     isComplete: true,
     createTask: {
       type: 'כשל תשלום',
@@ -1895,7 +1865,7 @@ async function handlePaymentFailRemindWhen(session: BotSession, msg: string): Pr
   const scheduled = parseRemindWhen(msg)
   if (!scheduled) {
     return {
-      text: `לא הצלחתי להבין את התאריך 😊\n\n*כתבי שוב — למשל "עוד 3 ימים", "ב-25 לחודש", "בעוד שבוע"*`,
+      text: botText('payfail_remind_invalid'),
       nextFlow: 'payment_fail_remind_when',
     }
   }
@@ -1919,7 +1889,7 @@ async function handlePaymentFailRemindWhen(session: BotSession, msg: string): Pr
   }
   const dateLabel = scheduled.toLocaleDateString('he-IL', { day: 'numeric', month: 'long' })
   return {
-    text: `👍 *סבבה!*\n\nנחזור אליך ב-*${dateLabel}* בנוגע ל-${childName}.\n\nאם תרצי לסדר לפני כן — כתבי *"תשלום"* 💛`,
+    text: botText('payfail_remind_done', { 'תאריך': dateLabel, 'ילד': childName }),
     isComplete: true,
     // יוצר גם פנייה גלויה בדשבורד (followup_reminders לבדו לא מופיע בלשונית "פניות")
     createTask: {
