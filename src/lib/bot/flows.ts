@@ -1971,7 +1971,7 @@ async function resolvePaymentSchool(session: BotSession): Promise<BotResponse> {
     }
     session.collectedData.payment_setup_school_list = names.join('||')
     return {
-      text: `מצוין! ובאיזה גן / בית ספר?\n\n` + names.map((s, i) => `*${i + 1}* — ${s}`).join('\n'),
+      text: botText('payset_school_menu', { 'מסגרות': names.map((s, i) => `*${i + 1}* — ${s}`).join('\n') }),
       nextFlow: 'payment_setup_school',
     }
   } catch {
@@ -1990,7 +1990,7 @@ async function paymentResolveFeeAndContinue(session: BotSession): Promise<BotRes
   // מתן מתמחר לפי כיתה — אם חסרה, נשאל
   if (school.includes('מתן') && !className) {
     return {
-      text: `ובאיזו כיתה ${session.collectedData.child_name ?? 'הילד/ה'}? (למשל: א / ב / ג)`,
+      text: botText('payset_class_matan', { 'ילד': session.collectedData.child_name ?? 'הילד/ה' }),
       nextFlow: 'payment_setup_class',
     }
   }
@@ -2000,7 +2000,7 @@ async function paymentResolveFeeAndContinue(session: BotSession): Promise<BotRes
 function paymentToStaff(session: BotSession, reason: string): BotResponse {
   const childName = session.collectedData.child_name ?? 'הילד/ה'
   return {
-    text: `אשמח לעזור! 💛 נציגה שלנו תשלח לכם את קישור התשלום המדויק בהקדם.`,
+    text: botText('payset_to_staff'),
     isComplete: true,
     createTask: {
       type:        'כשל תשלום',
@@ -2035,9 +2035,7 @@ async function finalizePaymentLink(session: BotSession): Promise<BotResponse> {
       .maybeSingle()
     if (existing?.payplus_recurring_uid && existing.payplus_recurring_status === 'active') {
       return {
-        text:
-          `יש לכם כבר הוראת קבע פעילה 💛\n\n` +
-          `אם צריך *לעדכן כרטיס* — כתבו "כשל תשלום". לכל שינוי אחר — נציגה תיצור קשר.`,
+        text: botText('payset_already_standing'),
         isComplete: true,
         createTask: { type: 'כשל תשלום', description: `ביקש/ה הסדרת תשלום אך כבר קיימת הו"ק פעילה — ${childName}.`, priority: 'רגיל' },
       }
@@ -2051,10 +2049,13 @@ async function finalizePaymentLink(session: BotSession): Promise<BotResponse> {
   })
   if (result.success && result.paymentUrl) {
     return {
-      text:
-        `מעולה! ${isStanding ? '🏦 *הוראת קבע*' : '💳 *אשראי*'} עבור *${childName}* (${school}) — *${amount}₪/חודש*:\n\n` +
-        `🔗 ${result.paymentUrl}\n\n` +
-        `לאחר השלמת התשלום — יישלח אישור. יש שאלה? כתבו לנו 💛`,
+      text: botText('payset_link', {
+        'סוג': isStanding ? '🏦 *הוראת קבע*' : '💳 *אשראי*',
+        'ילד': childName,
+        'מסגרת': school,
+        'סכום': String(amount),
+        'קישור': result.paymentUrl,
+      }),
       isComplete: true,
       createTask: { type: 'כשל תשלום', description: `קישור ${isStanding ? 'הו"ק' : 'אשראי'} נשלח — ${childName} | ${school} | ${amount}₪ | טלפון ${session.phone}`, priority: 'רגיל' },
     }
@@ -2091,15 +2092,7 @@ export async function handlePaymentSetupFlow(
       : `*הסדרת תשלום — Kids & Fun* 💛\n\n${personalInfo}`
 
     return {
-      text:
-        intro +
-        `*באיזו שיטת תשלום תרצו?\n\n*` +
-        `*1* — 💳 כרטיס אשראי (PayPlus)\n` +
-        `*2* — 🏦 הוראת קבע (PayPlus) — מומלץ!\n` +
-        `*3* — 💵 מזומן\n` +
-        `*4* — 📝 צ׳קים\n` +
-        `*5* — 🏛️ העברה בנקאית\n` +
-        `*6* — 🔗 קישור תשלום מיידי`,
+      text: botText('payset_intro_menu', { 'פתיחה': intro }),
       nextFlow: 'payment_setup_method',
     }
   }
@@ -2122,14 +2115,7 @@ export async function handlePaymentSetupFlow(
 
     if (!chosenMethod) {
       return {
-        text:
-          `לא הבנתי 😊 אנא בחרו:\n\n` +
-          `*1* — 💳 כרטיס אשראי\n` +
-          `*2* — 🏦 הוראת קבע\n` +
-          `*3* — 💵 מזומן\n` +
-          `*4* — 📝 צ׳קים\n` +
-          `*5* — 🏛️ העברה בנקאית\n` +
-          `*6* — 🔗 קישור תשלום מיידי`,
+        text: botText('payset_method_invalid'),
         nextFlow: 'payment_setup_method',
       }
     }
@@ -2141,10 +2127,9 @@ export async function handlePaymentSetupFlow(
     // שואלים: שם הילד/ה המלא + אזור — ולפי האזור נשלח הלינק הנכון.
     if (chosenMethod === 'credit' || chosenMethod === 'standing_order') {
       return {
-        text:
-          `${chosenMethod === 'standing_order' ? '🏦 *הוראת קבע*' : '💳 *כרטיס אשראי*'} — בחירה מצוינת!\n\n` +
-          `לפני שאשלח את הקישור, לצורך זיהוי:\n\n` +
-          `*מה שם הילד/ה? (שם פרטי + שם משפחה)*`,
+        text: botText('payset_credit_ask_name', {
+          'סוג': chosenMethod === 'standing_order' ? '🏦 *הוראת קבע*' : '💳 *כרטיס אשראי*',
+        }),
         nextFlow: 'payment_setup_child_name',
       }
     }
@@ -2152,12 +2137,10 @@ export async function handlePaymentSetupFlow(
     // ── מזומן ────────────────────────────────────────────────────────────────
     if (chosenMethod === 'cash') {
       return {
-        text:
-          `💵 *תשלום במזומן*\n\n` +
-          `ניתן לשלם בתחילת כל חודש ישירות לצוות הצהרון.\n\n` +
-          `*סכום:* ${amount}₪ לחודש\n\n` +
-          `נציגה שלנו תיצור קשר לתיאום.\n\n` +
-          `${isBusinessHours() ? 'נחזור אליך היום! 😊' : 'נחזור אליך בשעות הפעילות 💛'}`,
+        text: botText('payset_cash', {
+          'סכום': String(amount),
+          'המשך': isBusinessHours() ? 'נחזור אליך היום! 😊' : 'נחזור אליך בשעות הפעילות 💛',
+        }),
         isComplete: true,
         createTask: {
           type:        'כשל תשלום',
@@ -2170,10 +2153,7 @@ export async function handlePaymentSetupFlow(
     // ── צ׳קים — שואלים כמה ─────────────────────────────────────────────────
     if (chosenMethod === 'checks') {
       return {
-        text:
-          `📝 *צ׳קים — מצוין!*\n\n` +
-          `*כמה צ׳קים תרצו לתת?*\n` +
-          `_(למשל: 3, 6, 10 — כל צ׳ק לחודש אחד)_`,
+        text: botText('payset_checks_ask'),
         nextFlow: 'payment_setup_checks',
       }
     }
@@ -2181,11 +2161,7 @@ export async function handlePaymentSetupFlow(
     // ── העברה בנקאית ─────────────────────────────────────────────────────────
     if (chosenMethod === 'bank_transfer') {
       return {
-        text:
-          `🏛️ *העברה בנקאית*\n\n` +
-          formatBankTransferMessage() +
-          `\n\n*סכום להעברה:* ${amount}₪ לחודש\n\n` +
-          `לאחר כל העברה — שלחו אישור בצ׳אט ונתעד ✅`,
+        text: botText('payset_bank', { 'פרטי_בנק': formatBankTransferMessage(), 'סכום': String(amount) }),
         isComplete: true,
         createTask: {
           type:        'שאלה כללית',
@@ -2205,11 +2181,7 @@ export async function handlePaymentSetupFlow(
 
       if (invoiceUrl) {
         return {
-          text:
-            `🔗 *קישור לתשלום מיידי:*\n\n` +
-            `${invoiceUrl}\n\n` +
-            `ניתן לשלם בכרטיס אשראי / ביט / פייבוקס.\n` +
-            `לאחר התשלום — יישלח אישור אוטומטי 💛`,
+          text: botText('payset_invoice_link', { 'קישור': invoiceUrl }),
           isComplete: true,
           createTask: {
             type:        'שאלה כללית',
@@ -2221,11 +2193,11 @@ export async function handlePaymentSetupFlow(
 
       // קישור לא מוגדר ב-bot_assets
       return {
-        text:
-          `🔗 *קישור תשלום*\n\n` +
-          `${isBusinessHours()
+        text: botText('payset_invoice_fallback', {
+          'המשך': isBusinessHours()
             ? 'נציגה שלנו תשלח לך קישור תשלום עכשיו! 💛'
-            : 'נשלח לך קישור תשלום בשעות הפעילות (8:00-17:00) 📬'}`,
+            : 'נשלח לך קישור תשלום בשעות הפעילות (8:00-17:00) 📬',
+        }),
         isComplete: true,
         createTask: {
           type:        'שאלה כללית',
@@ -2244,10 +2216,7 @@ export async function handlePaymentSetupFlow(
     // דרושים לפחות שם פרטי + שם משפחה (2 מילים), ללא ספרות
     if (words.length < 2 || /\d/.test(nameInput) || nameInput.length > 60) {
       return {
-        text:
-          `צריך שם מלא לצורך זיהוי 😊\n\n` +
-          `*אנא כתבו שם פרטי + שם משפחה של הילד/ה*\n` +
-          `_(למשל: נועה כהן)_`,
+        text: botText('payment_status_name_invalid'),
         nextFlow: 'payment_setup_child_name',
       }
     }
@@ -2256,12 +2225,7 @@ export async function handlePaymentSetupFlow(
     session.collectedData.identity_confirmed = 'true'
 
     return {
-      text:
-        `תודה! ועכשיו —\n\n` +
-        `*באיזה אזור ${nameInput} בצהרון?*\n\n` +
-        `*1* — כרמל (עתלית והסביבה)\n` +
-        `*2* — שרון (רשפון, מתן והסביבה)\n` +
-        `*3* — תל אביב`,
+      text: botText('payset_ask_area', { 'ילד': nameInput }),
       nextFlow: 'payment_setup_area',
     }
   }
@@ -2278,11 +2242,7 @@ export async function handlePaymentSetupFlow(
 
     if (!areaCode) {
       return {
-        text:
-          `לא הבנתי 😊 באיזה אזור?\n\n` +
-          `*1* — כרמל\n` +
-          `*2* — שרון\n` +
-          `*3* — תל אביב`,
+        text: botText('payset_area_invalid'),
         nextFlow: 'payment_setup_area',
       }
     }
@@ -2304,7 +2264,7 @@ export async function handlePaymentSetupFlow(
       : (list.find(s => m.length >= 2 && s.includes(m)) ?? null)
     if (!chosen) {
       return {
-        text: `לא הבנתי 😊 בחרו מספר מהרשימה:\n` + list.map((s, i) => `*${i + 1}* — ${s}`).join('\n'),
+        text: botText('payset_school_reselect', { 'מסגרות': list.map((s, i) => `*${i + 1}* — ${s}`).join('\n') }),
         nextFlow: 'payment_setup_school',
       }
     }
@@ -2414,7 +2374,7 @@ export async function handlePaymentSetupFlow(
     const validNum = !isNaN(numChecks) && numChecks >= 1 && numChecks <= 12
     if (!validNum) {
       return {
-        text: `נא לכתוב מספר בין 1 ל-12 😊`,
+        text: botText('payset_checks_invalid'),
         nextFlow: 'payment_setup_checks',
       }
     }
@@ -2422,13 +2382,13 @@ export async function handlePaymentSetupFlow(
     const totalAmount = amount * numChecks
 
     return {
-      text:
-        `📝 *תשלום ב-${numChecks} צ׳קים*\n\n` +
-        `• ${numChecks} צ׳קים × ${amount}₪ = *${totalAmount}₪ סה"כ*\n` +
-        `• כל צ׳ק לסדר ל*Kids & Fun*\n` +
-        `• תאריכי הצ׳קים: ה-1 לכל חודש, רצוף מ-${new Date().toLocaleDateString('he-IL', { month: 'long', year: 'numeric', timeZone: 'Asia/Jerusalem' })}\n\n` +
-        `נציגה שלנו תתאם איתך לקבלת הצ׳קים.\n\n` +
-        `${isBusinessHours() ? 'ניצור קשר היום! 💛' : 'ניצור קשר בשעות הפעילות 💛'}`,
+      text: botText('payset_checks_summary', {
+        'מספר': String(numChecks),
+        'סכום': String(amount),
+        'סהכ': String(totalAmount),
+        'חודש': new Date().toLocaleDateString('he-IL', { month: 'long', year: 'numeric', timeZone: 'Asia/Jerusalem' }),
+        'המשך': isBusinessHours() ? 'ניצור קשר היום! 💛' : 'ניצור קשר בשעות הפעילות 💛',
+      }),
       isComplete: true,
       createTask: {
         type:        'שאלה כללית',
@@ -2439,7 +2399,7 @@ export async function handlePaymentSetupFlow(
   }
 
   return {
-    text: `😊 כתבו *"אפשרויות תשלום"* להתחיל מחדש.`,
+    text: botText('payset_restart'),
   }
 }
 
