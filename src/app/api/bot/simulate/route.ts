@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { processMessage } from '@/lib/bot/handler'
 import { primeSettingsCache } from '@/lib/bot/settings-db'
 import { primeSchoolsCache } from '@/lib/bot/schools-db'
+import { primeBotMessagesCache } from '@/lib/bot/bot-messages-db'
 import { BotSession } from '@/lib/types'
 
 // Sessions in-memory לסימולטור
@@ -49,7 +50,7 @@ export async function POST(req: NextRequest) {
     }
 
     // טעינת settings + מסגרות פעם אחת לבקשה — flows קורא סינכרונית מה-cache.
-    await Promise.all([primeSettingsCache(), primeSchoolsCache()])
+    await Promise.all([primeSettingsCache(), primeSchoolsCache(), primeBotMessagesCache()])
     // processMessage הוא עכשיו async (LLM fallback)
     const response = await processMessage(session, message)
 

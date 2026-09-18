@@ -21,6 +21,8 @@ import { getCachedSettings } from '@/lib/bot/settings-db'
 import { getDefaultMonthlyFee, DEFAULT_MONTHLY_FEE } from '@/lib/bot/payment-helpers'
 import { resolveMonthlyFee } from '@/lib/bot/pricing'
 import { priceFromCachedSchools } from '@/lib/bot/schools-db'
+import { botText, placeholdersMatch, BOT_MESSAGE_REGISTRY } from '@/lib/bot/bot-messages-db'
+import { buildDidNotUnderstand, buildEscalationMessage } from '@/lib/bot/flows'
 import type { BotIntent, BotSession } from '@/lib/types'
 
 const PHONE = '+972500000000'   // מספר שלא קיים ב-DB — "הורה לא מזוהה"
@@ -589,6 +591,34 @@ function pricingFallbackCases() {
     `got=${resolveMonthlyFee({ school: 'גן שלא קיים בכלל' })}`)
 }
 
+// ─── טקסט הודעות (פאזה 4) — בלי cache, ברירת המחדל; משתנים נעולים ─────────────
+function botMessagesCases() {
+  console.log('\n── טקסט הודעות (fallback + משתנים) ──')
+
+  // בלי cache → botText מחזיר את ברירת המחדל מהרג'יסטרי (זהה לטקסט הקשיח הישן).
+  check('botText — תפריט = ברירת המחדל בלי cache',
+    botText('menu') === BOT_MESSAGE_REGISTRY.menu.default, 'צריך את ברירת המחדל')
+  check('buildDidNotUnderstand — עדיין מכיל "לא הצלחתי להבין" + התפריט',
+    /לא הצלחתי להבין/.test(buildDidNotUnderstand()) && buildDidNotUnderstand().includes('*1* — רישום לצהרון'),
+    buildDidNotUnderstand().slice(0, 40))
+  check('buildEscalationMessage — מחזיר טקסט הסלמה (לפי שעה)',
+    /קורלי/.test(buildEscalationMessage()), buildEscalationMessage().slice(0, 40))
+
+  // הזרקת משתנים: {אזור} מוחלף, ואין {…} שנשאר.
+  const ac = botText('area_confirmed', { 'אזור': 'חוף הכרמל' })
+  check('botText — {אזור} הוזרק', ac.includes('חוף הכרמל') && !ac.includes('{אזור}'), ac.slice(0, 40))
+
+  // נעילת משתנים: ברירת המחדל תואמת; מחיקה/הוספה של משתנה נדחית.
+  check('משתנים — ברירת המחדל של area_confirmed תקינה',
+    placeholdersMatch(BOT_MESSAGE_REGISTRY.area_confirmed.default, ['אזור']) === true, 'צריך true')
+  check('משתנים — מחיקת {אזור} נדחית',
+    placeholdersMatch('עדכנתי את האזור ✅', ['אזור']) === false, 'צריך false')
+  check('משתנים — הוספת {חדש} נדחית',
+    placeholdersMatch('שלום {אזור} {חדש}', ['אזור']) === false, 'צריך false')
+  check('משתנים — הודעה בלי משתנים לא מקבלת {…}',
+    placeholdersMatch('טקסט עם {משתנה}', []) === false, 'צריך false')
+}
+
 async function main() {
   intentCases()
   await flowCases()
@@ -604,6 +634,7 @@ async function main() {
   voiceCases()
   settingsFallbackCases()
   pricingFallbackCases()
+  botMessagesCases()
   console.log(`\n────────────\nעברו: ${passed} | נכשלו: ${failed}`)
   process.exit(failed === 0 ? 0 : 1)
 }

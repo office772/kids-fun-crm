@@ -24,6 +24,7 @@ import { isTestPhone as isAllowedPhone, TEST_PHONES } from '@/lib/bot/test-phone
 import { isAllowedPhoneAsync } from '@/lib/bot/test-phones-db'
 import { primeSettingsCache } from '@/lib/bot/settings-db'
 import { primeSchoolsCache } from '@/lib/bot/schools-db'
+import { primeBotMessagesCache } from '@/lib/bot/bot-messages-db'
 import { phoneVariants } from '@/lib/phone'
 import { HANDOFF_FLOW } from '@/lib/bot/handler'
 import { detectMedia, handleMediaMessage, type MediaInfo } from '@/lib/bot/media-handler'
@@ -499,7 +500,7 @@ export async function POST(req: NextRequest) {
   // 4. עיבוד ההודעה (async — כולל LLM fallback)
   // טעינת settings + מסגרות פעם אחת לבקשה (שעות/מחיר/מחיר-מסגרת) — flows קורא
   // סינכרונית מה-cache. כשל DB → cache ריק → fallback קשיח (בלי שינוי התנהגות).
-  await Promise.all([primeSettingsCache(), primeSchoolsCache()])
+  await Promise.all([primeSettingsCache(), primeSchoolsCache(), primeBotMessagesCache()])
   const result = await processMessage(session, messageText)
 
   // 5. עדכון session לפי התוצאה

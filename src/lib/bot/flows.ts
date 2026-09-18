@@ -11,6 +11,7 @@ import {
 } from './payment-helpers'
 import { resolveMonthlyFee } from './pricing'
 import { getCachedSettings } from './settings-db'
+import { botText } from './bot-messages-db'
 
 export interface BotResponse {
   text: string
@@ -98,7 +99,7 @@ async function tryAreaCorrection(session: BotSession, msg: string): Promise<BotR
   session.collectedData.area_code = area
   const label = AREAS[area]?.label ?? area
   return {
-    text: `עדכנתי: אזור *${label}* ✅\n\n*מה שם הילד/ה?* (שם פרטי + שם משפחה)`,
+    text: botText('area_confirmed', { 'אזור': label }),
     nextFlow: 'register_child_name',
   }
 }
@@ -249,35 +250,29 @@ function isBareNo(msg: string): boolean {
   return isPlainAnswer(msg) && isNo(msg)
 }
 
-const MENU_TEXT =
-  `*1* — רישום לצהרון\n` +
-  `*2* — רישום לקייטנה\n` +
-  `*3* — ביטול\n` +
-  `*4* — שעות ולוח זמנים\n` +
-  `*5* — תשלומים\n` +
-  `*6* — איסוף מוקדם`
-
+// תפריט הבוט — נקרא מ-bot_messages (מפתח 'menu') עם fallback לקשיח. פונקציה כדי
+// שייקרא פר-בקשה מה-cache (const היה נטען פעם אחת בזמן טעינת המודול).
+function menuText(): string { return botText('menu') }
 
 // ─── ברכה ─────────────────────────────────────────────────────────────────────
 export function buildWelcomeMessage(parentName?: string): string {
   const greeting = parentName ? `היי ${parentName.split(' ')[0]} 😊\n\n` : `שלום! 😊\n\n`
   return greeting +
     `כאן ${BOT_NAME}! איך אפשר לעזור?\n\n` +
-    MENU_TEXT +
+    menuText() +
     `\n\nאו פשוט כתוב/י מה צריך 💬`
 }
 
 // ─── לא הבנתי ─────────────────────────────────────────────────────────────────
 export function buildDidNotUnderstand(): string {
-  return `לא הצלחתי להבין 😊\n\nאפשר לבחור מהתפריט:\n\n` + MENU_TEXT
+  return botText('did_not_understand', { 'תפריט': menuText() })
 }
 
 // ─── הסלמה לנציג ─────────────────────────────────────────────────────────────
 export function buildEscalationMessage(): string {
-  if (isBusinessHours()) {
-    return `העברתי את פנייתך לקורלי, הנציגה שלנו — היא תחזור אליך בהקדם 💛`
-  }
-  return `קיבלתי! העברתי לקורלי, הנציגה שלנו, והיא תחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) 📬\n\nלילה טוב! 🌙`
+  return isBusinessHours()
+    ? botText('escalation_business_hours')
+    : botText('escalation_after_hours')
 }
 
 // ─── פנייה יזומה (מהמערכת) ───────────────────────────────────────────────────
