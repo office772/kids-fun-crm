@@ -83,7 +83,7 @@ export function looksLikeChildName(text: string): boolean {
 // תגובה אחידה כשהקלט לא נראה כמו שם — נשארים באותו שלב
 function buildNotAName(nextFlow: string): BotResponse {
   return {
-    text: `זה לא נראה לי כמו שם 🤔\nאפשר בבקשה *שם פרטי + שם משפחה* של הילד/ה? (לדוגמה: נועה כהן)`,
+    text: botText('not_a_name'),
     nextFlow,
   }
 }
@@ -279,13 +279,7 @@ export function buildEscalationMessage(): string {
 // זו ההודעה שהמערכת שולחת כשמזוהה כשל תשלום
 export function buildProactivePaymentMessage(parentName: string): string {
   const firstName = parentName.split(' ')[0] || parentName
-  return `היי ${firstName}, מה שלומך? 😊\n\n` +
-    `הבנק ניסה לחייב אצלינו אבל הפעם לא הצלחנו לעבור.\n\n` +
-    `אין מה לדאוג — פשוט צריך לסדר את זה ביחד 💛\n\n` +
-    `האם החלפת כרטיס לאחרונה?\n` +
-    `*1* — כן, יש לי כרטיס חדש\n` +
-    `*2* — לא, תחזרו אלי קצת אחר כך\n` +
-    `*3* — יש בעיה אחרת`
+  return botText('proactive_payment', { 'שם': firstName })
 }
 
 
@@ -1051,11 +1045,7 @@ export function handleCampRegistrationFlow(): BotResponse {
   // הרישום לקייטנה מתבצע באתר (חנות ווקומרס) — האתר עצמו קובע אילו קייטנות
   // פתוחות לרישום. הבוט תמיד מציג את התפריט ושולח את הקישור לחנות.
   return {
-    text: `🏕️ *קייטנות Kids & Fun!*\n\n` +
-      `*מה תרצו?*\n` +
-      `*1* — לרשום ילד/ה לקייטנה\n` +
-      `*2* — לבדוק אם כבר נרשמתי\n` +
-      `*3* — יש לי בעיה בהרשמה`,
+    text: botText('camp_menu'),
     nextFlow: 'camp_menu'
   }
 }
@@ -1080,12 +1070,7 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
       } catch { /* fallback לקישור הקבוע */ }
 
       return {
-        text: `מצוין! 🎉\n\n` +
-          `הרישום לקייטנה מתבצע ישירות דרך האתר — בוחרים את הקייטנה לפי האזור, ` +
-          `ממלאים את פרטי הילד/ה ומשלמים אונליין:\n\n` +
-          `📲 ${campUrl}\n\n` +
-          `תהליך הרישום לוקח 5-10 דקות בלבד.\n\n` +
-          `יש בעיה בהרשמה? חזרו אלינו ונסייע 😊`,
+        text: botText('camp_register_link', { 'קישור': campUrl }),
         isComplete: true
       }
     }
@@ -1093,7 +1078,7 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
     // תרחיש 2: בדיקת רישום קיים
     if (msg === '2' || /לבדוק|כבר נרשם|האם נרשמ|רשום|נרשמתי|לא יודע|לא זוכר/i.test(msg)) {
       return {
-        text: `בשמחה! נבדוק יחד 🔍\n\n*מה שם הילד/ה?*`,
+        text: botText('camp_check_prompt'),
         nextFlow: 'camp_check_name'
       }
     }
@@ -1101,7 +1086,7 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
     // תרחיש 3: בעיה בהרשמה
     if (msg === '3' || /בעיה|שגיאה|לא עובד|לא הצלחתי|נתקעתי|תקלה/i.test(msg)) {
       return {
-        text: `אוי, כמה מבאס 😔\n\n*מה בדיוק קרה?* תפרטו ונעזור!`,
+        text: botText('camp_problem_prompt'),
         nextFlow: 'camp_problem_desc'
       }
     }
@@ -1116,7 +1101,7 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
     if (!looksLikeChildName(userMessage)) return buildNotAName('camp_check_name')
     session.collectedData.child_name = userMessage
     return {
-      text: `*${userMessage}* — *מספר תעודת זהות של הילד/ה?*\n(3-4 ספרות אחרונות מספיקות)`,
+      text: botText('camp_check_ask_id', { 'ילד': userMessage }),
       nextFlow: 'camp_check_id'
     }
   }
@@ -1179,19 +1164,18 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
             const campName  = campMatch?.[1] ?? ''
             if (reg.status === 'מאושר') {
               return {
-                text:
-                  `✅ *${child.name} רשום/ה לקייטנה!*\n\n` +
-                  `${campName ? `🏕️ ${campName}\n` : ''}` +
-                  `הרישום והתשלום התקבלו במלואם.\n\n` +
-                  `מחכים לראותכם! 💛`,
+                text: botText('camp_found_approved', {
+                  'ילד': child.name,
+                  'קייטנה': campName ? `🏕️ ${campName}\n` : '',
+                }),
                 isComplete: true,
               }
             }
             return {
-              text:
-                `🔶 מצאתי רישום של *${child.name}* לקייטנה` +
-                `${campName ? ` (${campName})` : ''} — אבל הוא עדיין *ממתין להשלמה*.\n\n` +
-                `ייתכן שהתשלום לא הושלם. נציגה שלנו תבדוק ותחזור אליך 💛`,
+              text: botText('camp_found_pending', {
+                'ילד': child.name,
+                'קייטנה': campName ? ` (${campName})` : '',
+              }),
               isComplete: true,
               createTask: {
                 type: 'בדיקת רישום קייטנה',
@@ -1203,11 +1187,7 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
 
           // ילד מזוהה אבל בלי רישום קייטנה
           return {
-            text:
-              `🔍 בדקתי — לא מצאתי רישום לקייטנה עבור *${child.name}*.\n\n` +
-              `אפשר להירשם עכשיו דרך האתר:\n` +
-              `📲 https://kidsandfun.co.il/shop/\n\n` +
-              `ואם נרשמתם ממש לאחרונה — ייתכן שהרישום עוד בדרך, נציגה תוודא ותחזור 💛`,
+            text: botText('camp_not_found_child', { 'ילד': child.name }),
             isComplete: true,
             createTask: {
               type: 'בדיקת רישום קייטנה',
@@ -1221,17 +1201,13 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
         if (!kids?.length) {
           // אין כלל ילד/ה בשם שנמסר → תשובה ודאית מהבוט: אין רישום (לא כשל זיהוי, לא נציגה אוטומטית)
           return {
-            text:
-              `🔎 לפי הרישומים שבידינו, לא נמצא רישום לקייטנה על השם *${childName}*.\n\n` +
-              `אם נרשמתם לאחרונה או שנפלה טעות — כתבו "נציגה" ונבדוק עבורכם 💛`,
+            text: botText('camp_no_registration', { 'ילד': childName }),
             isComplete: true,
           }
         }
         // נמצא שם תואם אך הת"ז לא התאימה → להגנת הפרטיות לא חושפים; מבקשים לאמת שוב
         return {
-          text:
-            `כדי להגן על הפרטים לא הצלחתי לאמת את הזהות (מספר ת"ז לא תואם).\n\n` +
-            `בדקו את מספר תעודת הזהות ונסו שוב, או כתבו "נציגה" ונשמח לעזור 💛`,
+          text: botText('camp_id_mismatch'),
           isComplete: true,
         }
       } catch (err) {
@@ -1241,10 +1217,10 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
 
     // לא אותר / לא אומת חד-משמעית → נציגה תבדוק (כמו קודם)
     return {
-      text: `🔍 בודקת...\n\n` +
-        `לא הצלחתי לאמת את הפרטים באופן אוטומטי — ` +
-        `נציגה שלנו תחזור אליך בהקדם עם הסטטוס של *${childName || 'הילד/ה'}* 💛\n\n` +
-        `${!isBusinessHours() ? '_שעות פעילות: ראשון-חמישי 8:00-17:00_' : ''}`,
+      text: botText('camp_check_manual', {
+        'ילד': childName || 'הילד/ה',
+        'המשך': !isBusinessHours() ? '_שעות פעילות: ראשון-חמישי 8:00-17:00_' : '',
+      }),
       isComplete: true,
       createTask: {
         type: 'בדיקת רישום קייטנה',
@@ -1258,11 +1234,11 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
   if (step === 'camp_problem_desc') {
     const problem = userMessage
     return {
-      text: `קיבלתי ✅\n\n` +
-        `${isBusinessHours()
+      text: botText('camp_problem_ack', {
+        'המשך': isBusinessHours()
           ? 'נציגה שלנו תחזור אליך עם פתרון בהקדם!'
-          : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) לעזור!'}\n\n` +
-        `בינתיים — ניתן לנסות שוב דרך הקישור:\n📲 https://kidsandfun.co.il/shop/`,
+          : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) לעזור!',
+      }),
       isComplete: true,
       createTask: {
         type: 'בעיה בהרשמה לקייטנה',
@@ -1272,7 +1248,7 @@ export async function handleCampMenuFlow(session: BotSession, userMessage: strin
     }
   }
 
-  return { text: '😊 כתבו *"קייטנה"* להתחיל מחדש.' }
+  return { text: botText('camp_restart') }
 }
 
 // ─── קייטנה אחרי סגירה ────────────────────────────────────────────────────────
@@ -1283,7 +1259,7 @@ export function handleLateCampFlow(session: BotSession, userMessage: string): Bo
     if (!looksLikeChildName(userMessage)) return buildNotAName('camp_late_name')
     session.collectedData.child_name = userMessage
     return {
-      text: `*${userMessage}* — *כיתה/גיל?*`,
+      text: botText('camp_late_ask_class', { 'ילד': userMessage }),
       nextFlow: 'camp_late_class'
     }
   }
@@ -1292,9 +1268,10 @@ export function handleLateCampFlow(session: BotSession, userMessage: string): Bo
     session.collectedData.class_name = userMessage
     const childName = session.collectedData.child_name || 'הילד/ה'
     return {
-      text: `תודה! קיבלתי ✅\n\n` +
-        `אני בודקת אם יש מקום זמין עבור *${childName}* ו*חוזרת אליך תוך יום עסקים*.\n\n` +
-        `${isBusinessHours() ? 'ניצור קשר בהמשך היום!' : 'ניצור קשר מחר בבוקר! 🌅'}`,
+      text: botText('camp_late_confirm', {
+        'ילד': childName,
+        'המשך': isBusinessHours() ? 'ניצור קשר בהמשך היום!' : 'ניצור קשר מחר בבוקר! 🌅',
+      }),
       isComplete: true,
       createTask: {
         type: 'רישום מאוחר',
@@ -1304,7 +1281,7 @@ export function handleLateCampFlow(session: BotSession, userMessage: string): Bo
     }
   }
 
-  return { text: '😊 כתבו *"קייטנה"* להתחיל מחדש.' }
+  return { text: botText('camp_restart') }
 }
 
 
@@ -2596,10 +2573,7 @@ export async function handleWaitingListSpotFlow(
 
     if (isNo(userMessage)) {
       return {
-        text:
-          `בסדר גמור 😊\n\n` +
-          `תודה על ההודעה — נמשיך לאדם הבא ברשימה.\n\n` +
-          `אם תרצו לחזור לרשימת ההמתנה בעתיד — כתבו לנו 💛`,
+        text: botText('waitlist_declined'),
         isComplete: true,
         createTask: {
           type:        'רשימת המתנה',
@@ -2611,16 +2585,13 @@ export async function handleWaitingListSpotFlow(
 
     // תגובה לא ברורה
     return {
-      text:
-        `לא הצלחתי להבין 😊\n\n` +
-        `כדי לאשר את המקום עבור *${childName}* — כתבו *"כן"*\n` +
-        `כדי לוותר — כתבו *"לא"*`,
+      text: botText('waitlist_unclear', { 'ילד': childName }),
       nextFlow: 'waiting_spot_confirm',
     }
   }
 
   return {
-    text: `😊 כתבו *"כן"* לאישור המקום, או *"לא"* לוותר.`,
+    text: botText('waitlist_restart'),
     nextFlow: 'waiting_spot_confirm',
   }
 }
