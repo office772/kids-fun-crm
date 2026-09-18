@@ -777,20 +777,12 @@ async function performCancellation(
 function buildCancelConfirm(childName: string, dayOfMonth: number): BotResponse {
   if (dayOfMonth <= 15) {
     return {
-      text: `📅 היום ה-${dayOfMonth} לחודש — אתם *בתוך חלון הביטול* ✅\n\n` +
-        `*${childName}* יכול/ה להמשיך עד סוף החודש הנוכחי.\n` +
-        `תקבלו זיכוי מלא לחודש הבא.\n\n` +
-        `*לאשר את הביטול?* (כן / לא)`,
+      text: botText('cancel_confirm_before15', { 'יום': String(dayOfMonth), 'ילד': childName }),
       nextFlow: 'cancel_confirm_before15',
     }
   }
   return {
-    text: `📅 היום ה-${dayOfMonth} לחודש.\n\n` +
-      `לפי תקנון הצהרון, ביטול לאחר ה-15 — *ממשיכים חודש נוסף* ` +
-      `ומפסיקים מהחודש שלאחריו.\n\n` +
-      `הביטול שיירשם הוא עבור *${childName}*.\n\n` +
-      `*לאשר?* (כן / לא)\n\n` +
-      `_אם יש נסיבות מיוחדות — כתבו ואנחנו נבדוק_`,
+    text: botText('cancel_confirm_after15', { 'יום': String(dayOfMonth), 'ילד': childName }),
     nextFlow: 'cancel_confirm_after15',
   }
 }
@@ -821,7 +813,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
       delete session.collectedData.child_name
       session.currentFlow = 'cancel_child'
       return {
-        text: `אוקיי — *מה שם הילד/ה הנכון?* (שם פרטי + שם משפחה)`,
+        text: botText('cancel_wrong_child'),
         nextFlow: 'cancel_child',
       }
     }
@@ -834,10 +826,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
 
   if (!step || step === 'cancel_start') {
     return {
-      text: `📋 *מדיניות ביטולים — Kids & Fun*\n\n` +
-        `• ביטול *עד ה-15 לחודש* — המשך עד סוף החודש + זיכוי מלא\n` +
-        `• ביטול *אחרי ה-15 לחודש* — ממשיכים חודש נוסף, ניתן להפסיק מהחודש שלאחריו\n\n` +
-        `כדי להמשיך — *מה שם הילד/ה* שתרצו לבטל?`,
+      text: botText('cancel_policy_intro'),
       nextFlow: 'cancel_child'
     }
   }
@@ -850,20 +839,13 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
     if (dayOfMonth <= 15) {
       // לפני 15 — ביטול מאושר אוטומטית
       return {
-        text: `📅 היום ה-${dayOfMonth} לחודש — אתם *בתוך חלון הביטול* ✅\n\n` +
-          `*${userMessage}* יכול/ה להמשיך עד סוף החודש הנוכחי.\n` +
-          `תקבלו זיכוי מלא לחודש הבא.\n\n` +
-          `*לאשר את הביטול?* (כן / לא)`,
+        text: botText('cancel_confirm_before15', { 'יום': String(dayOfMonth), 'ילד': userMessage }),
         nextFlow: 'cancel_confirm_before15'
       }
     } else {
       // אחרי 15 — מידע ברור על התקנון, ללא שאלה פתוחה
       return {
-        text: `📅 היום ה-${dayOfMonth} לחודש.\n\n` +
-          `לפי תקנון הצהרון, ביטול לאחר ה-15 — *ממשיכים חודש נוסף* ` +
-          `ומפסיקים מהחודש שלאחריו.\n\n` +
-          `*לאשר?* (כן / לא)\n\n` +
-          `_אם יש נסיבות מיוחדות — כתבו ואנחנו נבדוק_`,
+        text: botText('cancel_confirm_after15', { 'יום': String(dayOfMonth), 'ילד': userMessage }),
         nextFlow: 'cancel_confirm_after15'
       }
     }
@@ -883,10 +865,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
           ? `\n💳 *הוראת הקבע ב-PayPlus בוטלה אוטומטית* — לא יבוצעו חיובים נוספים.\n`
           : `\n`
         return {
-          text: `✅ *הביטול בוצע!*\n\n` +
-            `הרישום של *${result.childName}* עודכן במערכת — ` +
-            `ממשיך/ה עד סוף החודש הנוכחי, והזיכוי יתקבל לחודש הבא.${payplusLine}\n` +
-            `אישור סופי בכתב יישלח אליך תוך 1-2 ימי עסקים 💛`,
+          text: botText('cancel_done_before15', { 'ילד': result.childName, 'תשלום': payplusLine }),
           isComplete: true,
           createTask: {
             type: 'ביטול',
@@ -900,9 +879,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
 
       // לא אותר חד-משמעית — נציגה תשלים ידנית
       return {
-        text: `✅ *בקשת הביטול נקלטה!*\n\n` +
-          `*${childName}* ממשיך/ה עד סוף החודש הנוכחי, והזיכוי יתקבל לחודש הבא 💛\n\n` +
-          `נציגה שלנו תשלים את הביטול במערכת ותשלח אישור סופי.`,
+        text: botText('cancel_received_before15', { 'ילד': childName }),
         isComplete: true,
         createTask: {
           type: 'ביטול',
@@ -914,7 +891,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
 
     if (isBareNo(userMessage)) {
       return {
-        text: `בסדר, הביטול *לא בוצע* 😊\nאם תרצו לחזור לנושא — כתבו לנו בכל עת!`,
+        text: botText('cancel_declined_before15'),
         isComplete: true
       }
     }
@@ -930,11 +907,11 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
     // הורה מציין נסיבות מיוחדות → הסלמה לנציגה
     if (/מחלה|רפואי|מעבר|חריג|נסיבות|בעיה|קשה|אי אפשר|לא יכול/i.test(userMessage)) {
       return {
-        text: `מבינים לגמרי 💛\n\n` +
-          `מקרים כאלה מטופלים באופן אישי.\n\n` +
-          `${isBusinessHours()
+        text: botText('cancel_exception', {
+          'המשך': isBusinessHours()
             ? 'נציגה שלנו תחזור אליך בהקדם לטיפול בבקשה.'
-            : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) 📬'}`,
+            : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) 📬',
+        }),
         isComplete: true,
         createTask: {
           type: 'ביטול חריג',
@@ -955,10 +932,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
           ? `\n💳 *הוראת הקבע ב-PayPlus בוטלה אוטומטית* — לא יבוצעו חיובים נוספים אחרי החודש הבא.\n`
           : `\n`
         return {
-          text: `✅ *הביטול בוצע!*\n\n` +
-            `הרישום של *${result.childName}* עודכן במערכת — ` +
-            `ממשיך/ה חודש נוסף ומסיים/ת בסוף החודש הבא.${payplusLine}\n` +
-            `אישור סופי בכתב יישלח אליך תוך 1-2 ימי עסקים 💛`,
+          text: botText('cancel_done_after15', { 'ילד': result.childName, 'תשלום': payplusLine }),
           isComplete: true,
           createTask: {
             type: 'ביטול',
@@ -971,9 +945,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
       }
 
       return {
-        text: `✅ *בקשת הביטול נקלטה*\n\n` +
-          `*${childName}* ממשיך/ה חודש נוסף ומסיים/ת בסוף החודש הבא.\n\n` +
-          `נציגה שלנו תשלים את הביטול במערכת ותשלח אישור סופי 💛`,
+        text: botText('cancel_received_after15', { 'ילד': childName }),
         isComplete: true,
         createTask: {
           type: 'ביטול',
@@ -985,8 +957,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
 
     if (isBareNo(userMessage)) {
       return {
-        text: `בסדר, הביטול *לא בוצע* 😊\n` +
-          `שמחים שאתם נשארים! אם תרצו לחזור לנושא — כתבו לנו.`,
+        text: botText('cancel_declined_after15'),
         isComplete: true
       }
     }
@@ -995,7 +966,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
     return { text: '', useLLM: true }
   }
 
-  return { text: '😊 כתבו *"ביטול"* להתחיל מחדש.' }
+  return { text: botText('cancel_restart') }
 }
 
 
