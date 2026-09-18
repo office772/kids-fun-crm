@@ -1349,9 +1349,7 @@ export async function handleScheduleFlow(message: string): Promise<BotResponse> 
 
   // אין עדיין FAQ מתאים — תשובה רכה ללא שעות קשיחות (כדי לא לסתור את ה-FAQ)
   return {
-    text:
-      `אשמח לעזור! 😊\n\n` +
-      `לשעות הפעילות ולוח החגים המעודכן — נציגה שלנו תשלח לך את הפרטים המדויקים בהקדם 💛`,
+    text: botText('schedule_no_faq'),
     isComplete: true,
   }
 }
@@ -1366,7 +1364,7 @@ export function handleEarlyPickupFlow(session: BotSession, userMessage: string):
 
   if (!step || step === 'pickup_start') {
     return {
-      text: `👋 *בקשת איסוף מוקדם*\n\n*מה שם הילד/ה* שתרצו לאסוף?`,
+      text: botText('pickup_start'),
       nextFlow: 'pickup_child'
     }
   }
@@ -1378,7 +1376,7 @@ export function handleEarlyPickupFlow(session: BotSession, userMessage: string):
     if (!looksLikeChildName(userMessage)) return buildNotAName('pickup_child')
     session.collectedData.child_name = userMessage
     return {
-      text: `*${userMessage}* — *באיזו שעה* תרצו לאסוף?`,
+      text: botText('pickup_ask_time', { 'ילד': userMessage }),
       nextFlow: 'pickup_time'
     }
   }
@@ -1391,14 +1389,14 @@ export function handleEarlyPickupFlow(session: BotSession, userMessage: string):
       session.collectedData._pickup_time_miss = String(misses)
       if (misses >= 2) return { text: '', useLLM: true }
       return {
-        text: `רק כדי לא לטעות — *באיזו שעה* לאסוף? 🕒\n_(לדוגמה: 15:00, "בשלוש", "3 וחצי")_`,
+        text: botText('pickup_time_retry'),
         nextFlow: 'pickup_time',
       }
     }
     delete session.collectedData._pickup_time_miss
     session.collectedData.pickup_time = time
     return {
-      text: `שעה *${time}* ✅\n\n*מי יאסוף?*\n(שם + קרבה, למשל: "אבא דני" / "סבתא שרה")`,
+      text: botText('pickup_ask_collector', { 'שעה': time }),
       nextFlow: 'pickup_collector'
     }
   }
@@ -1409,11 +1407,7 @@ export function handleEarlyPickupFlow(session: BotSession, userMessage: string):
     const time = session.collectedData.pickup_time || '?'
 
     return {
-      text: `✅ *בקשת האיסוף התקבלה!*\n\n` +
-        `👧 ילד/ה: *${childName}*\n` +
-        `⏰ שעה: *${time}*\n` +
-        `🚗 אוסף/ת: *${userMessage}*\n\n` +
-        `הצוות עודכן ויהיה מוכן 😊`,
+      text: botText('pickup_confirm', { 'ילד': childName, 'שעה': time, 'אוסף': userMessage }),
       isComplete: true,
       createTask: {
         type: 'איסוף מוקדם',
@@ -1426,7 +1420,7 @@ export function handleEarlyPickupFlow(session: BotSession, userMessage: string):
     }
   }
 
-  return { text: '😊 כתבו *"איסוף מוקדם"* להתחיל מחדש.' }
+  return { text: botText('pickup_restart') }
 }
 
 
@@ -1437,14 +1431,7 @@ export function handleEarlyPickupFlow(session: BotSession, userMessage: string):
 export function handlePaymentStatusFlow(parentName?: string): BotResponse {
   const firstName = parentName ? parentName.split(' ')[0] : ''
   return {
-    text:
-      `💰 *תשלומים — Kids & Fun*\n\n` +
-      `${firstName ? `היי ${firstName}! ` : ''}על מה תרצו לשאול?\n\n` +
-      `*1* — סטטוס התשלום שלי\n` +
-      `*2* — לשנות שיטת תשלום\n` +
-      `*3* — לא עבר תשלום / בעיה\n` +
-      `*4* — מה העלות החודשית?\n` +
-      `*5* — 💳 להסדיר תשלום חדש`,
+    text: botText('payment_menu', { 'ברכה': firstName ? `היי ${firstName}! ` : '' }),
     nextFlow: 'payment_status_menu',
   }
 }
@@ -1470,10 +1457,7 @@ export async function handlePaymentStatusMenuFlow(
 
     // הטלפון לא מזוהה → מבקשים שם ילד לזיהוי
     return {
-      text:
-        `🔍 *בדיקת סטטוס תשלום*\n\n` +
-        `לא מצאתי את המספר שלך במערכת — בוא/י נזהה אותך:\n\n` +
-        `*מה שם הילד/ה? (שם פרטי + שם משפחה)*`,
+      text: botText('payment_status_ask_child'),
       nextFlow: 'payment_status_child_name',
     }
   }
@@ -1482,14 +1466,7 @@ export async function handlePaymentStatusMenuFlow(
   if (msg === '2' || /שיטה|לשנות|אמצעי|אחרת|אחר/i.test(msg)) {
     session.collectedData.payment_setup_reason = 'method_change'
     return {
-      text:
-        `*שינוי שיטת תשלום* — נשמח לעזור! 💛\n\n` +
-        `*באיזו שיטה הייתם רוצים להמשיך?*\n\n` +
-        `*1* — 💳 כרטיס אשראי (PayPlus)\n` +
-        `*2* — 🏦 הוראת קבע (PayPlus)\n` +
-        `*3* — 💵 מזומן\n` +
-        `*4* — 📝 צ׳קים\n` +
-        `*5* — 🏛️ העברה בנקאית`,
+      text: botText('payment_method_change_menu'),
       nextFlow: 'payment_setup_method',
     }
   }
@@ -1503,13 +1480,7 @@ export async function handlePaymentStatusMenuFlow(
   // בחירה 4 — עלות → תפריט עלויות מפורט
   if (msg === '4' || /עלות|מחיר|כמה עולה|כמה זה|עלה|עלות חודשית/i.test(msg)) {
     return {
-      text:
-        `💰 *שאלות עלות — Kids & Fun*\n\n` +
-        `על מה תרצו לדעת?\n\n` +
-        `*1* — 📅 עלות חודשית צהרון\n` +
-        `*2* — ☀️ תשלום מראש לקייטנה\n` +
-        `*3* — 👨‍👩‍👧‍👦 הנחת אחים / אחיות\n` +
-        `*4* — 💬 שאלה אחרת על עלות`,
+      text: botText('cost_info_menu'),
       nextFlow: 'cost_info_start',
     }
   }
@@ -1538,10 +1509,7 @@ async function handlePaymentStatusChildName(
   const words = nameInput.split(' ').filter(w => w.length >= 2)
   if (words.length < 2 || /\d/.test(nameInput)) {
     return {
-      text:
-        `צריך שם מלא לצורך זיהוי 😊\n\n` +
-        `*אנא כתבו שם פרטי + שם משפחה של הילד/ה*\n` +
-        `_(למשל: נועה כהן)_`,
+      text: botText('payment_status_name_invalid'),
       nextFlow: 'payment_status_child_name',
     }
   }
@@ -1552,9 +1520,7 @@ async function handlePaymentStatusChildName(
   const ownChild = await findOwnChildByName(session.phone, nameInput)
   if (!ownChild) {
     return {
-      text:
-        `המספר הזה לא מופיע אצלנו במערכת 🤔\n\n` +
-        `העברתי לקורלי, הנציגה שלנו, שתבדוק ותחזור אליך 💛`,
+      text: botText('payment_status_unidentified'),
       isComplete: true,
       createTask: {
         type:        'שאלה כללית',
@@ -1572,11 +1538,12 @@ async function handlePaymentStatusChildName(
 
   // הילד/ה של ההורה אותר/ה אך אין נתוני תשלום → נציגה תבדוק
   return {
-    text:
-      `🔍 לא הצלחתי לאתר את פרטי התשלום של *${ownChild.name}*.\n\n` +
-      `${isBusinessHours()
+    text: botText('payment_status_no_data', {
+      'ילד': ownChild.name,
+      'המשך': isBusinessHours()
         ? 'נציגה שלנו תבדוק את החשבון ותחזור אליך מיד 😊'
-        : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) עם הפרטים 💛'}`,
+        : 'נחזור אליך בשעות הפעילות (ראשון-חמישי 8:00-17:00) עם הפרטים 💛',
+    }),
     isComplete: true,
     createTask: {
       type:        'שאלה כללית',
@@ -1605,15 +1572,7 @@ export async function handleCostInfoFlow(
       : 'בהתאם לאזור המגורים'
 
     return {
-      text:
-        `📅 *עלות חודשית צהרון — Kids & Fun*\n\n` +
-        `העלות החודשית ${areaInfo} היא *${amount}₪* (כולל מע"מ).\n\n` +
-        `*כולל:*\n` +
-        `✅ ליווי מקצועי ראשון-חמישי\n` +
-        `✅ ארוחת צהריים וחטיפים\n` +
-        `✅ פעילויות חינוכיות\n\n` +
-        `התשלום מתבצע בתחילת כל חודש.\n\n` +
-        `רוצים להסדיר תשלום? כתבו *"תשלום"* 💳`,
+      text: botText('cost_monthly', { 'אזור': areaInfo, 'סכום': amount }),
       isComplete: true,
     }
   }
@@ -1621,15 +1580,7 @@ export async function handleCostInfoFlow(
   // ─── 2. קייטנה — תשלום מראש ─────────────────────────────────────────────────
   if (msg === '2' || /קייטנה|קיץ|קיטנה|גיני|קמפ/i.test(msg)) {
     return {
-      text:
-        `☀️ *קייטנה קיץ — Kids & Fun*\n\n` +
-        `הקייטנה משולמת *מראש במלואה* בעת הרישום.\n\n` +
-        `*מחיר הקייטנה:* החל מ-*1,200₪* (תלוי בתוכנית ומשך).\n\n` +
-        `*כולל:*\n` +
-        `✅ פעילויות יומיות מגוונות\n` +
-        `✅ טיולים שבועיים\n` +
-        `✅ ארוחות כלולות\n\n` +
-        `_פרטים מלאים ועלות מדויקת — צרו קשר לרישום_ 💛`,
+      text: botText('cost_camp'),
       isComplete: true,
     }
   }
@@ -1637,13 +1588,7 @@ export async function handleCostInfoFlow(
   // ─── 3. הנחת אחים ──────────────────────────────────────────────────────────
   if (msg === '3' || /אחים|אחיות|הנחה|שני ילדים|שניים|יותר מ/i.test(msg)) {
     return {
-      text:
-        `👨‍👩‍👧‍👦 *הנחת אחים — Kids & Fun*\n\n` +
-        `מ-2 ילדים ומעלה מאותה משפחה:\n\n` +
-        `✅ *ילד ראשון* — מחיר מלא\n` +
-        `✅ *ילד שני ואילך* — *הנחה של 10%*\n\n` +
-        `ההנחה מחושבת אוטומטית בעת הרישום.\n\n` +
-        `_לרישום ילד נוסף — כתבו "רישום" ונתחיל_ 🎒`,
+      text: botText('cost_siblings'),
       isComplete: true,
     }
   }
@@ -1651,10 +1596,7 @@ export async function handleCostInfoFlow(
   // ─── 4. שאלה אחרת — LLM (לא נציגה!) ────────────────────────────────────────
   if (msg === '4' || /אחר|אחרת|שאלה|אחרות/i.test(msg)) {
     return {
-      text:
-        `💬 *שאלות נוספות על עלות*\n\n` +
-        `כתבו את שאלתכם בחופשיות — אנסה לענות! 😊\n\n` +
-        `_לדוגמה: "יש הנחה לחד הורי?" / "מה אם ביטלנו באמצע חודש?"_`,
+      text: botText('cost_other_prompt'),
       nextFlow: 'cost_info_freetext',
     }
   }
@@ -1670,12 +1612,7 @@ export async function handleCostInfoFlow(
 
   // ─── לא הבין ────────────────────────────────────────────────────────────────
   return {
-    text:
-      `לא הבנתי 😊\n\n` +
-      `*1* — 📅 עלות חודשית צהרון\n` +
-      `*2* — ☀️ תשלום מראש לקייטנה\n` +
-      `*3* — 👨‍👩‍👧‍👦 הנחת אחים / אחיות\n` +
-      `*4* — 💬 שאלה אחרת`,
+    text: botText('cost_not_understood'),
     nextFlow: 'cost_info_start',
   }
 }
