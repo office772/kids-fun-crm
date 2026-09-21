@@ -49,6 +49,11 @@ export async function POST(req: NextRequest) {
         : {},
     }
 
+    // astra #9: הסימולטור אינו sandbox אמיתי — מסמנים את ה-session כ"מדומה" כדי
+    // שפעולות הרסניות (ביטול רישום + ביטול הו"ק ב-PayPlus) לא ייגעו בנתונים חיים,
+    // גם כשסופק testPhone אמיתי ומצב שיחה בשלב אישור.
+    session.simulated = true
+
     // טעינת settings + מסגרות פעם אחת לבקשה — flows קורא סינכרונית מה-cache.
     await Promise.all([primeSettingsCache(), primeSchoolsCache(), primeBotMessagesCache()])
     // processMessage הוא עכשיו async (LLM fallback)

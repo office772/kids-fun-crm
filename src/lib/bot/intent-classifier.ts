@@ -212,11 +212,14 @@ export function classifyIntent(text: string): BotIntent {
   // ── הודעה ארוכה / רב-נושאית → לא מתחילים מסלול בניחוש ────────────────────
   // בקשת נציג מפורשת תמיד גוברת (היא חד-משמעית, גם בתוך נאום ארוך).
   const asksHuman = intentKeywords['בקשת_נציג'].some(kw => matchKeyword(lowerText, kw.toLowerCase()))
-  if (!asksHuman) {
-    const wordCount = trimmed.split(/\s+/).filter(Boolean).length
-    if (wordCount > 40) return 'לא_ידוע'
-    if (matchedFamilies(lowerText) >= 3) return 'לא_ידוע'
-  }
+  // astra #4: בקשת נציג/ה מפורשת גוברת על כל נושא (ביטול/לו"ז/מחיר) — היא חד-משמעית,
+  // גם בתוך משפט כמו "לדבר עם נציגה על ביטול הצהרון". קודם היא רק עקפה את מסנן
+  // האורך, וחוק ביטול+מסגרת שרץ אחריה גבר עליה.
+  if (asksHuman) return 'בקשת_נציג'
+
+  const wordCount = trimmed.split(/\s+/).filter(Boolean).length
+  if (wordCount > 40) return 'לא_ידוע'
+  if (matchedFamilies(lowerText) >= 3) return 'לא_ידוע'
 
   // "לבטל צהרון/קייטנה" → ביטול (לא רישום!) — אחרת המילה "צהרון" תפעיל רישום
   if (CANCEL_WORDS.some(w => matchKeyword(lowerText, w)) &&

@@ -126,7 +126,7 @@ function makeNewSession(phone: string, parentId?: string, parentName?: string): 
 async function loadSession(
   supabase: ReturnType<typeof createServiceClient>,
   phone: string
-): Promise<BotSession | null> {
+): Promise<{ session: BotSession; rev: string | null } | null> {
   // ⚠️ עמודות הטבלה: current_flow, collected_data, last_message_at, expires_at
   // (לא session_data/last_activity — אי-התאמה זו גרמה לכך שה-session לא נשמר!)
   const { data, error } = await supabase
@@ -145,19 +145,24 @@ async function loadSession(
   if (expired) return null
 
   return {
-    sessionId:     `${phone}-session`,
-    phone,
-    parentId:      data.parent_id ?? undefined,
-    currentFlow:   data.current_flow ?? undefined,
-    collectedData: (data.collected_data as BotSession['collectedData']) ?? {},
-    messages:      [],
+    session: {
+      sessionId:     `${phone}-session`,
+      phone,
+      parentId:      data.parent_id ?? undefined,
+      currentFlow:   data.current_flow ?? undefined,
+      collectedData: (data.collected_data as BotSession['collectedData']) ?? {},
+      messages:      [],
+    },
+    rev: (data.last_message_at as string | null) ?? null,
   }
 }
 
+// מחזיר true אם השמירה הצליחה. astra #14: הקורא חייב לדעת על כשל ולא להציג
+// את השאלה הבאה כאילו נשמרה.
 async function saveSession(
   supabase: ReturnType<typeof createServiceClient>,
   session: BotSession
-) {
+): Promise<boolean> {
   const now = Date.now()
   const { error } = await supabase.from('bot_sessions').upsert(
     {
@@ -170,7 +175,32 @@ async function saveSession(
     },
     { onConflict: 'phone' }
   )
-  if (error) console.error('[manychat] saveSession error:', error.message)
+  if (error) { console.error('[manychat] saveSession error:', error.message); return false }
+  return true
+}
+
+// שמירה מותנית-גרסה (astra #12): כותבת *רק* אם השיחה לא התקדמה מאז שנטענה.
+// expectedRev = ה-last_message_at שנטען בבקשה הזו. עדכון מותנה בפעולת DB אחת
+// (אין חלון מרוץ בין "בדוק" ל"שמור"). 0 שורות = הגיעה הודעה חדשה ⇒ תוצאה מיושנת.
+// session חדש (בלי rev) → upsert רגיל.
+async function saveSessionIfCurrent(
+  supabase: ReturnType<typeof createServiceClient>,
+  session: BotSession,
+  expectedRev: string | null
+): Promise<{ saved: boolean; stale: boolean }> {
+  if (!expectedRev) return { saved: await saveSession(supabase, session), stale: false }
+  const now = Date.now()
+  const { data, error } = await supabase.from('bot_sessions').update({
+    parent_id:       session.parentId ?? null,
+    current_flow:    session.currentFlow ?? null,
+    collected_data:  session.collectedData ?? {},
+    last_message_at: new Date(now).toISOString(),
+    expires_at:      new Date(now + 30 * 60 * 1000).toISOString(),
+  }).eq('phone', session.phone).eq('last_message_at', expectedRev).select('phone')
+  if (error) { console.error('[manychat] saveSessionIfCurrent error:', error.message); return { saved: false, stale: false } }
+  const updated = (data?.length ?? 0) > 0
+  if (!updated) console.log(`[manychat] stale deferred write skipped for ${session.phone} (session advanced)`)
+  return { saved: updated, stale: !updated }
 }
 
 async function clearSession(
@@ -243,8 +273,8 @@ async function logConversation(
     sessionId?: string
     idMessage?: string | null   // מזהה הודעת uChat — לסינון כפילויות
   }
-) {
-  await supabase.from('conversations').insert({
+): Promise<{ error: { code?: string; message?: string } | null }> {
+  const { error } = await supabase.from('conversations').insert({
     phone: opts.phone,
     parent_id: opts.parentId ?? null,
     platform: 'whatsapp',
@@ -255,6 +285,7 @@ async function logConversation(
     session_id: opts.sessionId ?? null,
     id_message: opts.idMessage ?? null,
   })
+  return { error: (error as { code?: string; message?: string } | null) ?? null }
 }
 
 // ─── Create task ───────────────────────────────────────────────────────────────
@@ -392,26 +423,44 @@ async function applyResult(
   parent: { id?: string; name?: string | null },
   phone: string,
   result: ProcResult,
-) {
+  opts?: { rev?: string | null },   // rev נמסר בנתיב הדחוי → שמירה מותנית-גרסה (astra #12)
+): Promise<{ saved: boolean; stale: boolean }> {
   if (result.nextFlow) {
     session.currentFlow = result.nextFlow
   } else if (result.isComplete) {
     session.currentFlow = undefined
     session.collectedData = {}
   }
+
+  let saved = true, stale = false
   if (result.isComplete && !result.nextFlow) {
     await clearSession(supabase, phone)
+  } else if (opts && opts.rev !== undefined) {
+    const res = await saveSessionIfCurrent(supabase, session, opts.rev)
+    saved = res.saved; stale = res.stale
   } else {
-    await saveSession(supabase, session)
+    saved = await saveSession(supabase, session)
   }
+
+  // תוצאה מיושנת (השיחה התקדמה בינתיים) — לא יוצרים משימה/התראה על תשובה ישנה (astra #12)
+  if (stale) return { saved, stale }
+
   if (result.createTask) {
     let frameworkCtx: { area_code: string; school?: string; type?: 'צהרון'|'קייטנה' } | undefined
     if (result.notifyFramework?.byChildName) {
-      const { data: kid } = await supabase
-        .from('children').select('area_code, school, framework')
-        .ilike('name', result.notifyFramework.byChildName).limit(1).maybeSingle()
-      if (kid?.area_code) {
-        frameworkCtx = { area_code: kid.area_code, school: kid.school ?? undefined, type: (kid.framework === 'קייטנה' ? 'קייטנה' : 'צהרון') }
+      // ⚠️ astra #10: לנתב את בקשת האיסוף *רק* למסגרת של ילד ששייך להורה המזוהה,
+      //    ובהתאמה חד-משמעית. חיפוש שם גלובלי (limit(1) בלי parent) שלח את המסגרת
+      //    של ילד ממשפחה אחרת. הורה לא מזוהה / שם כפול → אין ניתוב אוטומטי; הפנייה
+      //    נשמרת כמשימה והצוות מאמת ידנית.
+      if (parent.id) {
+        const { data: kids } = await supabase
+          .from('children').select('area_code, school, framework')
+          .eq('parent_id', parent.id)
+          .ilike('name', `%${result.notifyFramework.byChildName}%`)
+        if (kids && kids.length === 1 && kids[0].area_code) {
+          const kid = kids[0]
+          frameworkCtx = { area_code: kid.area_code, school: kid.school ?? undefined, type: (kid.framework === 'קייטנה' ? 'קייטנה' : 'צהרון') }
+        }
       }
     } else if (result.notifyFramework?.area_code) {
       frameworkCtx = { area_code: result.notifyFramework.area_code, school: result.notifyFramework.school, type: result.notifyFramework.type }
@@ -426,6 +475,7 @@ async function applyResult(
       parentPhone: phone,
     })
   }
+  return { saved, stale }
 }
 
 // ─── POST ──────────────────────────────────────────────────────────────────────
@@ -473,19 +523,12 @@ export async function POST(req: NextRequest) {
 
   const supabase = createServiceClient()
 
-  // ─── סינון כפילויות (משוב קורלי: הבוט ענה פעמיים על אותה הודעה) ─────────────
-  // 1. לפי מזהה הודעה (אם uChat שלח) — webhook retry קלאסי.
-  // 2. לפי טקסט זהה מאותו טלפון ב-15 השניות האחרונות — כפילות בלי מזהה.
-  try {
-    if (messageId) {
-      const { data: dupById } = await supabase
-        .from('conversations').select('id')
-        .eq('id_message', messageId).limit(1)
-      if (dupById?.length) {
-        console.log(`[manychat] duplicate message_id ${messageId} — skipped`)
-        return NextResponse.json({ reply: '', skip: true, duplicate: true }, { status: 200 })
-      }
-    } else {
+  // ─── כפילויות ───────────────────────────────────────────────────────────────
+  // עם מזהה: נתפס *אטומית* ב-INSERT של ההודעה הנכנסת (id_message UNIQUE) למטה.
+  //   astra #13: SELECT-ואז-INSERT אינו אטומי — שתי בקשות מקבילות עברו וענו פעמיים.
+  // בלי מזהה: best-effort לפי טקסט זהה מאותו טלפון ב-15ש' האחרונות.
+  if (!messageId) {
+    try {
       const cutoff = new Date(Date.now() - 15_000).toISOString()
       const { data: dupByText } = await supabase
         .from('conversations').select('id')
@@ -496,9 +539,9 @@ export async function POST(req: NextRequest) {
         console.log(`[manychat] duplicate text within 15s from ${phone} — skipped`)
         return NextResponse.json({ reply: '', skip: true, duplicate: true }, { status: 200 })
       }
+    } catch (err) {
+      console.error('[manychat] text-dedup check failed (continuing):', err)
     }
-  } catch (err) {
-    console.error('[manychat] dedup check failed (continuing):', err)
   }
 
   // 1. טעינת הורה
@@ -509,12 +552,16 @@ export async function POST(req: NextRequest) {
     await supabase.from('parents').update({ uchat_user_ns: userNs }).eq('id', parent.id)
   }
 
-  // 2. טעינת session או יצירה חדשה
-  let session = await loadSession(supabase, phone)
-  if (!session) {
+  // 2. טעינת session או יצירה חדשה. rev = טוקן העדכניות (last_message_at) לשמירה
+  //    מותנית-גרסה בנתיב הדחוי (astra #12).
+  const loaded = await loadSession(supabase, phone)
+  let session: BotSession
+  let sessionRev: string | null = null
+  if (!loaded) {
     session = makeNewSession(phone, parent.id, parent.name)
   } else {
-    // עדכן parentId + parentName בכל מקרה
+    session = loaded.session
+    sessionRev = loaded.rev
     session.parentId = parent.id
     session.parentName = session.parentName || parent.name
   }
@@ -522,8 +569,10 @@ export async function POST(req: NextRequest) {
   // טעינת היסטוריית שיחה ל-context של ה-LLM (לפני רישום ההודעה הנוכחית)
   session.messages = await loadRecentMessages(supabase, phone)
 
-  // 3. רישום ההודעה הנכנסת
-  await logConversation(supabase, {
+  // 3. רישום ההודעה הנכנסת — *וגם* השער האטומי לכפילויות (id_message UNIQUE).
+  //    שתי בקשות מקבילות עם אותו מזהה: רק אחת מצליחה ב-INSERT; השנייה מקבלת 23505
+  //    ונעצרת כאן, לפני processMessage — כך רק אחת מעבדת ומגיבה (astra #13).
+  const incoming = await logConversation(supabase, {
     phone,
     parentId: parent.id,
     direction: 'נכנס',
@@ -531,6 +580,10 @@ export async function POST(req: NextRequest) {
     sessionId: session.sessionId,
     idMessage: messageId,
   })
+  if (messageId && incoming.error?.code === '23505') {
+    console.log(`[manychat] duplicate message_id ${messageId} (atomic insert) — skipped`)
+    return NextResponse.json({ reply: '', skip: true, duplicate: true }, { status: 200 })
+  }
 
   // 3.5 קובץ/תמונה שדורשים ניתוח → ack מיידי + המשך ברקע (A7). קבצים שלא
   //     מנתחים (וורד/אקסל/אודיו) נשארים בנתיב הרגיל — האישור שלהם מיידי ממילא.
@@ -566,7 +619,13 @@ export async function POST(req: NextRequest) {
   // ── תשובה מהירה (רוב המקרים) — נתיב רגיל ──────────────────────────────────
   if (raced !== DEFER) {
     const result = raced
-    await applyResult(supabase, session, parent, phone, result)
+    const { saved } = await applyResult(supabase, session, parent, phone, result)
+    if (!saved) {
+      // astra #14: שמירת ה-session נכשלה — לא שולחים את השאלה הבאה כאילו התקדמנו.
+      // תשובת retry בטוחה; ההודעה הבאה תיטופל מהמצב הקודם ולא כאילו כבר נשמר.
+      console.error(`[manychat] session save failed for ${phone} — returning safe retry`)
+      return NextResponse.json({ reply: 'רגע, הייתה תקלה קטנה אצלנו 🙏 אפשר לשלוח שוב?', intent: result.intent, saveError: true }, { status: 200 })
+    }
     if (result.text) {
       await logConversation(supabase, { phone, parentId: parent.id, direction: 'יוצא', text: result.text, intent: result.intent, sessionId: session.sessionId })
     }
@@ -581,7 +640,13 @@ export async function POST(req: NextRequest) {
     waitUntil((async () => {
       try {
         const result = await resultP
-        await applyResult(supabase, session, parent, phone, result)
+        // astra #12: שמירה מותנית-גרסה. אם השיחה התקדמה בינתיים (הורה שלח הודעה
+        // חדשה) — התוצאה הישנה מיושנת: לא שומרים ולא שולחים אותה.
+        const { stale } = await applyResult(supabase, session, parent, phone, result, { rev: sessionRev })
+        if (stale) {
+          console.log(`[manychat] deferred result for ${phone} is stale — not sending (conversation advanced)`)
+          return
+        }
         if (result.text) {
           const sent = await sendText(ns, result.text)
           await logConversation(supabase, { phone, parentId: parent.id, direction: 'יוצא', text: (sent ? '' : '⚠️ (לא נמסר להורה) ') + result.text, intent: result.intent, sessionId: session.sessionId })
@@ -600,7 +665,11 @@ export async function POST(req: NextRequest) {
 
   // ── אין user_ns — נתיב סינכרוני (מחכים לתשובה גם אם איטית) ─────────────────
   const result = await resultP
-  await applyResult(supabase, session, parent, phone, result)
+  const { saved: syncSaved } = await applyResult(supabase, session, parent, phone, result)
+  if (!syncSaved) {
+    console.error(`[manychat] session save failed for ${phone} (sync) — returning safe retry`)
+    return NextResponse.json({ reply: 'רגע, הייתה תקלה קטנה אצלנו 🙏 אפשר לשלוח שוב?', intent: result.intent, saveError: true }, { status: 200 })
+  }
   if (result.text) {
     await logConversation(supabase, { phone, parentId: parent.id, direction: 'יוצא', text: result.text, intent: result.intent, sessionId: session.sessionId })
   }

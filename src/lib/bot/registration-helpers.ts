@@ -11,7 +11,9 @@ export function areaFromMessage(msg: string): string | null {
   const m = msg.trim()
   if (m === '1' || /שרון|דרום|חוף השרון/i.test(m))  return 'sharon'
   if (m === '2' || /כרמל/i.test(m))                  return 'carmel'
-  if (m === '3' || /תל אביב|תלאביב|גן|גני/i.test(m)) return 'telaviv'
+  // astra #5: "גן"/"גני" הוסרו — מילה גנרית ("הילד בגן בגבעתיים") מיפתה כל הודעה
+  // לת"א. שמות גנים ספציפיים נתפסים ב-areaFromSchoolName שרץ *לפני* פונקציה זו.
+  if (m === '3' || /תל אביב|תלאביב|תל-אביב|ת"א|ת״א/i.test(m)) return 'telaviv'
   return null
 }
 

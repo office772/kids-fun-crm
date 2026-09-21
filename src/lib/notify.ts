@@ -13,6 +13,8 @@
 // הנציגה הראשית מקבלת תמיד עותק (כברירת מחדל).
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { sendText as uchatSendText, getUserNsByPhone } from './uchat'
+
 export interface StaffNotification {
   text:      string
   priority?: 'דחוף' | 'גבוה' | 'רגיל'
@@ -21,27 +23,6 @@ export interface StaffNotification {
     area_code:  string                  // 'carmel' / 'sharon' / 'telaviv'
     school?:    string                  // שם בי"ס / גן (התאמה מילולית)
     type?:      'צהרון' | 'קייטנה'      // ברירת מחדל: צהרון
-  }
-}
-
-async function sendUchatMessage(userNs: string, text: string): Promise<boolean> {
-  const token = process.env.UCHAT_API_TOKEN
-  const base  = process.env.UCHAT_BASE_URL ?? 'https://www.uchat.com.au'
-  if (!token) return false
-  try {
-    const res = await fetch(`${base}/api/subscriber/send-text`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body:    JSON.stringify({ user_ns: userNs, text }),
-    })
-    if (!res.ok) {
-      console.error(`[notifyStaff] uChat HTTP ${res.status} for ${userNs}: ${(await res.text().catch(() => '')).slice(0, 120)}`)
-      return false
-    }
-    return true
-  } catch (err) {
-    console.error('[notifyStaff] uChat error:', err)
-    return false
   }
 }
 
@@ -91,17 +72,20 @@ export async function notifyStaff(notification: StaffNotification): Promise<bool
     return false
   }
 
-  // שליחה בפועל — לכל user_ns ידוע. לאנשי צוות עם טלפון בלבד (ולא user_ns) נדרשת
-  // הגדרה עתידית של מיפוי טלפון→user_ns ב-uChat; כרגע אנחנו רושמים ללוג.
+  // שליחה בפועל דרך ה-helper המשותף (uchat.sendText) — שדה `content` + בדיקת
+  // שגיאת ספק *בגוף* (uChat מחזיר 200 עם status:error). לצוות עם טלפון בלבד:
+  // פותרים user_ns דרך uChat/DB ושולחים בפועל; אם לא נפתר — לא נמסר (מדווח).
+  // astra #11: אין לדווח הצלחה כשהספק החזיר שגיאה, ואין "would send" מדומה.
   let sentCount = 0
+  const undelivered: string[] = []
   for (const r of recipients) {
-    if (r.userNs) {
-      if (await sendUchatMessage(r.userNs, baseText)) sentCount++
-    } else if (r.phone) {
-      console.log(`[notifyStaff] would send to ${r.label} (${r.phone}) — phone→uChat mapping not yet configured`)
-    }
+    let ns = r.userNs
+    if (!ns && r.phone) ns = (await getUserNsByPhone(r.phone)) ?? undefined
+    if (ns && (await uchatSendText(ns, baseText))) sentCount++
+    else undelivered.push(`${r.label}${r.phone ? ` (${r.phone})` : ''}`)
   }
-  console.log(`[notifyStaff] sent to ${sentCount}/${recipients.length} recipients`)
+  if (undelivered.length) console.warn(`[notifyStaff] ⚠️ לא נמסר ל: ${undelivered.join(' | ')}`)
+  console.log(`[notifyStaff] נמסר ל-${sentCount}/${recipients.length} נמענים`)
   return sentCount > 0
 }
 

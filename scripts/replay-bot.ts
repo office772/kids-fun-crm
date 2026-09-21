@@ -303,6 +303,41 @@ async function cancelSafetyCases() {
       r.nextFlow === 'handoff_paused' && Object.keys(s.collectedData).length === 0,
       `nextFlow=${r.nextFlow} data=${JSON.stringify(s.collectedData)}`)
   }
+
+  // ─── astra #2: אישור *מסויג* אינו מבצע ביטול (S1 — כספי) ─────────────────────
+  console.log('\n── S1: אישור ביטול חד-משמעי (astra) ──')
+  const qualifiedYes: Array<[string, string]> = [
+    ['cancel_confirm_after15', 'כן אבל רגע'],
+    ['cancel_confirm_after15', 'כן, חכה'],
+    ['cancel_confirm_after15', 'כן רק שנייה'],
+    ['cancel_confirm_after15', 'כן?'],
+    ['cancel_confirm_after15', 'אולי כן'],
+    ['cancel_confirm_before15', 'כן אבל רגע'],
+    ['cancel_confirm_before15', 'בסדר'],
+  ]
+  for (const [flow, msg] of qualifiedYes) {
+    const s = makeSession(flow, { child_name: 'נועם בירן' })
+    const r = await processMessage(s, msg)
+    check(`${flow} — "${msg}" לא מבצע ביטול`,
+      !/הביטול בוצע|בקשת הביטול נקלטה/.test(r.text) && r.isComplete !== true,
+      `isComplete=${r.isComplete} text=${JSON.stringify(r.text.slice(0, 90))}`)
+  }
+  // אישור נקי כן מבצע — regression guard (לא לשבור את הזרימה התקינה)
+  {
+    const s = makeSession('cancel_confirm_after15', { child_name: 'נועם בירן' })
+    const r = await processMessage(s, 'כן')
+    check('cancel_confirm_after15 — "כן" נקי כן מבצע ביטול',
+      r.isComplete === true && /ביטול/.test(r.text),
+      `isComplete=${r.isComplete} text=${JSON.stringify(r.text.slice(0, 90))}`)
+  }
+  // מסלול המתנה — "לא אבל רגע" לא מוותר על המקום; "כן אבל" לא לוקח אותו
+  {
+    const s = makeSession('waiting_spot_confirm', { child_name: 'נועם בירן', area_label: 'חוף הכרמל' })
+    const r = await processMessage(s, 'לא אבל רגע')
+    check('waiting_spot_confirm — "לא אבל רגע" לא מוותר על המקום',
+      r.isComplete !== true && !/דחה הצעת מקום|waitlist_declined/.test(r.text),
+      `isComplete=${r.isComplete} text=${JSON.stringify(r.text.slice(0, 90))}`)
+  }
 }
 
 // ─── S2 #4: החלפת נושא מפורשת בשלב טקסט חופשי ────────────────────────────────
@@ -641,6 +676,45 @@ function botMessagesCases() {
     'צריך הזרקה מלאה')
 }
 
+// ─── פאזה 3: ניתוב (astra ממצאים 4/8/5/6) ────────────────────────────────────
+async function routingCases() {
+  console.log('\n── פאזה 3: ניתוב (astra 4/8/5/6) ──')
+  // #4 — בקשת נציגה גוברת על נושא ביטול
+  {
+    const got = classifyIntent('אני רוצה לדבר עם נציגה על ביטול הצהרון')
+    check('#4 — "לדבר עם נציגה על ביטול הצהרון" → בקשת_נציג', got === 'בקשת_נציג', `got=${got}`)
+  }
+  // #8 — ספרה ערבית ٢ בשלב אזור → בחירת חוף הכרמל (לא קפיצה לקייטנה)
+  {
+    const s = makeSession('register_area')
+    const r = await processMessage(s, '٢')
+    check('#8 — "٢" בשלב אזור → בחירת חוף הכרמל',
+      r.nextFlow === 'register_child_name' && s.collectedData.area_code === 'carmel',
+      `nextFlow=${r.nextFlow} area=${s.collectedData.area_code}`)
+  }
+  // #5 — "גן" גנרי לא ממופה לתל אביב
+  {
+    const s = makeSession('register_area')
+    await processMessage(s, 'הילד בגן בגבעתיים')
+    check('#5 — "בגן בגבעתיים" לא נבחר כתל אביב', s.collectedData.area_code !== 'telaviv',
+      `area=${s.collectedData.area_code}`)
+  }
+  // #5 — לא לשבור זיהוי גנים ספציפיים
+  {
+    const s = makeSession('register_area')
+    await processMessage(s, 'גלי עתלית')
+    check('#5 — "גלי עתלית" עדיין → carmel', s.collectedData.area_code === 'carmel',
+      `area=${s.collectedData.area_code}`)
+  }
+  // #6 — סירוב להוראת קבע לא נבחר כהוראת קבע
+  {
+    const s = makeSession('payment_setup_method')
+    await processMessage(s, 'אני לא רוצה הוראת קבע')
+    check('#6 — "לא רוצה הוראת קבע" לא נבחר כהוראת קבע', s.collectedData.payment_method !== 'standing_order',
+      `method=${s.collectedData.payment_method}`)
+  }
+}
+
 async function main() {
   intentCases()
   await flowCases()
@@ -649,6 +723,7 @@ async function main() {
   await humanRequestCases()
   await cancelSafetyCases()
   await switchCases()
+  await routingCases()
   classifierCases()
   await flowDetailCases()
   await miscCases()

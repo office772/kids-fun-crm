@@ -179,6 +179,11 @@ async function processMessageCore(
   session: BotSession,
   userMessage: string
 ): Promise<BotResponse & { intent: BotIntent }> {
+  // astra #8: נרמול פעם אחת בכניסה (ניקוד + ספרות ערביות/פרסיות → ASCII), כך
+  // שהסיווג, בחירת התפריט (isExplicitNumericChoice) והשלב הפעיל מסכימים. קודם
+  // "٢" בשלב אזור נורמל רק למסווג (→ קייטנה) ונחשב "החלפת נושא" במקום בחירה.
+  userMessage = normalizeMessage(userMessage)
+
   // ── קובץ/תמונה? ניתוח אמיתי במקום ניחוש כוונה מתוך URL ────────────────────
   // (לפני התיקון: קישור לקובץ נכנס ל-classifier והחזיר תפריטים אקראיים)
   const { detectMedia, handleMediaMessage } = await import('./media-handler')

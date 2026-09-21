@@ -266,4 +266,7 @@ export interface BotSession {
   messages: BotMessage[]
   currentFlow?: string
   collectedData: Record<string, string>
+  // astra #9: מסומן true רק כשההרצה מגיעה מהסימולטור בדשבורד. פעולות הרסניות
+  // (ביטול/סליקה) חייבות לבדוק אותו ולא לגעת בנתונים/סליקה אמיתיים.
+  simulated?: boolean
 }

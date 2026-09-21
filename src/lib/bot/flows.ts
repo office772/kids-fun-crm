@@ -12,6 +12,7 @@ import {
 import { resolveMonthlyFee } from './pricing'
 import { getCachedSettings } from './settings-db'
 import { botText } from './bot-messages-db'
+import { normalizeMessage } from './intent-classifier'
 
 export interface BotResponse {
   text: string
@@ -230,25 +231,34 @@ function isNo(msg: string): boolean {
   return /^(לא|לא רוצה|לא תודה|no|אין צורך|לא עכשיו)/i.test(msg.trim())
 }
 
-// ─── "כן"/"לא" *נקיים* — לשלבי אישור קריטיים (ביטול) ────────────────────────
-// נמצא בלוגים (09/2026): "לא הבנתי עד מתי אני משלם בפועל?" נקרא כ-"לא" והבוט
-// ענה "בסדר, הביטול לא בוצע". שאלה או משפט ארוך אינם תשובת כן/לא —
-// הם הולכים ל-LLM (והמסלול נשמר), לא מכריעים פעולה כספית.
-function isPlainAnswer(msg: string): boolean {
-  const t = msg.trim()
-  if (!t) return false
-  if (t.includes('?')) return false                     // שאלה — לא הכרעה
-  if (/הבנתי|למה|מה זאת|כלומר/.test(t)) return false     // בקשת הבהרה
-  return t.split(/\s+/).filter(Boolean).length <= 3      // תשובה קצרה בלבד
+// ─── אישור/שלילה חד-משמעיים לשלבי אישור קריטיים (astra, S1) ──────────────────
+// פעולה בלתי-הפיכה/כספית (ביטול + ביטול הו"ק, ויתור על מקום) מתבצעת *רק* בהתאמה
+// מלאה לרשימה סגורה. סדר קריטי: קודם פוסלים שאלה/הסתייגות על הטקסט *הגולמי*
+// (לפני הסרת פיסוק) — אחרת "כן?" היה הופך ל-"כן" ומאשר — ורק אז משווים לגרסה
+// מנורמלת. ההחלטה בקוד בלבד, לא בפרשנות LLM. "כן אבל רגע"/"אולי כן"/"בסדר" אינם
+// אישור; הם נופלים ל-LLM (והמסלול נשמר), לא מכריעים פעולה.
+// נמצא בלוגים (09/2026): "לא הבנתי עד מתי אני משלם בפועל?" נקרא כ-"לא"/"כן".
+const CONFIRM_QUALIFIER_RE = /\?|אבל|רגע|חכ[הי]|שנייה|שניה|תכף|עוד מעט|לא עכשיו|אולי|המתן|רק\s/
+
+function confirmCore(msg: string): string {
+  return normalizeMessage(msg).replace(/[^א-תA-Za-z\s]+/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-function isBareYes(msg: string): boolean {
-  return isPlainAnswer(msg) && isYes(msg)
+// אישור/שלילה = אין הסתייגות/שאלה (על הגולמי), וההודעה כולה מתאימה לרשימה (מנורמל).
+function unambiguousMatch(msg: string, whitelist: readonly string[]): boolean {
+  if (CONFIRM_QUALIFIER_RE.test(msg)) return false
+  return whitelist.includes(confirmCore(msg))
 }
 
-function isBareNo(msg: string): boolean {
-  return isPlainAnswer(msg) && isNo(msg)
-}
+// רשימות פר-הקשר — *לא* משותפות ("לבטל" אינו אישור להצטרפות לרשימת המתנה).
+const CONFIRM_CANCEL   = ['כן', 'כן בבקשה', 'כן לבטל', 'לבטל', 'בטלו', 'כן בטלו', 'מאשר', 'מאשרת', 'אישור'] as const
+const DECLINE_CANCEL   = ['לא', 'לא תודה', 'לא רוצה', 'לא לבטל', 'להשאיר', 'להישאר', 'עזבו'] as const
+const CONFIRM_WAITLIST = ['כן', 'כן בבקשה', 'כן להוסיף', 'להוסיף', 'מאשר', 'מאשרת', 'אישור'] as const
+const DECLINE_WAITLIST = ['לא', 'לא תודה', 'לא רוצה', 'לא צריך'] as const
+const CONFIRM_SPOT     = ['כן', 'כן בבקשה', 'כן רוצה', 'כן אני רוצה', 'רוצה', 'מאשר', 'מאשרת', 'אישור'] as const
+const DECLINE_SPOT     = ['לא', 'לא תודה', 'לא רוצה', 'לא צריך', 'לוותר', 'ויתרתי'] as const
+const CONFIRM_CHILD_ID = ['כן', 'נכון', 'כן נכון', 'כן זה', 'זה הוא', 'זו היא', 'מאשר', 'מאשרת', 'אישור'] as const
+const DECLINE_CHILD_ID = ['לא', 'לא נכון', 'לא זה', 'טעות'] as const
 
 // תפריט הבוט — נקרא מ-bot_messages (מפתח 'menu') עם fallback לקשיח. פונקציה כדי
 // שייקרא פר-בקשה מה-cache (const היה נטען פעם אחת בזמן טעינת המודול).
@@ -630,7 +640,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
     const childName = session.collectedData.child_name || 'הילד/ה'
     const areaCode  = session.collectedData.area_code  || 'sharon'
 
-    if (isYes(userMessage)) {
+    if (unambiguousMatch(userMessage, CONFIRM_WAITLIST)) {
       // שמור ב-Supabase
       try {
         const { saveWaitingListEntry, AREAS } = await import('./registration-helpers')
@@ -661,11 +671,17 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
           isComplete: true,
         }
       }
-    } else {
+    }
+    if (unambiguousMatch(userMessage, DECLINE_WAITLIST)) {
       return {
         text: botText('register_waitlist_declined'),
         isComplete: true,
       }
+    }
+    // עמימות ("כן אבל רגע"/שאלה) → שאלת אישור מפורשת, המסלול נשמר (astra)
+    return {
+      text: `להוסיף את *${childName}* לרשימת ההמתנה? (כן / לא)`,
+      nextFlow: 'register_waiting_confirm',
     }
   }
 
@@ -686,6 +702,11 @@ async function performCancellation(
   policyNote: string
 ): Promise<{ childName: string; payplusCancelled: boolean } | null> {
   try {
+    // astra #9: הסימולטור אינו sandbox — אסור לו לבטל רישום או הו"ק אמיתיים.
+    // מחזירים תוצאה *מדומה* כדי שהשיחה תזרום, בלי לגעת ב-DB או ב-PayPlus.
+    if (session.simulated) {
+      return { childName: childNameInput.trim().replace(/\s+/g, ' ') || 'הילד/ה', payplusCancelled: false }
+    }
     const { createServiceClient } = await import('@/lib/supabase/server')
     const supabase = createServiceClient()
     const name = childNameInput.trim().replace(/\s+/g, ' ')
@@ -723,10 +744,18 @@ async function performCancellation(
 
     if (!reg) return null
 
-    await supabase.from('registrations').update({
+    // ⚠️ Supabase מחזיר error *בגוף* (לא זורק) — בלי בדיקת התוצאה כשל כתיבה היה
+    //    מדווח "הביטול בוצע" *וגם* מבטל הו"ק ב-PayPlus (astra #3, S1). בכשל →
+    //    return null, וההורה מקבל "נקלט, נציגה תשלים ידנית" בלי סליקה ובלי timeline.
+    const { data: updated, error: updErr } = await supabase.from('registrations').update({
       status: 'בוטל',
       notes:  [reg.notes, `בוטל ע"י ההורה דרך הבוט — ${policyNote}`].filter(Boolean).join(' | '),
-    }).eq('id', reg.id)
+    }).eq('id', reg.id).select('id')
+
+    if (updErr || !updated?.length) {
+      console.error('[performCancellation] registration update failed:', updErr?.message ?? 'no row updated')
+      return null
+    }
 
     // ─── ביטול הוראת קבע ב-PayPlus אוטומטית (אם יש לו אחת פעילה) ──────────
     let payplusCancelled = false
@@ -851,7 +880,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
   // לפני 15 — אישור
   if (step === 'cancel_confirm_before15') {
     const childName = session.collectedData.child_name || 'הילד/ה'
-    if (isBareYes(userMessage)) {
+    if (unambiguousMatch(userMessage, CONFIRM_CANCEL)) {
       // ביצוע הביטול בפועל ב-CRM
       const result = await performCancellation(
         session, childName, `לפני ה-15 (יום ${dayOfMonth}) — המשך עד סוף החודש + זיכוי מלא`
@@ -886,7 +915,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
       }
     }
 
-    if (isBareNo(userMessage)) {
+    if (unambiguousMatch(userMessage, DECLINE_CANCEL)) {
       return {
         text: botText('cancel_declined_before15'),
         isComplete: true
@@ -918,7 +947,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
       }
     }
 
-    if (isBareYes(userMessage)) {
+    if (unambiguousMatch(userMessage, CONFIRM_CANCEL)) {
       // ביצוע הביטול בפועל ב-CRM
       const result = await performCancellation(
         session, childName, `אחרי ה-15 (יום ${dayOfMonth}) — ממשיך חודש נוסף ומסיים בסוף החודש הבא`
@@ -952,7 +981,7 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
       }
     }
 
-    if (isBareNo(userMessage)) {
+    if (unambiguousMatch(userMessage, DECLINE_CANCEL)) {
       return {
         text: botText('cancel_declined_after15'),
         isComplete: true
@@ -1584,10 +1613,10 @@ export async function handlePaymentFailureParentFlow(session: BotSession, userMe
 
   // ─── אישור זהות הילד (כשהזיהוי לפי טלפון הצליח) ──────────────────────────
   if (step === 'payment_fail_confirm_child') {
-    if (isYes(userMessage)) {
+    if (unambiguousMatch(userMessage, CONFIRM_CHILD_ID)) {
       return await routePaymentFailBranch(session)
     }
-    if (isNo(userMessage)) {
+    if (unambiguousMatch(userMessage, DECLINE_CHILD_ID)) {
       session.collectedData.child_name = ''
       return {
         text: botText('payfail_reidentify'),
@@ -2101,6 +2130,15 @@ export async function handlePaymentSetupFlow(
     const amount    = parseInt(session.collectedData.monthly_fee ?? String(getDefaultMonthlyFee()), 10)
     const firstName = session.parentName?.split(' ')[0] ?? ''
 
+    // astra #6: שלילה מפורשת ("אני לא רוצה הוראת קבע"/"בלי אשראי") אינה בחירה של
+    // אותה שיטה — לא בוחרים את מה שההורה דחה; מציגים שוב את האפשרויות לבחירה אחרת.
+    if (/לא רוצה|לא מתאים|לא צריך|בלי /.test(msg)) {
+      return {
+        text: botText('payset_method_invalid'),
+        nextFlow: 'payment_setup_method',
+      }
+    }
+
     let chosenMethod: PaymentMethod | null = null
 
     if (msg === '1' || /אשראי|כרטיס|credit/i.test(msg))        chosenMethod = 'credit'
@@ -2424,14 +2462,14 @@ export async function handleWaitingListSpotFlow(
     const childName  = session.collectedData.child_name   ?? 'הילד/ה'
     const areaLabel  = session.collectedData.area_label   ?? ''
 
-    if (isYes(userMessage)) {
+    if (unambiguousMatch(userMessage, CONFIRM_SPOT)) {
       // ← מעבר למסלול הסדרת תשלום
       session.collectedData.from_spot_offer = 'true'
       session.currentFlow = 'payment_setup_start'
       return handlePaymentSetupFlow(session, userMessage)
     }
 
-    if (isNo(userMessage)) {
+    if (unambiguousMatch(userMessage, DECLINE_SPOT)) {
       return {
         text: botText('waitlist_declined'),
         isComplete: true,
