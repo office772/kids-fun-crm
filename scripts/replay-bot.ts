@@ -857,6 +857,15 @@ async function routingCases() {
       r.nextFlow === 'payment_setup_method',
       `nextFlow=${r.nextFlow}`)
   }
+  // astra חלק ב 6: אזכור "ביטול" שאינו בקשת ביטול-רישום חיובית → *לא* מסלול ביטול.
+  //   שאלה → LLM; שלילה / ביטול אמצעי-תשלום → בירור (נשאר בהצעה).
+  for (const msg of ['אפשר לבטל הוראת קבע בהמשך?', 'אני לא רוצה לבטל את הרישום', 'אני רוצה לבטל את הוראת הקבע']) {
+    const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
+    const r = await processMessage(s, msg)
+    check(`§10-11 cancel-guard — "${msg}" → *לא* מסלול ביטול-רישום`,
+      r.nextFlow !== 'cancel_child' && s.collectedData.payment_method !== 'standing_order',
+      `nextFlow=${r.nextFlow} method=${s.collectedData.payment_method} text=${JSON.stringify(r.text.slice(0, 40))}`)
+  }
 }
 
 async function main() {

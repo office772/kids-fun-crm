@@ -2203,13 +2203,20 @@ export async function handlePaymentSetupFlow(
 
   // ─── §10-11: תגובת ההורה להצעת הוראת קבע ─────────────────────────────────
   if (step === 'payment_setup_offer') {
-    const msg = userMessage.trim()
-    // astra חלק ב' (5): הבחנה בין *סירוב להצעת התשלום* ("לא רוצה") לבין *בקשת ביטול
-    //   רישום מפורשת* ("אני רוצה לבטל את הרישום"). בקשה מפורשת (מזכירה לבטל/ביטול/
-    //   להפסיק/לעזוב) → מנתבים למסלול הביטול; שאר השליליות נשארות כסירוב להצעה.
-    if (/לבטל|ביטול|להפסיק|לעזוב|לסיים את/.test(normalizeMessage(msg))) {
-      session.currentFlow = 'cancel_start'
-      return handleCancellationFlow(session, msg)
+    const msg  = userMessage.trim()
+    const core = confirmCore(msg)
+    // astra חלק ב' (6): אזכור "ביטול" מסווג בזהירות — עוברים לביטול *רישום* רק בבקשה
+    //   *חיובית וברורה*. שאלה ("אפשר לבטל...?") → LLM; שלילה ("לא רוצה לבטל") או ביטול
+    //   *אמצעי התשלום* ("לבטל את הוראת הקבע") → בירור. לא כל אזכור ביטול = בקשת ביטול רישום.
+    if (/לבטל|ביטול|להפסיק|לעזוב/.test(core)) {
+      if (isRealQuestion(msg)) return { text: '', useLLM: true }                       // שאלה על ביטול → הסבר
+      const negated   = /(^|\s)(לא|בלי|אינני|אין)(\s|$)/.test(core)
+      const payTarget = /הוראת\s*ה?קבע|(^|\s)הו\s*ק(\s|$)|התשלום|אמצעי/.test(core)      // ביטול אמצעי תשלום, לא רישום
+      if (!negated && !payTarget) {                                                     // בקשה חיובית לביטול רישום
+        session.currentFlow = 'cancel_start'
+        return handleCancellationFlow(session, msg)
+      }
+      return { text: botText('payset_offer_reask'), nextFlow: 'payment_setup_offer' }   // שלילה/אמצעי-תשלום → בירור
     }
     const verdict = offerVerdict(msg)
     // אישור (ביטוי שלם) → ממשיכים ישירות בהוראת קבע (זיהוי שם → לינק, כמו במסלול הקיים).
