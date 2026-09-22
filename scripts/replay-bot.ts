@@ -738,6 +738,19 @@ async function routingCases() {
     check('#6 — "לא רוצה הוראת קבע" לא נבחר כהוראת קבע', s.collectedData.payment_method !== 'standing_order',
       `method=${s.collectedData.payment_method}`)
   }
+  // astra R6 (סבב 2) — שלילה *אחרי* האמצעי + בקשה משולבת
+  {
+    const s = makeSession('payment_setup_method')
+    await processMessage(s, 'הוראת קבע לא מתאימה לי')
+    check('R6 — "הוראת קבע לא מתאימה לי" (שלילה אחרי) לא נבחר כהו"ק', s.collectedData.payment_method !== 'standing_order',
+      `method=${s.collectedData.payment_method}`)
+  }
+  {
+    const s = makeSession('payment_setup_method')
+    await processMessage(s, 'הוראת קבע, לא אשראי')
+    check('R6 — "הוראת קבע, לא אשראי" בוחר הו"ק (השלילה שייכת לאשראי)', s.collectedData.payment_method === 'standing_order',
+      `method=${s.collectedData.payment_method}`)
+  }
   // astra R6 — ניסוחי סירוב נוספים + בקשה משולבת
   for (const msg of ['לא הוראת קבע', 'אני לא מעוניין בהוראת קבע', 'בלי הוראת קבע']) {
     const s = makeSession('payment_setup_method')

@@ -69,6 +69,53 @@ function dbFor(execute) {
   }
 }
 
+// ── Supabase מצבי בזיכרון: bot_sessions (עם rev), whatsapp_message_log (claim),
+//    conversations (היסטוריה), tasks. תואם למנגנון האמיתי (astra R3/R5). ────────────
+function makeSessionDB() {
+  const state = { sessions: new Map(), wml: new Map(), conv: [], tasks: [], failSave: false }
+  state.client = () => dbFor(q => {
+    const { table, op, payload, filters } = q
+    const eqv = (k) => (filters.find(f => f[0] === 'eq' && f[1] === k) || [])[2]
+    if (table === 'parents' && op === 'select') return { data: [{ id: 'p1', name: 'הורה' }], error: null }
+    if (table === 'whatsapp_message_log') {
+      const id = (payload && payload.id_message) || eqv('id_message')
+      if (op === 'insert') { if (state.wml.has(id)) return { data: null, error: { code: '23505' } }; state.wml.set(id, { processed: false, created_at: new Date().toISOString() }); return { data: null, error: null } }
+      if (op === 'select') { const e = state.wml.get(id); return { data: e ? [{ processed: e.processed, created_at: e.created_at }] : [], error: null } }
+      if (op === 'update') { if (state.wml.has(id)) state.wml.get(id).processed = true; return { data: null, error: null } }
+      if (op === 'delete') { state.wml.delete(id); return { data: null, error: null } }
+    }
+    if (table === 'bot_sessions') {
+      const phone = (payload && payload.phone) || eqv('phone')
+      const rev = eqv('rev')
+      if (op === 'update' && !rev) {                    // loadSession bump
+        const cur = state.sessions.get(phone)
+        if (!cur) return { data: [], error: null }
+        cur.rev = payload.rev
+        return { data: [{ parent_id: cur.parent_id ?? null, current_flow: cur.current_flow ?? null, collected_data: cur.collected_data ?? {}, last_message_at: cur.last_message_at ?? new Date().toISOString(), expires_at: cur.expires_at ?? new Date(Date.now() + 60000).toISOString() }], error: null }
+      }
+      if (op === 'update' && rev) {                     // persistSession מותנה
+        if (state.failSave) return { data: null, error: { message: 'save fail' } }
+        const cur = state.sessions.get(phone)
+        if (cur && cur.rev === rev) { state.sessions.set(phone, { ...payload }); return { data: [{ phone }], error: null } }
+        return { data: [], error: null }                // stale
+      }
+      if (op === 'insert') {                            // persistSession session חדש
+        if (state.failSave) return { data: null, error: { message: 'save fail' } }
+        if (state.sessions.has(phone)) return { data: null, error: { code: '23505' } }
+        state.sessions.set(phone, { ...payload }); return { data: null, error: null }
+      }
+      if (op === 'delete') {
+        if (rev) { const cur = state.sessions.get(phone); if (cur && cur.rev === rev) { state.sessions.delete(phone); return { data: [{ phone }], error: null } } return { data: [], error: null } }
+        state.sessions.delete(phone); return { data: null, error: null }
+      }
+    }
+    if (table === 'conversations') { if (op === 'insert') { if (payload.direction === 'נכנס') state.conv.push(payload); return { data: null, error: null } } if (op === 'select') return { data: [], error: null } }
+    if (table === 'tasks' && op === 'insert') { state.tasks.push(payload); return { data: null, error: null } }
+    return { data: null, error: null }
+  })
+  return state
+}
+
 let passed = 0, failed = 0
 function check(name, ok, detail) {
   if (ok) { passed++; console.log('✅ ' + name) }
@@ -172,71 +219,47 @@ const request = (body) => ({ headers: { get: () => null }, json: async () => bod
   require(path.join(ROOT, 'src/lib/bot/schools-db.ts')).primeSchoolsCache = async () => ({})
   require(path.join(ROOT, 'src/lib/bot/bot-messages-db.ts')).primeBotMessagesCache = async () => ({})
 
-  // ═══ 2.6 (#14) — כשל שמירת session: לא שולחים את השאלה הבאה כאילו נשמרה ════════
+  // ═══ 2.6 (#14) — כשל שמירת session: retry בטוח, לא השאלה הבאה ═════════════════
   {
+    const db = makeSessionDB(); db.failSave = true; dbmod.createServiceClient = db.client
     handler.processMessage = async () => ({ text: 'מה שם הילד?', intent: 'רישום_צהרון', nextFlow: 'register_child_name' })
-    dbmod.createServiceClient = () => dbFor(q => {
-      if (q.table === 'parents' && q.op === 'select') return { data: [{ id: 'p1', name: 'הורה בדיקה' }], error: null }
-      if (q.table === 'bot_sessions' && q.op === 'upsert') return { data: null, error: { message: 'simulated session save error' } }
-      return { data: [], error: null }
-    })
-    const res = await route.POST(request({ phone: '+972500000000', message: '2', message_id: 'save-fail-1' }))
-    const json = await res.json()
+    const json = await (await route.POST(request({ phone: '+972500000000', message: '2', message_id: 'save-fail-1' }))).json()
     check('2.6 (#14) — כשל שמירה: התשובה אינה השאלה הבאה', json.reply !== 'מה שם הילד?', `reply=${JSON.stringify(json.reply)}`)
     check('2.6 (#14) — כשל שמירה: מסומן saveError', json.saveError === true, `json=${JSON.stringify(json)}`)
   }
 
-  // ═══ 2.5 (#13) — dedup אטומי: שתי בקשות מקבילות עם אותו מזהה → עיבוד אחד ═══════
+  // ═══ 2.5 (#13) — שתי בקשות מקבילות עם אותו מזהה → עיבוד אחד (claim) ═══════════
   {
-    let handlerCalls = 0
-    handler.processMessage = async () => { handlerCalls++; return { text: 'שלום!', intent: 'שאלה_כללית', isComplete: true } }
-    const ids = new Set()
-    dbmod.createServiceClient = () => dbFor(q => {
-      if (q.table === 'parents' && q.op === 'select') return { data: [{ id: 'p1', name: 'הורה' }], error: null }
-      if (q.table === 'conversations' && q.op === 'insert' && q.payload && q.payload.id_message) {
-        if (ids.has(q.payload.id_message)) return { data: null, error: { code: '23505' } }
-        ids.add(q.payload.id_message); return { data: null, error: null }
-      }
-      return { data: [], error: null }
-    })
+    const db = makeSessionDB(); dbmod.createServiceClient = db.client
+    let calls = 0
+    handler.processMessage = async () => { calls++; return { text: 'שלום!', intent: 'שאלה_כללית', isComplete: true } }
     const replies = await Promise.all([1, 2].map(() =>
       route.POST(request({ phone: '+972500000000', message: 'שלום', message_id: 'dup-1' })).then(r => r.json())))
-    const duplicates = replies.filter(r => r.duplicate).length
-    check('2.5 (#13) — עיבוד אחד בלבד לשתי בקשות מקבילות', handlerCalls === 1, `handlerCalls=${handlerCalls}`)
-    check('2.5 (#13) — בקשה כפולה אחת נחסמה (duplicate)', duplicates === 1, `replies=${JSON.stringify(replies)}`)
+    check('2.5 (#13) — עיבוד אחד בלבד לשתי בקשות מקבילות', calls === 1, `calls=${calls}`)
+    check('2.5 (#13) — בקשה כפולה אחת נחסמה (duplicate)', replies.filter(r => r.duplicate).length === 1, `replies=${JSON.stringify(replies)}`)
   }
 
-  // ═══ 2.4 (#12) — תשובה איטית לא דורסת מסלול חדש ולא נשלחת ═════════════════════
+  // ═══ 2.4 (#12) — תשובה איטית לא דורסת מסלול חדש ולא נשלחת (rev) ═══════════════
   {
-    let stored = { phone: '+972500000000', current_flow: 'register_child_name', collected_data: { area_code: 'sharon' }, last_message_at: '2026-09-21T10:00:00.000Z', expires_at: new Date(Date.now() + 60000).toISOString() }
-    let releaseSlow
-    const gate = new Promise(r => (releaseSlow = r))
-    const sentTexts = []
-    uchat.getUserNsByPhone = async () => 'test-ns'
-    uchat.sendText = async (ns, text) => { sentTexts.push(text); return true }
-    dbmod.createServiceClient = () => dbFor(q => {
-      if (q.table === 'parents' && q.op === 'select') return { data: [{ id: 'p1', name: 'הורה' }], error: null }
-      if (q.table === 'bot_sessions' && q.op === 'select') return { data: stored ? JSON.parse(JSON.stringify(stored)) : null, error: null }
-      if (q.table === 'bot_sessions' && q.op === 'upsert') { stored = { ...q.payload }; return { data: [{ phone: q.payload.phone }], error: null } }
-      if (q.table === 'bot_sessions' && q.op === 'update') {
-        const revF = q.filters.find(f => f[0] === 'eq' && f[1] === 'last_message_at')
-        if (stored && revF && stored.last_message_at === revF[2]) { stored = { ...q.payload, phone: stored.phone }; return { data: [{ phone: stored.phone }], error: null } }
-        return { data: [], error: null }   // stale — אין שורה
-      }
-      return { data: [], error: null }
-    })
+    const PHONE = '+972500000000'
+    const db = makeSessionDB()
+    db.sessions.set(PHONE, { phone: PHONE, current_flow: 'register_child_name', collected_data: {}, rev: 'r0' })
+    dbmod.createServiceClient = db.client
+    let releaseSlow; const gate = new Promise(r => (releaseSlow = r))
+    const sent = []
+    uchat.getUserNsByPhone = async () => 'ns'; uchat.sendText = async (n, t) => { sent.push(t); return true }
     process.env.LLM_DEFER_TIMEOUT_MS = '10'
     handler.processMessage = async (s, msg) => {
       if (msg === 'כמה זה עולה?') { await gate; return { text: 'המחיר תלוי במסגרת', intent: 'בדיקת_תשלום', nextFlow: 'register_child_name' } }
       return { text: 'מה שם הילד לביטול?', intent: 'ביטול', nextFlow: 'cancel_child' }
     }
     const bgBefore = background.length
-    await route.POST(request({ phone: '+972500000000', message: 'כמה זה עולה?', user_ns: 'test-ns', message_id: 'old' }))
-    await route.POST(request({ phone: '+972500000000', message: 'אני רוצה לבטל', user_ns: 'test-ns', message_id: 'new' }))
-    releaseSlow()
-    await Promise.all(background.slice(bgBefore))
-    check('2.4 (#12) — המסלול נשאר cancel_child (תוצאה ישנה לא דרסה)', stored.current_flow === 'cancel_child', `flow=${stored.current_flow}`)
-    check('2.4 (#12) — התשובה הישנה (מחיר) לא נשלחה להורה', !sentTexts.some(t => /המחיר/.test(t)), `sent=${JSON.stringify(sentTexts)}`)
+    await route.POST(request({ phone: PHONE, message: 'כמה זה עולה?', user_ns: 'ns', message_id: 'old' }))
+    await route.POST(request({ phone: PHONE, message: 'אני רוצה לבטל', user_ns: 'ns', message_id: 'new' }))
+    releaseSlow(); await Promise.all(background.slice(bgBefore))
+    const flow = db.sessions.get(PHONE)?.current_flow
+    check('2.4 (#12) — המסלול נשאר cancel_child (תוצאה ישנה לא דרסה)', flow === 'cancel_child', `flow=${flow}`)
+    check('2.4 (#12) — התשובה הישנה (מחיר) לא נשלחה', !sent.some(t => /המחיר/.test(t)), `sent=${JSON.stringify(sent)}`)
   }
 
   // ═══ 2.1 (#9) — הסימולטור אינו מבצע ביטול/כתיבה אמיתיים ═══════════════════════
@@ -274,78 +297,77 @@ const request = (body) => ({ headers: { get: () => null }, json: async () => bod
     check('R1 (#9) — סימולטור: אין שום כתיבה אמיתית', writes.length === 0, `writes=${JSON.stringify(writes)}`)
   }
 
-  // ═══ R3 (#12) — תשובה ישנה שמסיימת שיחה לא מוחקת מסלול חדש (שער "הודעה חדשה יותר") ══
+  // ═══ R3 (#12) — תשובה ישנה שמסיימת שיחה לא מוחקת מסלול חדש (rev) ══════════════
   {
-    let stored = { phone: '+972500000000', current_flow: 'register_child_name', collected_data: {}, last_message_at: 'T0', expires_at: new Date(Date.now() + 60000).toISOString() }
-    const incoming = []
+    const PHONE = '+972500000000'
+    const db = makeSessionDB()
+    db.sessions.set(PHONE, { phone: PHONE, current_flow: 'register_child_name', collected_data: {}, rev: 'r0' })
+    dbmod.createServiceClient = db.client
     let releaseSlow; const gate = new Promise(r => (releaseSlow = r))
     const sent = []
     uchat.getUserNsByPhone = async () => 'ns'; uchat.sendText = async (n, t) => { sent.push(t); return true }
-    dbmod.createServiceClient = () => dbFor(q => {
-      if (q.table === 'parents' && q.op === 'select') return { data: [{ id: 'p1', name: 'הורה' }], error: null }
-      if (q.table === 'conversations' && q.op === 'insert') { if (q.payload.direction === 'נכנס') incoming.push(q.payload.id_message); return { data: null, error: null } }
-      if (q.table === 'conversations' && q.op === 'select') return { data: incoming.length ? [{ id_message: incoming[incoming.length - 1] }] : [], error: null }
-      if (q.table === 'bot_sessions' && q.op === 'select') return { data: stored ? JSON.parse(JSON.stringify(stored)) : null, error: null }
-      if (q.table === 'bot_sessions' && q.op === 'upsert') { stored = { ...q.payload }; return { data: [{ phone: q.payload.phone }], error: null } }
-      if (q.table === 'bot_sessions' && q.op === 'update') { const rev = q.filters.find(f => f[0] === 'eq' && f[1] === 'last_message_at'); if (stored && rev && stored.last_message_at === rev[2]) { stored = { ...q.payload, phone: stored.phone }; return { data: [{ phone: stored.phone }], error: null } } return { data: [], error: null } }
-      if (q.table === 'bot_sessions' && q.op === 'delete') { stored = null; return { data: null, error: null } }
-      return { data: [], error: null }
-    })
     process.env.LLM_DEFER_TIMEOUT_MS = '10'
     handler.processMessage = async (s, msg) => {
       if (msg === 'שאלה איטית') { await gate; return { text: 'תשובה ישנה', intent: 'שאלה_כללית', isComplete: true } }  // ישן: מסיים שיחה
       return { text: 'מה שם הילד לביטול?', intent: 'ביטול', nextFlow: 'cancel_child' }  // חדש: מתקדם
     }
     const bgBefore = background.length
-    await route.POST(request({ phone: '+972500000000', message: 'שאלה איטית', user_ns: 'ns', message_id: 'old' }))
-    await route.POST(request({ phone: '+972500000000', message: 'לבטל', user_ns: 'ns', message_id: 'new' }))
+    await route.POST(request({ phone: PHONE, message: 'שאלה איטית', user_ns: 'ns', message_id: 'old' }))
+    await route.POST(request({ phone: PHONE, message: 'לבטל', user_ns: 'ns', message_id: 'new' }))
     releaseSlow(); await Promise.all(background.slice(bgBefore))
-    check('R3 (#12) — תשובה ישנה שמסיימת לא מחקה מסלול חדש', !!stored && stored.current_flow === 'cancel_child', `stored=${JSON.stringify(stored)}`)
+    const cur = db.sessions.get(PHONE)
+    check('R3 (#12) — תשובה ישנה שמסיימת לא מחקה מסלול חדש', !!cur && cur.current_flow === 'cancel_child', `session=${JSON.stringify(cur)}`)
     check('R3 (#12) — התשובה הישנה לא נשלחה', !sent.some(t => /תשובה ישנה/.test(t)), `sent=${JSON.stringify(sent)}`)
   }
 
   // ═══ R4 (#14) — כשל שמירה בנתיב הדחוי לא שולח את התשובה ═══════════════════════
   {
-    const stored = { phone: '+972500000000', current_flow: 'x', collected_data: {}, last_message_at: 'T0', expires_at: new Date(Date.now() + 60000).toISOString() }
-    const incoming = []
+    const PHONE = '+972500000000'
+    const db = makeSessionDB()
+    db.sessions.set(PHONE, { phone: PHONE, current_flow: 'x', collected_data: {}, rev: 'r0' })
+    db.failSave = true
+    dbmod.createServiceClient = db.client
     let releaseSlow; const gate = new Promise(r => (releaseSlow = r))
     const sent = []
     uchat.getUserNsByPhone = async () => 'ns'; uchat.sendText = async (n, t) => { sent.push(t); return true }
-    dbmod.createServiceClient = () => dbFor(q => {
-      if (q.table === 'parents' && q.op === 'select') return { data: [{ id: 'p1' }], error: null }
-      if (q.table === 'conversations' && q.op === 'insert') { if (q.payload.direction === 'נכנס') incoming.push(q.payload.id_message); return { data: null, error: null } }
-      if (q.table === 'conversations' && q.op === 'select') return { data: incoming.length ? [{ id_message: incoming[incoming.length - 1] }] : [], error: null }
-      if (q.table === 'bot_sessions' && q.op === 'select') return { data: JSON.parse(JSON.stringify(stored)), error: null }
-      if (q.table === 'bot_sessions' && q.op === 'update') return { data: null, error: { message: 'deferred save fail' } }
-      return { data: [], error: null }
-    })
     process.env.LLM_DEFER_TIMEOUT_MS = '10'
     handler.processMessage = async () => { await gate; return { text: 'מה שם הילד?', intent: 'רישום_צהרון', nextFlow: 'register_child_name' } }
     const bgBefore = background.length
-    await route.POST(request({ phone: '+972500000000', message: 'איטי', user_ns: 'ns', message_id: 'only' }))
+    await route.POST(request({ phone: PHONE, message: 'איטי', user_ns: 'ns', message_id: 'only' }))
     releaseSlow(); await Promise.all(background.slice(bgBefore))
     check('R4 (#14) — כשל שמירה דחוי → התשובה לא נשלחה', !sent.some(t => /מה שם הילד/.test(t)), `sent=${JSON.stringify(sent)}`)
   }
 
-  // ═══ R5 (#13/#14) — הודעה שנכשלה משוחררת, וניסיון חוזר לא נחסם ככפילות ═════════
+  // ═══ R5 — כשל שמירה משחרר תפיסה; retry מעובד, בלי פנייה כפולה ═════════════════
   {
-    const claimed = new Set()
-    let failNext = true, calls = 0
-    dbmod.createServiceClient = () => dbFor(q => {
-      if (q.table === 'parents' && q.op === 'select') return { data: [{ id: 'p1' }], error: null }
-      if (q.table === 'conversations' && q.op === 'insert' && q.payload && q.payload.id_message) {
-        if (claimed.has(q.payload.id_message)) return { data: null, error: { code: '23505' } }
-        claimed.add(q.payload.id_message); return { data: null, error: null }
-      }
-      if (q.table === 'conversations' && q.op === 'delete') { const id = q.filters.find(f => f[0] === 'eq' && f[1] === 'id_message')?.[2]; if (id) claimed.delete(id); return { data: null, error: null } }
-      if (q.table === 'bot_sessions' && q.op === 'upsert') { if (failNext) { failNext = false; return { data: null, error: { message: 'save fail once' } } } return { data: [{ phone: q.payload.phone }], error: null } }
-      return { data: [], error: null }
-    })
-    handler.processMessage = async () => { calls++; return { text: 'מה שם הילד?', intent: 'רישום_צהרון', nextFlow: 'register_child_name' } }
+    const db = makeSessionDB(); dbmod.createServiceClient = db.client
+    let calls = 0
+    handler.processMessage = async () => { calls++; return { text: 'מה שם הילד?', intent: 'רישום_צהרון', nextFlow: 'register_child_name', createTask: { type: 'שאלה כללית', description: 'בדיקה', priority: 'רגיל' } } }
+    db.failSave = true
     const r1 = await (await route.POST(request({ phone: '+972500000000', message: '2', message_id: 'retry-1' }))).json()
+    db.failSave = false
     const r2 = await (await route.POST(request({ phone: '+972500000000', message: '2', message_id: 'retry-1' }))).json()
     check('R5 — ניסיון ראשון נכשל בשמירה (saveError)', r1.saveError === true, `r1=${JSON.stringify(r1)}`)
-    check('R5 — ניסיון חוזר לא נחסם ככפילות (עובד שוב)', r2.duplicate !== true && calls === 2, `r2=${JSON.stringify(r2)} calls=${calls}`)
+    check('R5 — ניסיון חוזר עובד (לא duplicate)', r2.duplicate !== true && calls === 2, `r2=${JSON.stringify(r2)} calls=${calls}`)
+    check('R5 — נוצרה פנייה אחת בלבד (לא כפולה ב-retry)', db.tasks.length === 1, `tasks=${db.tasks.length}`)
+  }
+
+  // ═══ R1b — הסימולטור לא עושה fetch ל-PayPlus בענף חידוש כרטיס (renewRecurringCard) ══
+  {
+    handler.processMessage = realProcess
+    // מפתחות PayPlus מוגדרים כדי שבלי השער renewRecurringCard *היה* מגיע ל-fetch:
+    process.env.PAYPLUS_API_KEY = 'k'; process.env.PAYPLUS_SECRET_KEY = 's'; process.env.PAYPLUS_TERMINAL_UID = 't'
+    const db = makeSessionDB(); dbmod.createServiceClient = db.client
+    const helpers = require(path.join(ROOT, 'src/lib/bot/payment-helpers.ts'))
+    helpers.findRecurringForRenewal = async () => ({ uid: 'sim-uid' })
+    const fetchUrls = []
+    global.fetch = async (url) => { fetchUrls.push(String(url)); throw new Error('NETWORK_BLOCKED_IN_TEST') }
+    const simulator = require(path.join(ROOT, 'src/app/api/bot/simulate/route.ts'))
+    const res = await simulator.POST(request({ sessionId: 'sim-pp', testPhone: '+972500000000', message: 'כן', clientState: { currentFlow: 'payment_fail_confirm_child', collectedData: { child_name: 'נועם בדיקה', payment_fail_branch: 'card' } } }))
+    await res.json()
+    global.fetch = async () => { throw new Error('NETWORK_BLOCKED_IN_TEST') }
+    delete process.env.PAYPLUS_API_KEY; delete process.env.PAYPLUS_SECRET_KEY; delete process.env.PAYPLUS_TERMINAL_UID
+    check('R1b — הסימולטור לא עשה fetch ל-PayPlus (renewRecurringCard חסום)', !fetchUrls.some(u => /payplus/i.test(u)), `fetchUrls=${JSON.stringify(fetchUrls)}`)
   }
 
   console.log(`\n────────────\nעברו: ${passed} | נכשלו: ${failed}`)

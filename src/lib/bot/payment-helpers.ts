@@ -18,6 +18,7 @@
 import type { BotSession } from '@/lib/types'
 import { resolveMonthlyFee } from './pricing'
 import { getCachedSettings } from './settings-db'
+import { isSimulated } from '@/lib/supabase/sim-context'
 
 export type PaymentMethod =
   | 'credit'           // 💳 כרטיס אשראי - חיוב חודשי דרך PayPlus
@@ -81,6 +82,8 @@ function simulatePayPlusResponse(params: PayPlusOrderParams): PayPlusOrderResult
 export async function createPayPlusPaymentLink(
   params: PayPlusOrderParams
 ): Promise<PayPlusOrderResult> {
+  // astra R1: בסימולטור לא קוראים ל-PayPlus — מחזירים קישור מדומה בלי fetch.
+  if (isSimulated()) return { success: true, paymentUrl: 'https://simulated.local/payplus' }
   const { isDemoMode } = await import('@/lib/demo-data')
 
   // ─── דמו מוד (demo data בלבד) - סימולציה ─────────────────────────────────
@@ -220,6 +223,7 @@ export async function getInvoiceLink(params?: {
   amount?: number
   description?: string
 }): Promise<string | null> {
+  if (isSimulated()) return 'https://simulated.local/invoice'
   const { isDemoMode } = await import('@/lib/demo-data')
 
   if (isDemoMode()) {

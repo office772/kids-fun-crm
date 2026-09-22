@@ -2163,11 +2163,17 @@ export async function handlePaymentSetupFlow(
       ['bank_transfer',  /העברה|בנק|transfer/i],
       ['invoice_link',   /קישור|חשבונית|invoice|link/i],
     ]
-    // שלילה צמודה לשיטה: מילת שלילה ממש לפני מילת המפתח, או "לא רוצה/מתאים/מעוניין"
-    const negatedBefore = (idx: number): boolean => {
-      const pre = msg.slice(Math.max(0, idx - 22), idx)
-      return /(לא|בלי|אינני|אין)[^א-ת]*$/.test(pre) ||
-             /לא\s*(רוצה|מתאים|צריכ|מעוני)|אינני\s*(רוצה|מעוני)/.test(pre)
+    // astra R6: שלילה צמודה לשיטה — *לפני* מילת המפתח או *אחריה*, בגבול הפסוקית
+    // (עד פסיק/"אבל"/"אלא"). כך "הוראת קבע לא מתאימה לי" נשלל, ו-"הוראת קבע, לא אשראי"
+    // לא שולל את הו"ק (ה-"לא אשראי" בפסוקית אחרת ושייך לאשראי).
+    const CLAUSE_SEP = /[,.;:]|אבל|אלא|אך/
+    const negRun = /לא\s*(רוצה|מתאים|צריכ|מעוני)|אינני\s*(רוצה|מעוני)/
+    const negatedNear = (start: number, end: number): boolean => {
+      const beforeClause = msg.slice(0, start).split(CLAUSE_SEP).pop() || ''
+      const afterClause  = msg.slice(end).split(CLAUSE_SEP)[0] || ''
+      const negBefore = /(לא|בלי|אינני|אין)[^א-ת]*$/.test(beforeClause) || negRun.test(beforeClause)
+      const negAfter  = /(^|[^א-ת])(לא|בלי|אינני|אין)([^א-ת]|$)/.test(afterClause) || negRun.test(afterClause)
+      return negBefore || negAfter
     }
 
     let chosenMethod: PaymentMethod | null = digitPick[msg] ?? null
@@ -2176,7 +2182,7 @@ export async function handlePaymentSetupFlow(
       for (const [method, kw] of methodKeywords) {
         const m = kw.exec(msg)
         if (!m || m.index == null) continue
-        if (negatedBefore(m.index)) { sawNegatedMethod = true; continue }
+        if (negatedNear(m.index, m.index + m[0].length)) { sawNegatedMethod = true; continue }
         chosenMethod = method
         break
       }

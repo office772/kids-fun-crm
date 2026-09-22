@@ -50,8 +50,12 @@ create table if not exists bot_sessions (
   updated_at timestamptz default now(),
   -- session expires after 30 min of inactivity (cleanup by cron)
   expires_at timestamptz default (now() + interval '30 minutes'),
+  rev uuid,                    -- astra R3: גרסת בקרת-מקביליות (bump בטעינה, כתיבה מותנית)
   unique (phone)               -- phone = primary key for session lookup
 );
+
+-- astra R3: עמודת rev למסדים קיימים (מיגרציה add_bot_sessions_rev)
+alter table bot_sessions add column if not exists rev uuid;
 
 create index if not exists idx_bot_sessions_phone on bot_sessions(phone);
 

@@ -3,8 +3,14 @@
 // כל הפונקציות מחזירות שגיאה ידידותית אם ה-API חסום (לפני שהמסלול הופעל).
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { isSimulated } from '@/lib/supabase/sim-context'
+
 const PAYPLUS_PROD_BASE    = 'https://restapi.payplus.co.il/api/v1.0'
 const PAYPLUS_SANDBOX_BASE = 'https://restapidev.payplus.co.il/api/v1.0'
+
+// astra R1: בהקשר סימולטור — לא קוראים ל-PayPlus כלל (זו פעולה חיצונית ממשית:
+// חידוש כרטיס/ביטול/שינוי תאריך שולחים מייל/לינק ללקוח). מחזירים תוצאה מדומה.
+const SIM_PAYPLUS: PayPlusResult<Record<string, unknown>> = { success: true, data: { simulated: true } }
 
 export function getPayPlusBase(): string {
   return process.env.PAYPLUS_SANDBOX === 'true' ? PAYPLUS_SANDBOX_BASE : PAYPLUS_PROD_BASE
@@ -33,6 +39,7 @@ export async function updateRecurringBillingDate(
   recurringUid: string,
   newDayOfMonth: number
 ): Promise<PayPlusResult> {
+  if (isSimulated()) return SIM_PAYPLUS
   const headers = getAuthHeaders()
   if (!headers) return { success: false, error: 'PayPlus API לא מוגדר' }
   if (!recurringUid) return { success: false, error: 'חסר מזהה הוראת קבע' }
@@ -65,6 +72,7 @@ export async function updateRecurringBillingDate(
 // ובלי לבטל את הקיימת. זה הפתרון לכשל תשלום (מונע הוראת קבע כפולה).
 // דורש PAYPLUS_TERMINAL_UID + payment page משויך לטרמינל.
 export async function renewRecurringCard(recurringUid: string): Promise<PayPlusResult<{ paymentUrl?: string; emailed: boolean }>> {
+  if (isSimulated()) return { success: true, data: { emailed: false } }
   const headers = getAuthHeaders()
   if (!headers) return { success: false, error: 'PayPlus API לא מוגדר (חסרים מפתחות)' }
   if (!recurringUid) return { success: false, error: 'חסר מזהה הוראת קבע' }
@@ -102,6 +110,7 @@ export async function renewRecurringCard(recurringUid: string): Promise<PayPlusR
 // ─── ביטול הוראת קבע ─────────────────────────────────────────────────────────
 // POST /recurringpayments-deleterecurring-uid
 export async function cancelRecurringPayment(recurringUid: string): Promise<PayPlusResult> {
+  if (isSimulated()) return { success: true }
   const headers = getAuthHeaders()
   if (!headers) return { success: false, error: 'PayPlus API לא מוגדר (חסרים מפתחות)' }
   if (!recurringUid) return { success: false, error: 'חסר מזהה הוראת קבע' }
