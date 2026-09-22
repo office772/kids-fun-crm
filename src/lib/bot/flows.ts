@@ -273,6 +273,8 @@ const CONFIRM_SPOT     = ['כן', 'כן בבקשה', 'כן רוצה', 'כן אנ
 const DECLINE_SPOT     = ['לא', 'לא תודה', 'לא רוצה', 'לא צריך', 'לוותר', 'ויתרתי'] as const
 const CONFIRM_CHILD_ID = ['כן', 'נכון', 'כן נכון', 'כן זה', 'זה הוא', 'זו היא', 'מאשר', 'מאשרת', 'אישור'] as const
 const DECLINE_CHILD_ID = ['לא', 'לא נכון', 'לא זה', 'טעות'] as const
+// §10-11: אישור להסדרת הוראת קבע (האופציה הראשית). סירוב/בקשת חלופות → תפריט השיטות.
+const CONFIRM_STANDING = ['כן', 'כן בבקשה', 'כן להסדיר', 'להסדיר', 'הוראת קבע', 'כן הוראת קבע', 'קבע', 'מאשר', 'מאשרת', 'אישור'] as const
 
 // תפריט הבוט — נקרא מ-bot_messages (מפתח 'menu') עם fallback לקשיח. פונקציה כדי
 // שייקרא פר-בקשה מה-cache (const היה נטען פעם אחת בזמן טעינת המודול).
@@ -2147,11 +2149,33 @@ export async function handlePaymentSetupFlow(
       : ''
 
     const intro = fromSpot
-      ? `מעולה! 🎉 נסדר עכשיו את התשלום עבור *${childName}*${areaLabel ? ` ב${areaLabel}` : ''} (${amount}₪/חודש).\n\n`
+      ? `מעולה! 🎉 נסדר עכשיו את התשלום עבור *${childName}*${areaLabel ? ` ב${areaLabel}` : ''}.\n\n`
       : `*הסדרת תשלום - Kids & Fun* 💛\n\n${personalInfo}`
 
+    // §10-11: מציעים הוראת קבע *ישירות* כאופציה הראשית (לא תפריט 6 שיטות מראש).
     return {
-      text: botText('payset_intro_menu', { 'פתיחה': intro }),
+      text: botText('payset_offer_standing', { 'פתיחה': intro, 'סכום': String(amount) }),
+      nextFlow: 'payment_setup_offer',
+    }
+  }
+
+  // ─── §10-11: תגובת ההורה להצעת הוראת קבע ─────────────────────────────────
+  if (step === 'payment_setup_offer') {
+    const msg = userMessage.trim()
+    // אישור חד-משמעי → ממשיכים ישירות בהוראת קבע (זיהוי שם → לינק, כמו במסלול הקיים).
+    if (unambiguousMatch(msg, CONFIRM_STANDING)) {
+      session.collectedData.payment_method = 'standing_order'
+      return {
+        text: botText('payset_credit_ask_name', { 'סוג': '🏦 *הוראת קבע*' }),
+        nextFlow: 'payment_setup_child_name',
+      }
+    }
+    // שאלה אמיתית → LLM עונה, המסלול נשמר.
+    if (isRealQuestion(msg)) return { text: '', useLLM: true }
+    // סירוב / בקשת חלופות / נקיבת שיטה אחרת → מציגים את תפריט החלופות ומעבירים למסלול הבחירה
+    //   הקיים (אם ההורה נקב שיטה מפורשת, יבחר אותה מהתפריט; אם רק "לא"/"אחרת" — מהאפשרויות).
+    return {
+      text: botText('payset_intro_menu', { 'פתיחה': '' }),
       nextFlow: 'payment_setup_method',
     }
   }

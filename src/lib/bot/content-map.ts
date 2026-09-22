@@ -268,13 +268,13 @@ export const BOT_FLOW_MAP: BotFlow[] = [
     steps: [
       {
         order: 1,
-        stepId: "payment_setup_start",
-        title: "הסדרת תשלום — Kids & Fun 💛 עבור {שם} ({אזו…",
-        userInput: "בחירה 1-6: שיטת תשלום",
-        botMessage: "*הסדרת תשלום — Kids & Fun* 💛 עבור *{שם}* ({אזור}) — *{סכום}₪/חודש* *באיזו שיטת תשלום תרצו?* *1* — 💳 כרטיס אשראי | *2* — 🏦 הוראת קבע | *3* — 💵 מזומן | *4* — 📝 צ׳קים | *5* — 🏛️ העברה בנקאית | *6* — 🔗 קישור תשלום מיידי",
-        branches: "בחירה 1-2 → payment_setup_child_name (זיהוי כפול) | בחירה 3-6 → תשובה ישירה או task",
+        stepId: "payment_setup_start / payment_setup_offer",
+        title: "הסדרת תשלום — הצעת הוראת קבע (ראשי, §10-11)",
+        userInput: "כן / אפשרות אחרת / שיטה",
+        botMessage: "מציעים *הוראת קבע* ישירות (לא תפריט 6 שיטות): *להסדיר הוראת קבע?* (כן / אפשרות אחרת). חלופות רק אחרי סירוב.",
+        branches: "אישור הו\"ק → payment_setup_child_name | סירוב/חלופות → payment_setup_method (תפריט השיטות)",
         mode: "FP",
-        sideEffects: "loadParentRegistrationContext() אם צריך",
+        sideEffects: "loadParentRegistrationContext() אם צריך | payment_method='standing_order' באישור",
       },
       {
         order: 2,

@@ -770,6 +770,40 @@ async function routingCases() {
     check('R6 — "הוראת קבע" (חיובי) עדיין נבחר', s.collectedData.payment_method === 'standing_order',
       `method=${s.collectedData.payment_method}`)
   }
+
+  // ═══ #7 §10-11 — הוראת קבע כאופציה ראשית (חלק ב) ═══════════════════════════
+  // כניסה למסלול התשלום → מציעים הו"ק *ישירות*, לא תפריט 6 שיטות
+  {
+    const s = makeSession('payment_setup_start')
+    const r = await processMessage(s, 'הסדרת תשלום')
+    check('§10-11 — כניסה למסלול תשלום מציעה הוראת קבע ראשית (לא תפריט מלא)',
+      r.nextFlow === 'payment_setup_offer' && /הוראת קבע/.test(r.text) && !/כרטיס אשראי \(PayPlus\)/.test(r.text),
+      `nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 90))}`)
+  }
+  // "כן" בהצעה → ממשיך ישירות בהוראת קבע
+  {
+    const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
+    const r = await processMessage(s, 'כן')
+    check('§10-11 — "כן" בהצעה → הוראת קבע (שם → לינק)',
+      s.collectedData.payment_method === 'standing_order' && r.nextFlow === 'payment_setup_child_name',
+      `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow}`)
+  }
+  // "הוראת קבע" בהצעה → אישור הו"ק
+  {
+    const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
+    const r = await processMessage(s, 'הוראת קבע')
+    check('§10-11 — "הוראת קבע" בהצעה → אישור הו"ק',
+      s.collectedData.payment_method === 'standing_order' && r.nextFlow === 'payment_setup_child_name',
+      `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow}`)
+  }
+  // סירוב / בקשת חלופות → מציג את תפריט השיטות (רק *אחרי* סירוב)
+  for (const msg of ['אני מעדיף אפשרות אחרת', 'לא', 'משהו אחר']) {
+    const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
+    const r = await processMessage(s, msg)
+    check(`§10-11 — "${msg}" → תפריט חלופות (לא בחר הו"ק)`,
+      r.nextFlow === 'payment_setup_method' && /כרטיס אשראי|מזומן/.test(r.text) && s.collectedData.payment_method !== 'standing_order',
+      `nextFlow=${r.nextFlow} method=${s.collectedData.payment_method} text=${JSON.stringify(r.text.slice(0, 60))}`)
+  }
 }
 
 async function main() {
