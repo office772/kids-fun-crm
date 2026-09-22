@@ -377,18 +377,22 @@ const request = (body) => ({ headers: { get: () => null }, json: async () => bod
     check('C (R5) — חידוש תפיסה מקבילי אחרי timeout → עיבוד אחד בלבד', calls === 1, `calls=${calls}`)
   }
 
-  // ═══ D (R3/R5) — כשל מחיקת session בסיום → saveError, בלי פנייה/סימון השלמה ════
+  // ═══ D (סבב 5 - עודכן) — כשל ניקוי *אחרי* פעולה שהושלמה → COMMIT, לא replay ══════
+  //   סבב 4 החזיר כאן saveError+release (replay). סבב 5 הראה ש-replay משכפל את הפעולה
+  //   הבלתי-הפיכה שכבר בוצעה ב-processMessage. הנכון: המשימה נוצרת, התשובה נשלחת,
+  //   האירוע processed; הכשל נרשם אבל אין replay. (הסשן rev-guarded ויפוג.)
   {
     const PHONE = '+972500000000'
     const db = makeSessionDB()
     db.sessions.set(PHONE, { phone: PHONE, current_flow: 'cancel_confirm_after15', collected_data: {}, rev: 'r0' })
     db.failClear = true
     dbmod.createServiceClient = db.client
-    handler.processMessage = async () => ({ text: 'הביטול בוצע!', intent: 'ביטול', isComplete: true, createTask: { type: 'ביטול', description: 'x', priority: 'גבוה' } })
+    handler.processMessage = async () => ({ text: 'הביטול בוצע!', intent: 'ביטול', isComplete: true, createTask: { type: 'ביטול', description: 'לבטל ידנית הו"ק', priority: 'גבוה' } })
     const json = await (await route.POST(request({ phone: PHONE, message: 'כן', message_id: 'del-fail' }))).json()
-    check('D — כשל מחיקת session: saveError (לא הצלחה)', json.saveError === true, `json=${JSON.stringify(json)}`)
-    check('D — כשל מחיקת session: לא נוצרה פנייה', db.tasks.length === 0, `tasks=${db.tasks.length}`)
-    check('D — כשל מחיקת session: לא סומן processed', (db.wml.get('del-fail') || {}).processed !== true, `wml=${JSON.stringify(db.wml.get('del-fail'))}`)
+    check('D (commit) — התשובה נשלחת (לא saveError)', json.saveError !== true && json.reply === 'הביטול בוצע!', `json=${JSON.stringify(json)}`)
+    check('D (commit) — המשימה (תיעוד מדויק) נוצרה', db.tasks.length === 1, `tasks=${db.tasks.length}`)
+    check('D (commit) — האירוע סומן processed (בלי release/replay)', (db.wml.get('del-fail') || {}).processed === true, `wml=${JSON.stringify(db.wml.get('del-fail'))}`)
+    handler.processMessage = realProcess
   }
 
   // ═══ Gap1 (S1) — שתי הודעות "כן" חופפות לביטול → ביטול הו"ק אחד בלבד (CAS) ══════
@@ -445,25 +449,68 @@ const request = (body) => ({ headers: { get: () => null }, json: async () => bod
     handler.processMessage = realProcess
   }
 
-  // ═══ Gap2 (P2) — מדיה: כשל מחיקת session → לא מסומן processed, התפיסה משוחררת ═══
+  // ═══ Gap2 (סבב 5 - עודכן) — מדיה: כשל ניקוי → COMMIT; retry לא משכפל שליחה/פנייה ══
+  //   astra round5: השחרור ל-retry (סבב 4) גרם ל-2 תשובות + 2 פניות. הנכון: לסמן
+  //   processed (הפעולה כבר בוצעה) כדי שניסיון חוזר של אותו אירוע יזוהה כ-duplicate.
   {
     const PHONE = '+972500000000'
     const db = makeSessionDB()
     db.sessions.set(PHONE, { phone: PHONE, current_flow: 'register_child_name', collected_data: {}, rev: 'r0' })
-    db.failClear = true
     dbmod.createServiceClient = db.client
-    uchat.getUserNsByPhone = async () => 'ns'; uchat.sendText = async () => true
+    let sends = 0
+    uchat.getUserNsByPhone = async () => 'ns'; uchat.sendText = async () => { sends++; return true }
     const mediaH = require(path.join(ROOT, 'src/lib/bot/media-handler.ts'))
     const realDetect = mediaH.detectMedia, realHandle = mediaH.handleMediaMessage
     mediaH.detectMedia = () => ({ kind: 'image', url: 'http://x/f.jpg' })
-    mediaH.handleMediaMessage = async () => ({ text: 'ניתחתי את הקובץ', createTask: null })
-    const bgBefore = background.length
+    mediaH.handleMediaMessage = async () => ({ text: 'ניתחתי את הקובץ', createTask: { type: 'שאלה כללית', description: 'הורה שלח קובץ', priority: 'גבוה' } })
+    // ניסיון 1 — כשל ניקוי הסשן
+    db.failClear = true
+    let bg = background.length
     await route.POST(request({ phone: PHONE, message: 'http://x/f.jpg', user_ns: 'ns', message_id: 'media-1' })).then(r => r.json())
-    await Promise.all(background.slice(bgBefore))
-    const e = db.wml.get('media-1')
-    check('Gap2 — מדיה: כשל מחיקה → האירוע לא סומן processed', !(e && e.processed), `wml=${JSON.stringify(e)}`)
-    check('Gap2 — מדיה: התפיסה שוחררה (retry אפשרי)', !db.wml.has('media-1'), `has=${db.wml.has('media-1')}`)
+    await Promise.all(background.slice(bg))
+    // ניסיון 2 — אותו message_id (ה-uChat שלח שוב), הניקוי כבר יצליח
+    db.failClear = false
+    bg = background.length
+    const j2 = await route.POST(request({ phone: PHONE, message: 'http://x/f.jpg', user_ns: 'ns', message_id: 'media-1' })).then(r => r.json())
+    await Promise.all(background.slice(bg))
+    check('Gap2 (commit) — כשל ניקוי: האירוע סומן processed (לא release)', (db.wml.get('media-1') || {}).processed === true, `wml=${JSON.stringify(db.wml.get('media-1'))}`)
+    check('Gap2 (commit) — retry של אותו אירוע: שליחה אחת בלבד', sends === 1, `sends=${sends}`)
+    check('Gap2 (commit) — retry: פנייה אחת בלבד (לא כפולה)', db.tasks.length === 1, `tasks=${db.tasks.length}`)
+    check('Gap2 (commit) — הניסיון החוזר זוהה כ-duplicate', j2.duplicate === true, `j2=${JSON.stringify(j2)}`)
     mediaH.detectMedia = realDetect; mediaH.handleMediaMessage = realHandle
+  }
+
+  // ═══ ביטול-משולב (סבב 5) — reg בוטל + PayPlus נכשל + כשל ניקוי → פנייה *מדויקת* ════
+  //   התרחיש של astra: אחרי כשל משולב, ה-retry (סבב קודם) יצר פנייה כללית "לא אותר"
+  //   ואיבד את המידע. עכשיו: commit בלי replay → נשמרת הפנייה המדויקת "לבטל ידנית הו"ק".
+  {
+    const PHONE = '+972500000000'
+    let regStatus = 'מאושר', ppCalls = 0
+    const db = makeSessionDB((q) => {
+      const { table, op, filters } = q
+      if (table === 'parents' && op === 'select') return (q.fields || '').includes('payplus') ? { data: { payplus_recurring_uid: 'uid1', payplus_recurring_status: 'active' }, error: null } : { data: [{ id: 'p1', name: 'הורה' }], error: null }
+      if (table === 'parents' && op === 'update') return { data: null, error: null }
+      if (table === 'children' && op === 'select') return { data: [{ id: 'c1', name: 'נועם בדיקה', parent_id: 'p1' }], error: null }
+      if (table === 'registrations' && op === 'select') return { data: ['מאושר', 'ממתין לאישור'].includes(regStatus) ? { id: 'r1', status: regStatus, notes: '' } : null, error: null }
+      if (table === 'registrations' && op === 'update') { const idOk = filters.some(f => f[0] === 'eq' && f[1] === 'id' && f[2] === 'r1'); const inS = filters.find(f => f[0] === 'in' && f[1] === 'status'); const sOk = !inS || inS[2].includes(regStatus); if (idOk && sOk) { regStatus = 'בוטל'; return { data: [{ id: 'r1' }], error: null } } return { data: [], error: null } }
+      if (table === 'registration_timeline') return { data: null, error: null }
+      return undefined
+    })
+    db.sessions.set(PHONE, { phone: PHONE, current_flow: 'cancel_confirm_after15', collected_data: { child_name: 'נועם בדיקה' }, rev: 'r0' })
+    db.failClear = true   // כשל ניקוי הסשן *אחרי* שהביטול בוצע
+    dbmod.createServiceClient = db.client
+    const payplus = require(path.join(ROOT, 'src/lib/payplus-api.ts'))
+    payplus.isPayPlusApiConfigured = () => true
+    payplus.cancelRecurringPayment = async () => { ppCalls++; return { success: false, error: 'timeout' } }   // הספק נכשל
+    handler.processMessage = realProcess
+    const json = await (await route.POST(request({ phone: PHONE, message: 'כן', message_id: 'cxl-combo' }))).json()
+    check('ביטול-משולב — reg בוטל, PayPlus נקרא פעם אחת (נכשל)', regStatus === 'בוטל' && ppCalls === 1, `regStatus=${regStatus} ppCalls=${ppCalls}`)
+    check('ביטול-משולב — התשובה נשלחה (commit, לא saveError)', json.saveError !== true && !!json.reply, `json=${JSON.stringify(json)}`)
+    check('ביטול-משולב — נוצרה פנייה *מדויקת* ("לבטל ידנית"), לא כללית "לא אותר"',
+      db.tasks.some(t => /לבטל ידנית/.test(t.description || '')) && !db.tasks.some(t => /לא אותר אוטומטית/.test(t.description || '')),
+      `tasks=${JSON.stringify(db.tasks.map(t => t.description))}`)
+    check('ביטול-משולב — האירוע processed (בלי replay)', (db.wml.get('cxl-combo') || {}).processed === true, `wml=${JSON.stringify(db.wml.get('cxl-combo'))}`)
+    handler.processMessage = realProcess
   }
 
   console.log(`\n────────────\nעברו: ${passed} | נכשלו: ${failed}`)

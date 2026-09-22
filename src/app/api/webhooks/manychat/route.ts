@@ -442,13 +442,13 @@ async function finishMediaInBackground(
     // מדיה מסיימת את המסלול — מחיקה *מותנית-rev* (לא לדרוס הודעה חדשה שהגיעה בזמן הניתוח).
     const cleared = await clearSessionIfCurrent(supabase, phone, rev)
     if (cleared.error) {
-      // astra סבב 4: כשל מחיקת session אינו נבלע — לא מסמנים הושלם, ומשחררים את התפיסה
-      //    כדי שניסיון חוזר יוכל לעבד. (עיבוד המדיה עצמו at-least-once, כמו חריג E.)
-      console.error(`[media-bg] clearSession failed for ${phone} — releasing claim for retry`)
-      await releaseClaim(supabase, messageId, claimToken)
-    } else {
-      await markProcessed(supabase, messageId, claimToken)   // הושלם רק עכשיו, בסוף הרקע
+      // astra סבב 5: התשובה (sendText) והפנייה (createTask) *כבר בוצעו* למעלה. כשל ניקוי
+      //   הסשן אינו מצדיק replay — release+retry היה שולח את הניתוח ויוצר פנייה *שוב*
+      //   (astra round5, פער המדיה). לכן מסמנים processed (commit) ומתעדים; הסשן נותר
+      //   rev-guarded ויפוג. הכשל לא נבלע (נרשם), אבל אין שכפול של פעולה שכבר הצליחה.
+      console.error(`[media-bg] clearSession failed for ${phone} — session left to expire (rev-guarded); marking processed to avoid duplicate send/task on retry`)
     }
+    await markProcessed(supabase, messageId, claimToken)   // הושלם (התשובה+הפנייה בוצעו) — לא לעבד שוב
     console.log(`[media-bg] phone=${phone} kind=${media.kind} sent=${sent} cleared=${!cleared.error}`)
   } catch (err) {
     console.error('[media-bg] failed:', err)
@@ -487,15 +487,24 @@ async function applyResult(
   if (result.isComplete && !result.nextFlow) {
     const r = await clearSessionIfCurrent(supabase, phone, rev)
     stale = r.stale
-    if (r.error) saved = false   // astra D: כשל מחיקה אינו הצלחה — עוצר לפני תופעות לוואי
+    if (r.error) {
+      // astra סבב 5 (התאוששות מכשל חלקי): בשלב isComplete הפעולה העסקית הבלתי-הפיכה
+      //   כבר בוצעה *בתוך* processMessage (ביטול רישום/הו"ק, רשימת המתנה, לינק תשלום).
+      //   כשל *ניקוי* הסשן אחריה אינו מצדיק replay — replay יריץ את אותה פעולה שוב
+      //   ויכפיל תשובות/פניות (astra round5: ביטול+מדיה). לכן מחייבים COMMIT: המשימה
+      //   נוצרת (התיעוד המדויק, למשל "לבטל ידנית הו"ק"), התשובה נשלחת, ההודעה מסומנת
+      //   processed; הסשן שנותר rev-guarded ויפוג לבד. שונה מ-D (סבב 4): הכשל *לא נבלע*
+      //   (נרשם + המשימה נוצרת); מה שהשתנה — אין replay שמשכפל פעולה שכבר הצליחה.
+      console.error(`[applyResult] clearSession failed for ${phone} after a completed action — committing task+reply, session left to expire (rev-guarded); NOT replaying (avoids duplicate side-effects)`)
+      // saved נשאר true → הקורא ישלח את התשובה ויסמן processed (בלי release/replay).
+    }
   } else {
     const r = await persistSession(supabase, session, rev)
     saved = r.saved; stale = r.stale
   }
 
-  // astra R3/R5: תוצאה מיושנת (השיחה התקדמה) *או* כשל שמירה/מחיקה → לא יוצרים שום
-  // תופעת לוואי (משימה/התראה/סליקה). מונע גם פנייה כפולה ב-retry (הניסיון שנכשל לא
-  // יוצר כלום; רק זה שהשלים בהצלחה).
+  // מיושן (השיחה התקדמה) → לא יוצרים תופעת לוואי (הבעלים החדש יעשה זאת). כשל שמירה
+  // בשלב-ביניים (nextFlow, בלי פעולה בלתי-הפיכה) → release+retry בטוח דרך saved=false.
   if (stale || !saved) return { saved, stale }
 
   if (result.createTask) {
