@@ -761,13 +761,23 @@ async function performCancellation(
     // ⚠️ Supabase מחזיר error *בגוף* (לא זורק) — בלי בדיקת התוצאה כשל כתיבה היה
     //    מדווח "הביטול בוצע" *וגם* מבטל הו"ק ב-PayPlus (astra #3, S1). בכשל →
     //    return null, וההורה מקבל "נקלט, נציגה תשלים ידנית" בלי סליקה ובלי timeline.
+    // ⚠️ astra סבב 4 (S1): ה-UPDATE הוא **compare-and-set** — מותנה בסטטוס שעדיין פעיל.
+    //    שתי הודעות "כן" חופפות: רק ה-UPDATE הראשון תופס (מ'מאושר'→'בוטל', מחזיר שורה);
+    //    השני רואה 0 שורות ⇒ return null ⇒ *לא* מבצע ביטול הו"ק ב-PayPlus שוב. כך הפעולה
+    //    העסקית עצמה אטומית, לא רק שמירת מצב השיחה. הגנת ה-rev לבדה לא הספיקה כי
+    //    performCancellation רץ בתוך processMessage, לפני בדיקת הבעלות.
     const { data: updated, error: updErr } = await supabase.from('registrations').update({
       status: 'בוטל',
       notes:  [reg.notes, `בוטל ע"י ההורה דרך הבוט — ${policyNote}`].filter(Boolean).join(' | '),
-    }).eq('id', reg.id).select('id')
+    }).eq('id', reg.id).in('status', ['מאושר', 'ממתין לאישור']).select('id')
 
-    if (updErr || !updated?.length) {
-      console.error('[performCancellation] registration update failed:', updErr?.message ?? 'no row updated')
+    if (updErr) {
+      console.error('[performCancellation] registration update failed:', updErr.message)
+      return null
+    }
+    if (!updated?.length) {
+      // 0 שורות = מישהו כבר ביטל (הודעה חופפת) → לא מבצעים שוב, לא נוגעים ב-PayPlus.
+      console.log('[performCancellation] registration already cancelled (concurrent) — no-op')
       return null
     }
 

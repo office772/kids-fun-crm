@@ -71,19 +71,21 @@ function dbFor(execute) {
 
 // ── Supabase מצבי בזיכרון: bot_sessions (עם rev), whatsapp_message_log (claim),
 //    conversations (היסטוריה), tasks. תואם למנגנון האמיתי (astra R3/R5). ────────────
-function makeSessionDB() {
+function makeSessionDB(extra) {
   const state = { sessions: new Map(), wml: new Map(), conv: [], tasks: [], failSave: false, failClear: false }
   state.client = () => dbFor(q => {
     const { table, op, payload, filters } = q
     const eqv = (k) => (filters.find(f => f[0] === 'eq' && f[1] === k) || [])[2]
+    if (extra) { const r = extra(q, state); if (r !== undefined) return r }
     if (table === 'parents' && op === 'select') return { data: [{ id: 'p1', name: 'הורה' }], error: null }
     if (table === 'whatsapp_message_log') {
       const id = (payload && payload.id_message) || eqv('id_message')
       const sid = (payload && payload.session_id) || eqv('session_id')
+      const procF = filters.find(f => f[0] === 'eq' && f[1] === 'processed')
       if (op === 'insert') { if (state.wml.has(id)) return { data: null, error: { code: '23505' } }; state.wml.set(id, { processed: false, created_at: new Date().toISOString(), session_id: payload.session_id }); return { data: null, error: null } }
       if (op === 'select') { const e = state.wml.get(id); return { data: e ? [{ processed: e.processed, created_at: e.created_at, session_id: e.session_id }] : [], error: null } }
       if (op === 'update') { const e = state.wml.get(id); if (e && (!sid || e.session_id === sid)) e.processed = true; return { data: null, error: null } }   // מותנה-טוקן
-      if (op === 'delete') { const e = state.wml.get(id); if (e && (!sid || e.session_id === sid)) { state.wml.delete(id); return { data: [{ id_message: id }], error: null } } return { data: [], error: null } }   // מותנה-טוקן
+      if (op === 'delete') { const e = state.wml.get(id); const procOk = !procF || (e && e.processed === procF[2]); if (e && (!sid || e.session_id === sid) && procOk) { state.wml.delete(id); return { data: [{ id_message: id }], error: null } } return { data: [], error: null } }   // מותנה-טוקן+processed
     }
     if (table === 'bot_sessions') {
       const phone = (payload && payload.phone) || eqv('phone')
@@ -387,6 +389,81 @@ const request = (body) => ({ headers: { get: () => null }, json: async () => bod
     check('D — כשל מחיקת session: saveError (לא הצלחה)', json.saveError === true, `json=${JSON.stringify(json)}`)
     check('D — כשל מחיקת session: לא נוצרה פנייה', db.tasks.length === 0, `tasks=${db.tasks.length}`)
     check('D — כשל מחיקת session: לא סומן processed', (db.wml.get('del-fail') || {}).processed !== true, `wml=${JSON.stringify(db.wml.get('del-fail'))}`)
+  }
+
+  // ═══ Gap1 (S1) — שתי הודעות "כן" חופפות לביטול → ביטול הו"ק אחד בלבד (CAS) ══════
+  {
+    const PHONE = '+972500000000'
+    let regStatus = 'מאושר', ppCalls = 0
+    const db = makeSessionDB((q) => {
+      const { table, op, filters } = q
+      if (table === 'parents' && op === 'select') return (q.fields || '').includes('payplus') ? { data: { payplus_recurring_uid: 'uid1', payplus_recurring_status: 'active' }, error: null } : { data: [{ id: 'p1', name: 'הורה' }], error: null }
+      if (table === 'parents' && op === 'update') return { data: null, error: null }
+      if (table === 'children' && op === 'select') return { data: [{ id: 'c1', name: 'נועם בדיקה', parent_id: 'p1' }], error: null }
+      if (table === 'registrations' && op === 'select') return { data: ['מאושר', 'ממתין לאישור'].includes(regStatus) ? { id: 'r1', status: regStatus, notes: '' } : null, error: null }
+      if (table === 'registrations' && op === 'update') {
+        // מוק נאמן ל-Postgres: UPDATE נוגע בשורה רק אם *כל* המסננים מתקיימים (id וגם, אם קיים, status IN).
+        // כך: עם ה-CAS (.in status) — רק ההודעה הראשונה תופסת; בלי ה-CAS (id בלבד) — *שתיהן* תופסות → ppCalls=2 (fail-before).
+        const idOk = filters.some(f => f[0] === 'eq' && f[1] === 'id' && f[2] === 'r1')
+        const inS = filters.find(f => f[0] === 'in' && f[1] === 'status')
+        const statusOk = !inS || inS[2].includes(regStatus)
+        if (idOk && statusOk) { regStatus = 'בוטל'; return { data: [{ id: 'r1' }], error: null } }
+        return { data: [], error: null }
+      }
+      if (table === 'registration_timeline') return { data: null, error: null }
+      return undefined
+    })
+    db.sessions.set(PHONE, { phone: PHONE, current_flow: 'cancel_confirm_after15', collected_data: { child_name: 'נועם בדיקה' }, rev: 'r0' })
+    dbmod.createServiceClient = db.client
+    const payplus = require(path.join(ROOT, 'src/lib/payplus-api.ts'))
+    payplus.isPayPlusApiConfigured = () => true
+    payplus.cancelRecurringPayment = async () => { ppCalls++; return { success: true } }
+    handler.processMessage = realProcess
+    await Promise.all([1, 2].map(i => route.POST(request({ phone: PHONE, message: 'כן', message_id: `y${i}` })).then(r => r.json())))
+    check('Gap1 (S1) — שתי "כן" חופפות → ביטול הו"ק *אחד* בלבד', ppCalls === 1, `ppCalls=${ppCalls}`)
+    check('Gap1 (S1) — הרישום בוטל (פעם אחת)', regStatus === 'בוטל', `regStatus=${regStatus}`)
+    handler.processMessage = realProcess
+  }
+
+  // ═══ Gap3 (P2) — חידוש תפיסה לא מוחק אירוע שהושלם בין SELECT ל-DELETE ═════════
+  {
+    // מוק שמדמה מרוץ: ה-SELECT מחזיר processed=false (snapshot ישן) אך מסמן true מיד —
+    // כאילו העובד המקורי סיים בין ה-SELECT ל-DELETE.
+    const db = makeSessionDB((q, state) => {
+      if (q.table === 'whatsapp_message_log' && q.op === 'select') {
+        const e = state.wml.get('race-msg')
+        if (e && !e.processed) { const snap = { processed: false, created_at: e.created_at, session_id: e.session_id }; e.processed = true; return { data: [snap], error: null } }
+      }
+      return undefined
+    })
+    db.wml.set('race-msg', { processed: false, created_at: new Date(Date.now() - 3 * 60000).toISOString(), session_id: 'tok' })
+    dbmod.createServiceClient = db.client
+    let calls = 0
+    handler.processMessage = async () => { calls++; return { text: 'x', intent: 'שאלה_כללית', isComplete: true } }
+    const json = await (await route.POST(request({ phone: '+972500000000', message: 'x', message_id: 'race-msg' }))).json()
+    check('Gap3 — הושלם בין SELECT ל-DELETE → לא מעובד מחדש', calls === 0 && json.duplicate === true, `calls=${calls} json=${JSON.stringify(json)}`)
+    handler.processMessage = realProcess
+  }
+
+  // ═══ Gap2 (P2) — מדיה: כשל מחיקת session → לא מסומן processed, התפיסה משוחררת ═══
+  {
+    const PHONE = '+972500000000'
+    const db = makeSessionDB()
+    db.sessions.set(PHONE, { phone: PHONE, current_flow: 'register_child_name', collected_data: {}, rev: 'r0' })
+    db.failClear = true
+    dbmod.createServiceClient = db.client
+    uchat.getUserNsByPhone = async () => 'ns'; uchat.sendText = async () => true
+    const mediaH = require(path.join(ROOT, 'src/lib/bot/media-handler.ts'))
+    const realDetect = mediaH.detectMedia, realHandle = mediaH.handleMediaMessage
+    mediaH.detectMedia = () => ({ kind: 'image', url: 'http://x/f.jpg' })
+    mediaH.handleMediaMessage = async () => ({ text: 'ניתחתי את הקובץ', createTask: null })
+    const bgBefore = background.length
+    await route.POST(request({ phone: PHONE, message: 'http://x/f.jpg', user_ns: 'ns', message_id: 'media-1' })).then(r => r.json())
+    await Promise.all(background.slice(bgBefore))
+    const e = db.wml.get('media-1')
+    check('Gap2 — מדיה: כשל מחיקה → האירוע לא סומן processed', !(e && e.processed), `wml=${JSON.stringify(e)}`)
+    check('Gap2 — מדיה: התפיסה שוחררה (retry אפשרי)', !db.wml.has('media-1'), `has=${db.wml.has('media-1')}`)
+    mediaH.detectMedia = realDetect; mediaH.handleMediaMessage = realHandle
   }
 
   console.log(`\n────────────\nעברו: ${passed} | נכשלו: ${failed}`)

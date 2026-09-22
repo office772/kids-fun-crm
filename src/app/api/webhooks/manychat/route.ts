@@ -215,10 +215,13 @@ async function claimMessage(
   if (ex?.processed) return { status: 'duplicate', token: null }
   const claimedAt = ex?.created_at ? new Date(ex.created_at).getTime() : 0
   if (Date.now() - claimedAt < 2 * 60_000) return { status: 'duplicate', token: null }   // עיבוד מקביל בעיצומו
-  // חידוש אטומי: מחיקה מותנית בטוקן הישן — רק בקשה אחת מצליחה למחוק ולתפוס מחדש.
-  const { data: del } = await supabase.from('whatsapp_message_log')
-    .delete().eq('id_message', messageId).eq('session_id', ex?.session_id ?? '__none__').select('id_message')
-  if (!del?.length) return { status: 'duplicate', token: null }   // מישהו אחר תפס-מחדש
+  // חידוש אטומי: מחיקה מותנית *גם בטוקן הישן וגם ב-processed=false* (astra סבב 4). כך
+  // אם העובד המקורי סיים (processed=true) בין ה-SELECT ל-DELETE — המחיקה לא תואמת ולא
+  // מעבדים מחדש אירוע שהושלם. שגיאת DB מובחנת מכפילות (לא נבלעת כ-duplicate).
+  const { data: del, error: delErr } = await supabase.from('whatsapp_message_log')
+    .delete().eq('id_message', messageId).eq('session_id', ex?.session_id ?? '__none__').eq('processed', false).select('id_message')
+  if (delErr) { console.error(`[manychat] reclaim delete failed for ${messageId}: ${delErr.message}`); return { status: 'unclaimed', token: null } }
+  if (!del?.length) return { status: 'duplicate', token: null }   // הושלם או נתפס-מחדש בינתיים
   const { error: reErr } = await supabase.from('whatsapp_message_log').insert(row)
   return reErr ? { status: 'unclaimed', token: null } : { status: 'new', token }
 }
@@ -411,9 +414,11 @@ async function finishMediaInBackground(
     parentId?: string
     parentName?: string | null
     rev: string
+    messageId: string | null
+    claimToken: string | null
   }
 ) {
-  const { session, media, userNs, phone, parentId, parentName, rev } = opts
+  const { session, media, userNs, phone, parentId, parentName, rev, messageId, claimToken } = opts
   try {
     const result = await handleMediaMessage(session, media)
     const sent = await sendText(userNs, result.text)
@@ -434,11 +439,20 @@ async function finishMediaInBackground(
         parentPhone: phone,
       })
     }
-    // מדיה מסיימת את המסלול — מחיקה *מותנית-rev* (astra: לא לדרוס הודעה חדשה שהגיעה בזמן הניתוח).
-    await clearSessionIfCurrent(supabase, phone, rev)
-    console.log(`[media-bg] phone=${phone} kind=${media.kind} sent=${sent}`)
+    // מדיה מסיימת את המסלול — מחיקה *מותנית-rev* (לא לדרוס הודעה חדשה שהגיעה בזמן הניתוח).
+    const cleared = await clearSessionIfCurrent(supabase, phone, rev)
+    if (cleared.error) {
+      // astra סבב 4: כשל מחיקת session אינו נבלע — לא מסמנים הושלם, ומשחררים את התפיסה
+      //    כדי שניסיון חוזר יוכל לעבד. (עיבוד המדיה עצמו at-least-once, כמו חריג E.)
+      console.error(`[media-bg] clearSession failed for ${phone} — releasing claim for retry`)
+      await releaseClaim(supabase, messageId, claimToken)
+    } else {
+      await markProcessed(supabase, messageId, claimToken)   // הושלם רק עכשיו, בסוף הרקע
+    }
+    console.log(`[media-bg] phone=${phone} kind=${media.kind} sent=${sent} cleared=${!cleared.error}`)
   } catch (err) {
     console.error('[media-bg] failed:', err)
+    // כשל ניתוח → לא מסמנים הושלם (ניתן לנסות שוב); לא משחררים אוטומטית (ה-ack כבר נשלח).
   }
 }
 
@@ -649,10 +663,12 @@ export async function POST(req: NextRequest) {
         phone, parentId: parent.id, direction: 'יוצא', text: mediaAck(),
         intent: 'לא_ידוע', sessionId: session.sessionId,
       })
+      // astra סבב 4: הודעת ה-ack נשלחה, אבל האירוע מסומן processed *רק אחרי* שהניתוח
+      //    ברקע הסתיים (כולל המחיקה) — לא מיד. הפרדה בין קבלה להשלמת עיבוד.
       waitUntil(finishMediaInBackground(supabase, {
-        session, media, userNs: ns, phone, parentId: parent.id, parentName: parent.name, rev: sessionRev,
+        session, media, userNs: ns, phone, parentId: parent.id, parentName: parent.name,
+        rev: sessionRev, messageId, claimToken,
       }))
-      await markProcessed(supabase, messageId, claimToken)
       console.log(`[manychat] phone=${phone} media=${media.kind} → ack now, analysis in background`)
       return NextResponse.json({ reply: mediaAck(), intent: 'לא_ידוע', deferred: true }, { status: 200 })
     }
