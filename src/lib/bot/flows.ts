@@ -2209,14 +2209,21 @@ export async function handlePaymentSetupFlow(
     //   *חיובית וברורה*. שאלה ("אפשר לבטל...?") → LLM; שלילה ("לא רוצה לבטל") או ביטול
     //   *אמצעי התשלום* ("לבטל את הוראת הקבע") → בירור. לא כל אזכור ביטול = בקשת ביטול רישום.
     if (/לבטל|ביטול|להפסיק|לעזוב/.test(core)) {
-      if (isRealQuestion(msg)) return { text: '', useLLM: true }                       // שאלה על ביטול → הסבר
+      if (isRealQuestion(msg)) return { text: '', useLLM: true }                         // שאלה על ביטול → הסבר
       const negated   = /(^|\s)(לא|בלי|אינני|אין)(\s|$)/.test(core)
-      const payTarget = /הוראת\s*ה?קבע|(^|\s)הו\s*ק(\s|$)|התשלום|אמצעי/.test(core)      // ביטול אמצעי תשלום, לא רישום
-      if (!negated && !payTarget) {                                                     // בקשה חיובית לביטול רישום
+      const regTarget = /רישום|הרשמה|צהרון|קייטנה/.test(core)                            // ביטול *רישום* מפורש
+      const payTarget = /הוראת\s*ה?קבע|(^|\s)הו\s*ק(\s|$)|התשלום|אמצעי/.test(core)        // ביטול *אמצעי תשלום*
+      // astra חלק ב' (7): עוברים לביטול-רישום *רק* בבקשה חיובית עם מטרת-רישום מפורשת.
+      //   היעדר "הוראת קבע" אינו מוכיח שרוצים לבטל צהרון — עמימות → בירור מה לבטל.
+      if (!negated && regTarget) {                                                       // ביטול רישום מפורש → מסלול הביטול
         session.currentFlow = 'cancel_start'
         return handleCancellationFlow(session, msg)
       }
-      return { text: botText('payset_offer_reask'), nextFlow: 'payment_setup_offer' }   // שלילה/אמצעי-תשלום → בירור
+      if (!negated && payTarget) {                                                       // ביטול הו"ק (אין עדיין) → חלופות, לא re-ask מעגלי
+        return { text: botText('payset_intro_menu', { 'פתיחה': '' }), nextFlow: 'payment_setup_method' }
+      }
+      if (negated) return { text: botText('payset_offer_reask'), nextFlow: 'payment_setup_offer' }  // שלילה → החזרה להצעה
+      return { text: botText('payset_cancel_clarify'), nextFlow: 'payment_setup_offer' }  // עמום → בירור מה לבטל
     }
     const verdict = offerVerdict(msg)
     // אישור (ביטוי שלם) → ממשיכים ישירות בהוראת קבע (זיהוי שם → לינק, כמו במסלול הקיים).

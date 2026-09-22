@@ -841,12 +841,20 @@ async function routingCases() {
       s.collectedData.payment_method !== 'standing_order' && r.nextFlow === 'payment_setup_offer',
       `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 40))}`)
   }
-  // בקשת ביטול *מפורשת* בשלב ההצעה → מסלול הביטול (לא סירוב-להצעה). astra חלק ב 5.
-  for (const msg of ['אני רוצה לבטל את הרישום לצהרון', 'אני רוצה לבטל את הרישום', 'לבטל את הצהרון', 'רוצה לבטל']) {
+  // בקשת ביטול *רישום מפורשת* (מטרת-רישום) → מסלול הביטול. astra חלק ב 5/7.
+  for (const msg of ['אני רוצה לבטל את הרישום לצהרון', 'אני רוצה לבטל את הרישום', 'לבטל את הצהרון', 'לבטל את הרישום']) {
     const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
     const r = await processMessage(s, msg)
     check(`§10-11 cancel-redirect — "${msg}" → מסלול ביטול`,
       r.nextFlow === 'cancel_child' && s.collectedData.payment_method !== 'standing_order',
+      `nextFlow=${r.nextFlow} method=${s.collectedData.payment_method} text=${JSON.stringify(r.text.slice(0, 40))}`)
+  }
+  // ביטול *עמום* (בלי מטרה ברורה) → *בירור* מה לבטל, לא ניתוב אוטומטי לביטול-רישום. astra חלק ב 7.
+  for (const msg of ['רוצה לבטל', 'לבטל', 'אני רוצה לבטל']) {
+    const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
+    const r = await processMessage(s, msg)
+    check(`§10-11 cancel-ambiguous — "${msg}" → בירור (לא מסלול ביטול)`,
+      r.nextFlow === 'payment_setup_offer' && /מה תרצו לבטל/.test(r.text) && s.collectedData.payment_method !== 'standing_order',
       `nextFlow=${r.nextFlow} method=${s.collectedData.payment_method} text=${JSON.stringify(r.text.slice(0, 40))}`)
   }
   // "לא רוצה" נשאר סירוב-להצעה (לא ביטול-רישום) → תפריט חלופות
