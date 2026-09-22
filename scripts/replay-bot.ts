@@ -859,12 +859,20 @@ async function routingCases() {
       `nextFlow=${r.nextFlow} method=${s.collectedData.payment_method} text=${JSON.stringify(r.text.slice(0, 40))}`)
   }
   // מענה לבירור: "את הרישום" → ביטול; "אפשרות אחרת" → חלופות (astra חלק ב 8 — התשובה נקראת כמענה)
-  for (const [answer, expected] of [['את הרישום', 'cancel_child'], ['הרישום', 'cancel_child'], ['צהרון', 'cancel_child'], ['אפשרות אחרת', 'payment_setup_method'], ['הוראת קבע', 'payment_setup_method']]) {
+  for (const [answer, expected] of [['את הרישום', 'cancel_child'], ['הרישום', 'cancel_child'], ['צהרון', 'cancel_child'], ['אפשרות אחרת', 'payment_setup_method'], ['הוראת קבע', 'payment_setup_method'], ['את התשלום', 'payment_setup_method']]) {
     const s = makeSession('payment_setup_cancel_choice', { child_name: 'נועם', monthly_fee: '450' })
     const r = await processMessage(s, answer)
     check(`§10-11 cancel-choice — "${answer}" → ${expected}`,
       r.nextFlow === expected && s.collectedData.payment_method !== 'standing_order',
       `nextFlow=${r.nextFlow} method=${s.collectedData.payment_method}`)
+  }
+  // הגנות בשלב הבירור (astra חלק ב 9): שאלה → LLM; שלילה → בירור שוב — *לא* ביטול רישום.
+  for (const answer of ['לא את הרישום', 'מה יקרה לרישום?', 'לא בטוח', 'מה זה אומר לגבי הרישום']) {
+    const s = makeSession('payment_setup_cancel_choice', { child_name: 'נועם', monthly_fee: '450' })
+    const r = await processMessage(s, answer)
+    check(`§10-11 cancel-choice-guard — "${answer}" → *לא* ביטול רישום`,
+      r.nextFlow !== 'cancel_child' && s.collectedData.payment_method !== 'standing_order',
+      `nextFlow=${r.nextFlow} method=${s.collectedData.payment_method} text=${JSON.stringify(r.text.slice(0, 40))}`)
   }
   // "לא רוצה" נשאר סירוב-להצעה (לא ביטול-רישום) → תפריט חלופות
   {

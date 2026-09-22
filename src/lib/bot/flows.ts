@@ -2251,17 +2251,23 @@ export async function handlePaymentSetupFlow(
   // ─── §10-11 (astra ב 8): מענה לבירור "מה תרצו לבטל?" ─────────────────────
   //   התשובה נקראת *כאן* (לא כפתיחת רישום/כוונה חדשה — השלב מחזיק את הכוונות הרלוונטיות).
   if (step === 'payment_setup_cancel_choice') {
-    const core = confirmCore(userMessage.trim())
+    const msg  = userMessage.trim()
+    const core = confirmCore(msg)
+    // astra חלק ב' (9): אותן הגנות כמו בהצעה, *לפני* בחירת המטרה —
+    //   שאלה ("מה יקרה לרישום?") → LLM; שלילה ("לא את הרישום") → בירור שוב.
+    if (isRealQuestion(msg)) return { text: '', useLLM: true }
+    if (/(^|\s)(לא|בלי|אינני|אין)(\s|$)/.test(core)) {
+      return { text: botText('payset_cancel_clarify'), nextFlow: 'payment_setup_cancel_choice' }
+    }
     const wantsReg = CANCEL_REG_TARGET.test(core)
     const wantsPay = CANCEL_PAY_TARGET.test(core) || /תשלום|אמצעי|אפשרות|(^|\s)אחר(ת)?(\s|$)|חלופ/.test(core)
     if (wantsReg && !wantsPay) {                                                        // "את הרישום"/"צהרון" → ביטול רישום
       session.currentFlow = 'cancel_start'
-      return handleCancellationFlow(session, userMessage.trim())
+      return handleCancellationFlow(session, msg)
     }
     if (wantsPay && !wantsReg) {                                                        // "אפשרות אחרת"/"תשלום" → חלופות
       return { text: botText('payset_intro_menu', { 'פתיחה': '' }), nextFlow: 'payment_setup_method' }
     }
-    if (isRealQuestion(userMessage)) return { text: '', useLLM: true }
     return { text: botText('payset_cancel_clarify'), nextFlow: 'payment_setup_cancel_choice' }  // עדיין לא ברור → בירור שוב
   }
 
