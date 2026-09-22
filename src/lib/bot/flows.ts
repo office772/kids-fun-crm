@@ -247,7 +247,7 @@ const CONFIRM_QUALIFIER_RE = /[?؟？]|\d|[٠-٩۰-۹]|אבל|רגע|חכ[הי]|
 // כן מתאים ל-"כן בבקשה". (לפני התיקון \p{P}/מספרים נמחקו והופכים תוכן ל-"כן".)
 function confirmCore(msg: string): string {
   // שומרים אותיות (עברית/לטינית), ספרות ורווח; כל השאר (פיסוק/אמוג'י) → רווח.
-  return normalizeMessage(msg).replace(/[^א-תA-Za-z0-9\s]+/g, ' ').replace(/\s+/g, ' ').trim()
+  return normalizeMessage(msg).toLowerCase().replace(/[^א-תa-z0-9\s]+/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
 // אישור/שלילה = אין הסתייגות/שאלה/מספר (על הגולמי), וההודעה כולה מתאימה לרשימה.
@@ -287,12 +287,46 @@ const CONFIRM_STANDING = [
   'אני רוצה', 'כן רוצה', 'כן אני רוצה', 'אני רוצה הוראת קבע', 'רוצה הוראת קבע', 'כן רוצה הוראת קבע',
   'בוא נעשה', 'בוא נעשה הוראת קבע', 'נעשה הוראת קבע',
   'כן בטח', 'כן מעולה', 'כן בהחלט', 'כן לגמרי', 'כן סבבה', 'כן בשמחה', 'בשמחה רבה',
+  // astra חלק ב' (10, סריקה יזומה — קורפוס 160 ניסוחים): ביטויי הסכמה שמכילים מילת שלילה
+  //   ("אין בעיה", "בלי ספק") — נתפסו כסירוב. ביטויים שלמים ברשימה הסגורה; ההתאמה המלאה
+  //   קודמת להיוריסטיקת השלילה (ראו offerVerdict).
+  'אין בעיה', 'לא בעיה', 'אין לי בעיה', 'אין לי בעיה עם זה', 'אין שום בעיה', 'בלי בעיה',
+  'בלי ספק', 'אין ספק', 'אין ספק שכן', 'אין לי התנגדות', 'לא רע', 'לא רע בכלל',
+  // סלנג/דיבור יומיומי (ביטויים שלמים)
+  'בכיף', 'בכיף גדול', 'ברור', 'ברור שכן', 'כמובן', 'כמובן שכן', 'בטח שכן', 'אחלה', 'סגור', 'סגור עליי', 'סגור עלי',
+  'נשמע מעולה', 'נשמע לי טוב', 'נראה לי טוב', 'נראה טוב', 'נראה מעולה', 'מקובל', 'מקובל עליי', 'מקובל עלי',
+  'בוא נתחיל', 'בואו נתחיל', 'נתחיל', 'נעשה את זה', 'בוא נעשה את זה', 'בואו נעשה', 'בואו נעשה הוראת קבע',
+  // אנגלית (הורים דוברי אנגלית) — באותיות קטנות; confirmCore מנרמל רישיות
+  'ok', 'okay', 'yes', 'yes please', 'sure', 'yep', 'yeah', 'ok sure', 'sounds good', 'fine',
 ] as const
-const DECLINE_STANDING = ['לא', 'לא תודה', 'לא רוצה', 'לא צריך', 'אפשרות אחרת', 'אחרת', 'משהו אחר', 'חלופה', 'חלופות', 'אפשרויות', 'תפריט'] as const
+// מילות-מילוי שמותר להן להופיע *לצד* ביטוי אישור שלם ("סבבה אחי", "כן תודה") — לעולם לא
+//   מאשרות לבד. רשימה סגורה וקצרה; כל מילה אחרת בהודעה מפילה את ההתאמה → הבהרה.
+const ACCEPT_FILLERS = ['אחי', 'אחותי', 'נו', 'אז', 'תודה', 'בבקשה', 'ממש', 'מאוד', 'רבה', 'גדול', 'זה', 'בוא', 'בואו', 'טוב', 'יאללה', 'please', 'thanks'] as const
+const DECLINE_STANDING = ['לא', 'לא תודה', 'לא רוצה', 'לא צריך', 'אפשרות אחרת', 'אחרת', 'משהו אחר', 'חלופה', 'חלופות', 'אפשרויות', 'תפריט',
+  'no', 'no thanks', 'no thank you', 'nope'] as const
+
+// astra חלק ב' (10): הודעה שמורכבת *כולה* מביטויי אישור שלמים (+מילוי) — "בסדר גמור מאשרת",
+//   "כן מעולה בואו נתחיל", "סבבה אחי". התאמה חמדנית (הביטוי הארוך ביותר קודם), נדרש לפחות
+//   ביטוי אישור אחד; מילה שאינה ברשימות → אין התאמה (ברירת מחדל בטוחה = הבהרה). זה עדיין
+//   אוצר סגור — לא מילים-בודדות, לא regex — רק צירוף של ביטויים שכל אחד מהם אישור בפני עצמו.
+function isAcceptPhraseSequence(msg: string): boolean {
+  if (CONFIRM_QUALIFIER_RE.test(msg)) return false
+  const words = confirmCore(msg).split(' ').filter(Boolean)
+  if (words.length === 0) return false
+  const phrases = [...CONFIRM_STANDING].map(p => p.split(' ')).sort((a, b) => b.length - a.length)
+  let i = 0, accepts = 0
+  while (i < words.length) {
+    const hit = phrases.find(ph => ph.every((w, k) => words[i + k] === w))
+    if (hit) { i += hit.length; accepts++; continue }
+    if ((ACCEPT_FILLERS as readonly string[]).includes(words[i])) { i++; continue }
+    return false
+  }
+  return accepts > 0
+}
 const OTHER_METHOD_RE = /אשראי|כרטיס|מזומן|צ.?ק|שיק|העברה|בנק|קישור|חשבונית/
 // astra חלק ב' (2): בקשות *הסבר/מידע* — קדימות על אישור, גם בלי סימן שאלה
 //   ("מה זה הוראת קבע", "כן אשמח לדעת יותר", "תסביר"). → LLM, נשארים בהצעה.
-const EXPLAIN_RE = /מה\s*(זה|זו|הם|היא)|מה\s*המשמעות|מה\s*(זה\s*)?כולל|תסביר|להסביר|הסבר|פרטים|עוד מידע|לדעת (עוד|יותר)|אשמח לדעת|רוצה לדעת|רוצה להבין|להבין (עוד|יותר|טוב)|איך זה עובד|מה היתרון/
+const EXPLAIN_RE = /מה\s*(זה|זו|הם|היא)|מה\s*המשמעות|מה\s*(זה\s*)?כולל|תסביר|להסביר|הסבר|פרטים|עוד מידע|לדעת (עוד|יותר)|אשמח לדעת|רוצה לדעת|רוצה להבין|להבין (עוד|יותר|טוב)|איך זה עובד|איך [^,.?]{0,25}עובד|מה היתרון/
 // סירוב/הימנעות (כולל אזכור "הוראת קבע" בהקשר שלילי כמו "מעדיף להימנע מהוראת קבע").
 const REFUSE_RE = /להימנע|מעדיף (לא|להימנע)|עדיף (לא|להימנע)|לא מעוני|לא רוצ|לא בא לי|לא צריך|בלי הוראת|אפשרות אחרת|משהו אחר|(^|\s)אחר(ת)?(\s|$)|חלופ|תפריט|אפשרויות/
 // דחייה/היסוס — "לא עכשיו"/"רוצה לחשוב"/"נראה" אינם סירוב לחלופות אלא בקשת זמן → הבהרה
@@ -300,6 +334,29 @@ const REFUSE_RE = /להימנע|מעדיף (לא|להימנע)|עדיף (לא|ל
 const DEFER_RE = /לחשוב|אחשוב|בהמשך|אחר כך|אחכ|עוד מעט|לא עכשיו|לא היום|מחר|נראה|תלוי|(^|\s)רגע(\s|$)|שנייה|שניה|(^|\s)חכ[הי]|תכף/
 // §10-11: זיהוי מטרת-הביטול — רישום (צהרון/קייטנה) מול אמצעי-תשלום (הו"ק). שתיהן יחד → בירור.
 const CANCEL_REG_TARGET = /רישום|הרשמה|צהרון|קייטנה/
+// astra חלק ב' (10): פועל הביטול בכל נטיותיו (תת-מחרוזת — "נבטל"/"תבטלו"/"מבטלת"/"ביטלנו"),
+//   לא רק "לבטל|ביטול". אותו פער תוקן במסווג הכוונות (CANCEL_VERB_FORMS).
+const CANCEL_VERB_RE = /ביטול|ביטל|בטל|להפסיק|לעזוב/
+// astra חלק ב' (10): שלילה נספרת רק אם היא *באותה פסוקית* של המטרה. "לא, לבטל את הרישום"
+//   (הפסיק סוגר את ה-"לא" כתשובה להצעה) ≠ "לא לבטל את הרישום" / "לא רוצה לבטל". קודם השלילה
+//   נבדקה על כל ההודעה אחרי מחיקת הפיסוק — והבקשה החיובית נפלה ללולאת הבהרה.
+//   נבדק על הטקסט *הגולמי* (עם פיסוק), בגבולות פסוקית: פסיק/נקודה/סימן קריאה/"אבל"/"אלא"/"אך".
+const CLAUSE_BOUNDARY_RE = /[,.;:!?]|(^|\s)(אבל|אלא|אך)(\s|$)/
+const NEG_WORD_RE = /(^|[^א-ת])(לא|בלי|אינני|אין)([^א-ת]|$)/
+function clauseAround(raw: string, start: number, end: number): { before: string; after: string } {
+  return {
+    before: raw.slice(0, start).split(CLAUSE_BOUNDARY_RE).pop() || '',
+    after:  raw.slice(end).split(CLAUSE_BOUNDARY_RE)[0] || '',
+  }
+}
+function negatedInClause(raw: string, start: number, end: number): boolean {
+  const { before, after } = clauseAround(raw, start, end)
+  return NEG_WORD_RE.test(before) || NEG_WORD_RE.test(after)
+}
+// astra חלק ב' (10): "שניהם"/"הכל" בבירור "מה לבטל" — ביטול הרישום מבטל ממילא גם את הו"ק
+//   (ראו handleCancellationFlow), ויש בו שלב אישור משלו → מנתבים לביטול רישום.
+const CANCEL_BOTH_RE = /שניהם|שתיהן|(^|\s)הכל(\s|$)|גם וגם|גם את/
+const WANT_ALTERNATIVE_RE = /אפשרות אחרת|משהו אחר|חלופ|אפשרויות|תפריט|(^|\s)אחר(ת)?(\s|$)/
 const CANCEL_PAY_TARGET = /הוראת\s*ה?קבע|(^|\s)הו\s*ק(\s|$)|התשלום|אמצעי/
 // §10-11: מסווג תגובה להצעת הו"ק. **סדר קדימות: שאלה/בקשת-הסבר → דחייה → סירוב → אישור → עמום.**
 //   האישור הוא **התאמה מלאה לביטוי שלם** (לא מילים-בודדות מאוצר). כל קלט לא-מסווג נופל
@@ -309,7 +366,13 @@ function offerVerdict(msg: string): 'accept' | 'refuse' | 'question' | 'unclear'
   const negated   = /(^|\s)(לא|בלי|אינני|אין)(\s|$)/.test(core)
   const otherMeth = OTHER_METHOD_RE.test(core)
 
-  // 1. קדימות לשאלות ובקשות הסבר → LLM (נשאר בהצעה). לפני כל אישור.
+  // 0. astra חלק ב' (10): הודעה שכולה ביטויי-אישור שלמים מהרשימה הסגורה ("אין בעיה", "נראה לי טוב",
+  //    "סבבה אחי") — מוכרעת *לפני* ההיוריסטיקות (שלילה/דחייה/סירוב הן regex על תת-מחרוזות, ו-"אין"
+  //    ב-"אין בעיה" / "נראה" ב-"נראה לי טוב" הפילו אישורים ברורים לסירוב/הבהרה). זה לא משנה את סדר
+  //    הקדימות לקלט חופשי: ההתאמה כאן היא לרשימה סגורה בלבד, שאינה מכילה שאלה/סירוב/דחייה, וסימן
+  //    שאלה/"אבל"/"רגע"/"אולי"/ספרה עדיין פוסלים (CONFIRM_QUALIFIER_RE).
+  if (isAcceptPhraseSequence(msg)) return 'accept'
+  // 1. קדימות לשאלות ובקשות הסבר → LLM (נשאר בהצעה). לפני כל אישור חופשי.
   if (isRealQuestion(msg) || EXPLAIN_RE.test(core)) return 'question'
   // 2. דחייה/היסוס ("לא עכשיו"/"רוצה לחשוב"/"נראה") → הבהרה, נשאר בהצעה (לפני סירוב).
   if (DEFER_RE.test(core)) return 'unclear'
@@ -2211,12 +2274,22 @@ export async function handlePaymentSetupFlow(
     // astra חלק ב' (6): אזכור "ביטול" מסווג בזהירות — עוברים לביטול *רישום* רק בבקשה
     //   *חיובית וברורה*. שאלה ("אפשר לבטל...?") → LLM; שלילה ("לא רוצה לבטל") או ביטול
     //   *אמצעי התשלום* ("לבטל את הוראת הקבע") → בירור. לא כל אזכור ביטול = בקשת ביטול רישום.
-    if (/לבטל|ביטול|להפסיק|לעזוב/.test(core)) {
-      if (isRealQuestion(msg)) return { text: '', useLLM: true }                         // שאלה על ביטול → הסבר
-      const negated = /(^|\s)(לא|בלי|אינני|אין)(\s|$)/.test(core)
-      if (negated) return { text: botText('payset_offer_reask'), nextFlow: 'payment_setup_offer' }  // שלילה → החזרה להצעה
-      const regTarget = CANCEL_REG_TARGET.test(core)                                     // ביטול *רישום*
-      const payTarget = CANCEL_PAY_TARGET.test(core)                                     // ביטול *אמצעי תשלום*
+    const raw = normalizeMessage(msg)
+    const cm  = CANCEL_VERB_RE.exec(raw)
+    if (cm) {
+      // שאלה/בקשת הסבר ("לא רוצה לבטל כלום, רק תגידו איך הוראת קבע עובדת") → LLM
+      if (isRealQuestion(msg) || EXPLAIN_RE.test(core)) return { text: '', useLLM: true }
+      // שלילה *באותה פסוקית* של פועל הביטול ("לא רוצה לבטל") → החזרה להצעה.
+      //   "לא, לבטל את הרישום" — ה-"לא" בפסוקית נפרדת (תשובה להצעה) → ממשיכים לניתוב.
+      if (negatedInClause(raw, cm.index, cm.index + cm[0].length)) {
+        return { text: botText('payset_offer_reask'), nextFlow: 'payment_setup_offer' }
+      }
+      // astra חלק ב' (10): המטרה נקראת מהפסוקית של פועל הביטול — "לא רוצה הוראת קבע, תבטלו לי את
+      //   הרישום" = ביטול רישום (ה-"הוראת קבע" בפסוקית הסירוב, לא במושא הביטול).
+      const { before, after } = clauseAround(raw, cm.index, cm.index + cm[0].length)
+      const verbClause = confirmCore(`${before} ${cm[0]} ${after}`)
+      const regTarget = CANCEL_REG_TARGET.test(verbClause)                               // ביטול *רישום*
+      const payTarget = CANCEL_PAY_TARGET.test(verbClause)                               // ביטול *אמצעי תשלום*
       // astra חלק ב' (8): מנתבים לפי המטרה. רישום *בלבד* → ביטול; אמצעי-תשלום *בלבד* →
       //   חלופות; שתי המטרות יחד ("לבטל את הו"ק לצהרון") *או* עמימות ("רוצה לבטל") → בירור
       //   בשלב ייעודי, כדי שהתשובה הבאה תיקרא כמענה לבירור (לא כפתיחת רישום/כוונה חדשה).
@@ -2255,12 +2328,25 @@ export async function handlePaymentSetupFlow(
     const core = confirmCore(msg)
     // astra חלק ב' (9): אותן הגנות כמו בהצעה, *לפני* בחירת המטרה —
     //   שאלה ("מה יקרה לרישום?") → LLM; שלילה ("לא את הרישום") → בירור שוב.
-    if (isRealQuestion(msg)) return { text: '', useLLM: true }
-    if (/(^|\s)(לא|בלי|אינני|אין)(\s|$)/.test(core)) {
+    if (isRealQuestion(msg) || EXPLAIN_RE.test(core)) return { text: '', useLLM: true }
+    // astra חלק ב' (10): שלילה נספרת רק כשהיא באותה פסוקית של מטרת-הרישום ("לא את הרישום" → בירור);
+    //   "לא, את הרישום" (פסיק) → ניתוב רגיל. בקשה מפורשת לחלופה ("משהו אחר, לא הוראת קבע") → חלופות.
+    const raw  = normalizeMessage(msg)
+    const rm   = CANCEL_REG_TARGET.exec(raw)
+    const regNegated = !!rm && negatedInClause(raw, rm.index, rm.index + rm[0].length)
+    const wantsReg = !!rm && !regNegated
+    const wantsAlt = WANT_ALTERNATIVE_RE.test(core)
+    const wantsPay = wantsAlt || CANCEL_PAY_TARGET.test(core) || /תשלום|אמצעי/.test(core)
+    if (CANCEL_BOTH_RE.test(core) && !regNegated) {                                     // "שניהם"/"הכל" → ביטול רישום (כולל הו"ק, עם אישור)
+      session.currentFlow = 'cancel_start'
+      return handleCancellationFlow(session, msg)
+    }
+    if (wantsAlt && !wantsReg) {                                                        // "אפשרות אחרת"/"משהו אחר, לא הו"ק" → חלופות
+      return { text: botText('payset_intro_menu', { 'פתיחה': '' }), nextFlow: 'payment_setup_method' }
+    }
+    if (regNegated) {                                                                   // "לא את הרישום" → בירור שוב
       return { text: botText('payset_cancel_clarify'), nextFlow: 'payment_setup_cancel_choice' }
     }
-    const wantsReg = CANCEL_REG_TARGET.test(core)
-    const wantsPay = CANCEL_PAY_TARGET.test(core) || /תשלום|אמצעי|אפשרות|(^|\s)אחר(ת)?(\s|$)|חלופ/.test(core)
     if (wantsReg && !wantsPay) {                                                        // "את הרישום"/"צהרון" → ביטול רישום
       session.currentFlow = 'cancel_start'
       return handleCancellationFlow(session, msg)
