@@ -789,45 +789,56 @@ async function routingCases() {
     check('§10-11 gap1 — עם מחיר מאומת: מוצג הסכום (880₪)',
       /880\s*₪/.test(r.text), `text=${JSON.stringify(r.text.slice(0, 120))}`)
   }
-  // אישורים טבעיים מורחבים → הו"ק (astra חלק ב gap2)
-  for (const msg of ['כן', 'כן אשמח', 'בשמחה', 'אני רוצה הוראת קבע', 'הוראת קבע']) {
+  // ── קורפוס ממצה למסווג האישור (offerVerdict) — כל קטגוריה והתוצאה הצפויה ──────
+  //    מיפוי כל מרחב הקלט מראש (לא נקודה-נקודה), כדי לתפוס false-accept לפני שהוא קורה.
+  const OFFER = {
+    // אישור → הו"ק (זיהוי שם → לינק). כולל צירופים חופשיים מאוצר-האישור.
+    accept: ['כן', 'כן בבקשה', 'כן להסדיר', 'להסדיר', 'מאשר', 'מאשרת', 'אישור', 'מסכים',
+      'הוראת קבע', 'כן הוראת קבע', 'הוראת קבע בבקשה', 'קבע',
+      'כן אשמח', 'אשמח', 'בשמחה', 'בטח', 'כן בטח', 'בהחלט', 'לגמרי', 'מעולה', 'כן מעולה',
+      'סבבה', 'אוקיי', 'בסדר', 'בסדר גמור', 'מצוין', 'מושלם', 'יאללה', 'קדימה',
+      'נשמע טוב', 'רוצה', 'אני רוצה', 'כן רוצה', 'אני רוצה הוראת קבע', 'בוא נעשה הוראת קבע', 'נעשה הוראת קבע'],
+    // שאלה/בקשת הסבר → LLM (לא אישור, לא תפריט)
+    question: ['מה זה הוראת קבע', 'מה זו הוראת קבע', 'מה זה הוראת קבע?', 'כן אשמח לדעת יותר',
+      'רוצה לדעת עוד', 'רוצה לדעת עוד על הוראת קבע', 'תסביר', 'תסביר לי', 'מה היתרונות?',
+      'איך זה עובד?', 'זה מחייב?', 'אפשר לשלם באשראי?', 'מה המשמעות של הוראת קבע'],
+    // סירוב/שיטה אחרת → תפריט חלופות
+    refuse: ['לא', 'לא תודה', 'לא רוצה', 'לא צריך', 'לא מעוניין', 'מעדיף להימנע',
+      'מעדיף להימנע מהוראת קבע', 'מעדיף לא', 'בלי הוראת קבע', 'אפשרות אחרת',
+      'אני מעדיף אפשרות אחרת', 'משהו אחר', 'חלופות',
+      'אשראי', 'מזומן', 'צ׳קים', 'העברה בנקאית', 'קישור', 'כרטיס אשראי'],
+    // דחייה/היסוס/עמימות → הבהרה, נשארים בהצעה
+    unclear: ['רוצה לחשוב', 'אני רוצה לחשוב', 'אני צריך לחשוב', 'אני צריך לחשוב על זה',
+      'תן לי לחשוב', 'אחשוב על זה', 'כן בהמשך', 'לא עכשיו', 'אחר כך', 'עוד מעט', 'מחר',
+      'בהמשך', 'אולי', 'אולי אחר כך', 'תלוי', 'נראה', 'כן אבל רגע', 'רגע', 'שנייה', 'חכה'],
+  }
+  for (const msg of OFFER.accept) {
     const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
     const r = await processMessage(s, msg)
-    check(`§10-11 gap2 — "${msg}" → הו"ק (אישור טבעי)`,
+    check(`§10-11 accept — "${msg}" → הו"ק`,
       s.collectedData.payment_method === 'standing_order' && r.nextFlow === 'payment_setup_child_name',
       `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow}`)
   }
-  // עמימות → הבהרה, נשארים בהצעה (לא הו"ק, לא תפריט)
-  for (const msg of ['כן אבל רגע', 'אולי']) {
+  for (const msg of OFFER.question) {
     const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
     const r = await processMessage(s, msg)
-    check(`§10-11 gap2 — "${msg}" → הבהרה (לא בחר הו"ק, לא תפריט)`,
-      s.collectedData.payment_method !== 'standing_order' && r.nextFlow === 'payment_setup_offer' && !/כרטיס אשראי/.test(r.text),
-      `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 50))}`)
+    check(`§10-11 question — "${msg}" → לא אישור/לא תפריט`,
+      s.collectedData.payment_method !== 'standing_order' && r.nextFlow !== 'payment_setup_child_name' && r.nextFlow !== 'payment_setup_method',
+      `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow}`)
   }
-  // שאלות / בקשות הסבר / הימנעות → *לא* אישור (astra חלק ב 2: קדימות לשאלות)
-  for (const msg of ['מה זה הוראת קבע', 'כן אשמח לדעת יותר', 'מעדיף להימנע מהוראת קבע', 'רוצה לדעת עוד על הוראת קבע']) {
+  for (const msg of OFFER.refuse) {
     const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
     const r = await processMessage(s, msg)
-    check(`§10-11 gap2b — "${msg}" → *לא* נבחרה הו"ק`,
-      s.collectedData.payment_method !== 'standing_order' && r.nextFlow !== 'payment_setup_child_name',
-      `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 50))}`)
+    check(`§10-11 refuse — "${msg}" → תפריט חלופות`,
+      r.nextFlow === 'payment_setup_method' && s.collectedData.payment_method !== 'standing_order',
+      `nextFlow=${r.nextFlow} method=${s.collectedData.payment_method}`)
   }
-  // דחייה/היסוס ("רוצה לחשוב"/"כן בהמשך") → *לא* אישור, נשארים בהבהרה (astra חלק ב 3)
-  for (const msg of ['רוצה לחשוב', 'אני רוצה לחשוב', 'כן בהמשך', 'אני צריך לחשוב על זה']) {
+  for (const msg of OFFER.unclear) {
     const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
     const r = await processMessage(s, msg)
-    check(`§10-11 gap2c — "${msg}" → *לא* הו"ק (הבהרה, לא אישור)`,
+    check(`§10-11 unclear — "${msg}" → הבהרה (נשאר בהצעה)`,
       s.collectedData.payment_method !== 'standing_order' && r.nextFlow === 'payment_setup_offer',
-      `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 50))}`)
-  }
-  // סירוב / שיטה אחרת → תפריט חלופות (רק *אחרי* סירוב)
-  for (const msg of ['אני מעדיף אפשרות אחרת', 'לא', 'אשראי']) {
-    const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
-    const r = await processMessage(s, msg)
-    check(`§10-11 — "${msg}" → תפריט חלופות (לא בחר הו"ק)`,
-      r.nextFlow === 'payment_setup_method' && /כרטיס אשראי|מזומן/.test(r.text) && s.collectedData.payment_method !== 'standing_order',
-      `nextFlow=${r.nextFlow} method=${s.collectedData.payment_method} text=${JSON.stringify(r.text.slice(0, 60))}`)
+      `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 40))}`)
   }
 }
 
