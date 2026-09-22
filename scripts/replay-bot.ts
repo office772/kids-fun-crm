@@ -884,7 +884,8 @@ async function routingCases() {
     ['משהו אחר, לא הוראת קבע', 'payment_setup_method'], ['אפשרות אחרת בבקשה', 'payment_setup_method'],
     // astra סבב 10 (P2): "גם את X" = X בלבד; "לא, שניהם" (פסיק) = שניהם; ביטוי משותף מפורש
     ['גם את התשלום', 'payment_setup_method'], ['גם את הוראת הקבע', 'payment_setup_method'], ['לא, שניהם', 'cancel_child'],
-    ['את שתי האפשרויות', 'cancel_child'], ['גם את הצהרון', 'cancel_child']]) {
+    ['את שתי האפשרויות', 'cancel_child'], ['גם את הצהרון', 'cancel_child'],
+    ['רק את הרישום', 'cancel_child'], ['הרישום בלבד', 'cancel_child'], ['רק את התשלום', 'payment_setup_method'], ['גם הרישום גם התשלום', 'cancel_child']]) {
     const s = makeSession('payment_setup_cancel_choice', { child_name: 'נועם', monthly_fee: '450' })
     const r = await processMessage(s, answer)
     check(`§10-11 cancel-choice — "${answer}" → ${expected}`,
@@ -894,7 +895,10 @@ async function routingCases() {
   // הגנות בשלב הבירור (astra חלק ב 9): שאלה → LLM; שלילה → בירור שוב — *לא* ביטול רישום.
   for (const answer of ['לא את הרישום', 'מה יקרה לרישום?', 'לא בטוח', 'מה זה אומר לגבי הרישום', 'לא את הצהרון', 'בלי לבטל את הרישום',
     // astra סבב 10 (P2): שלילת "שניהם" / שלילת התשלום אינן בחירה → נשארים בבירור (לא ביטול, לא חלופות)
-    'לא שניהם', 'לא הכל', 'לא גם וגם', 'לא את התשלום']) {
+    'לא שניהם', 'לא הכל', 'לא גם וגם', 'לא את התשלום',
+    // astra סבב 11 (P2): שתי מילות-מטרה בלי חיבור מפורש = תיאור, לא "שניהם" → בירור (לא ביטול רישום)
+    'את הוראת הקבע לצהרון', 'הוראת הקבע של הצהרון', 'התשלום לצהרון', 'את הרישום ואת הוראת הקבע', 'לא שתי האפשרויות',
+    'לא בטוח, אולי את הרישום', 'אולי הרישום', 'הרישום, אבל רגע']) {
     const s = makeSession('payment_setup_cancel_choice', { child_name: 'נועם', monthly_fee: '450' })
     const r = await processMessage(s, answer)
     check(`§10-11 cancel-choice-guard — "${answer}" → *לא* ביטול רישום`,

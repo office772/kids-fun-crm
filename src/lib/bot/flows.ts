@@ -359,6 +359,9 @@ function negatedInClause(raw: string, start: number, end: number): boolean {
 //   מפורש, או שתי מטרות מזוהות וחיוביות. השלילה נבדקת גם על ביטוי ה"שניהם" עצמו ("לא שניהם" → בירור).
 const CANCEL_BOTH_RE = /שניהם|שתיהן|(^|\s)הכל(\s|$)|גם וגם|שתי האפשרויות|שני הדברים/
 const WANT_ALTERNATIVE_RE = /אפשרות אחרת|משהו אחר|חלופ|אפשרויות|תפריט|(^|\s)אחר(ת)?(\s|$)/
+// סבב 12 (סריקה יזומה): היסוס בתשובה לבירור ("לא בטוח, אולי את הרישום") אינו בחירה - אותו שומר
+//   כמו CONFIRM_QUALIFIER_RE/DEFER_RE בשלב ההצעה, בלי "רק" ("רק את הרישום" היא בחירה ברורה).
+const HESITATION_RE = /אולי|אבל|(^|\s)רגע(\s|$)|לא בטוח|לחשוב|אחשוב|תלוי|כנראה|אני חושב|אני חושבת|נראה לי ש/
 const CANCEL_PAY_TARGET = /הוראת\s*ה?קבע|(^|\s)הו\s*ק(\s|$)|התשלום|אמצעי/
 // §10-11: מסווג תגובה להצעת הו"ק. **סדר קדימות: שאלה/בקשת-הסבר → דחייה → סירוב → אישור → עמום.**
 //   האישור הוא **התאמה מלאה לביטוי שלם** (לא מילים-בודדות מאוצר). כל קלט לא-מסווג נופל
@@ -2344,18 +2347,21 @@ export async function handlePaymentSetupFlow(
     const reg  = target(CANCEL_REG_TARGET)
     const pay  = target(/הוראת\s*ה?קבע|(^|\s)הו["'׳״]?\s*ק(\s|$)|תשלום|אמצעי/)
     const both = target(CANCEL_BOTH_RE)
-    const wantsAlt = WANT_ALTERNATIVE_RE.test(core) && both !== 'yes'                   // "שתי האפשרויות" אינה בקשת חלופה
+    const wantsAlt = WANT_ALTERNATIVE_RE.test(core) && both === 'none'                  // "שתי האפשרויות"/"לא שתי האפשרויות" אינן בקשת חלופה
     // בקשת חלופה מפורשת (ביטוי שלם: "אפשרות אחרת"/"משהו אחר") בלי בחירה חיובית ברישום → חלופות,
     //   גם כשיש שלילה של הו"ק ("משהו אחר, לא הוראת קבע") - השלילה מחזקת את הבקשה, לא סותרת אותה.
     if (wantsAlt && reg !== 'yes') {
       return { text: botText('payset_intro_menu', { 'פתיחה': '' }), nextFlow: 'payment_setup_method' }
     }
-    if (both === 'negated' || reg === 'negated' || pay === 'negated') {                // "לא שניהם"/"לא את הרישום"/"לא את התשלום" → בירור שוב
+    if (both === 'negated' || reg === 'negated' || pay === 'negated' || HESITATION_RE.test(core)) {  // שלילה/היסוס → בירור שוב
       return { text: botText('payset_cancel_clarify'), nextFlow: 'payment_setup_cancel_choice' }
     }
-    // "שניהם"/"הכל" מפורש, או שתי מטרות חיוביות ("גם את הרישום וגם את הוראת הקבע") → ביטול רישום
-    //   (מבטל ממילא גם את הו"ק ב-PayPlus; יש שלב אישור נפרד לפני ביצוע).
-    if (both === 'yes' || (reg === 'yes' && pay === 'yes')) {
+    // "שניהם"/"הכל" מפורש, או שתי מטרות חיוביות *עם חיבור מפורש* ("גם את הרישום וגם את הוראת הקבע")
+    //   → ביטול רישום (מבטל ממילא גם את הו"ק ב-PayPlus; יש שלב אישור נפרד לפני ביצוע).
+    //   astra סבב 11 (P2): עצם הופעת שתי מילות-מטרה אינה "שניהם" - "את הוראת הקבע לצהרון" הצהרון
+    //   מתאר את התשלום. שילוב בלי חיבור מפורש → לא מוכרע → בירור שוב (כמו בשלב ההצעה).
+    const explicitPair = reg === 'yes' && pay === 'yes' && /וגם|גם\s.*\sגם\s/.test(core)
+    if (both === 'yes' || explicitPair) {
       session.currentFlow = 'cancel_start'
       return handleCancellationFlow(session, msg)
     }
