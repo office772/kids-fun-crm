@@ -805,6 +805,14 @@ async function routingCases() {
       s.collectedData.payment_method !== 'standing_order' && r.nextFlow === 'payment_setup_offer' && !/כרטיס אשראי/.test(r.text),
       `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 50))}`)
   }
+  // שאלות / בקשות הסבר / הימנעות → *לא* אישור (astra חלק ב 2: קדימות לשאלות)
+  for (const msg of ['מה זה הוראת קבע', 'כן אשמח לדעת יותר', 'מעדיף להימנע מהוראת קבע', 'רוצה לדעת עוד על הוראת קבע']) {
+    const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
+    const r = await processMessage(s, msg)
+    check(`§10-11 gap2b — "${msg}" → *לא* נבחרה הו"ק`,
+      s.collectedData.payment_method !== 'standing_order' && r.nextFlow !== 'payment_setup_child_name',
+      `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 50))}`)
+  }
   // סירוב / שיטה אחרת → תפריט חלופות (רק *אחרי* סירוב)
   for (const msg of ['אני מעדיף אפשרות אחרת', 'לא', 'אשראי']) {
     const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })

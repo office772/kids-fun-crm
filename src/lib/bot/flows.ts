@@ -276,29 +276,36 @@ const DECLINE_CHILD_ID = ['לא', 'לא נכון', 'לא זה', 'טעות'] as c
 // §10-11: אישור להסדרת הוראת קבע (האופציה הראשית). סירוב/בקשת חלופות → תפריט השיטות.
 const CONFIRM_STANDING = ['כן', 'כן בבקשה', 'כן להסדיר', 'להסדיר', 'הוראת קבע', 'כן הוראת קבע', 'קבע', 'מאשר', 'מאשרת', 'אישור'] as const
 const DECLINE_STANDING = ['לא', 'לא תודה', 'לא רוצה', 'לא צריך', 'אפשרות אחרת', 'אחרת', 'משהו אחר', 'חלופה', 'חלופות', 'אפשרויות', 'תפריט'] as const
-// astra חלק ב': אישור *לא הרסני* → מרשים ניסוחים טבעיים רחבים יותר מרשימה סגורה
-//   ("כן אשמח", "בשמחה", "בטח"). שיטה אחרת נבדקת בנפרד כדי שלא ניפול לאישור הו"ק בטעות.
-const STANDING_ACCEPT_RE = /^(כן|בטח|בשמחה|אשמח|כן אשמח|סבבה|אוקיי|אוקי|בסדר|מעולה|יאללה|נשמע טוב|לגמרי|בהחלט|רוצה|אני רוצה|בוא נעשה|קדימה)/
+// astra חלק ב': אישור *לא הרסני* → מרשים ניסוחים טבעיים ("כן אשמח", "בשמחה", "בטח").
+const STANDING_ACCEPT_RE = /^(כן|בטח|בשמחה|אשמח|סבבה|אוקיי|אוקי|בסדר|מעולה|יאללה|נשמע טוב|לגמרי|בהחלט|רוצה|אני רוצה|בוא נעשה|קדימה)/
 const OTHER_METHOD_RE = /אשראי|כרטיס|מזומן|צ.?ק|שיק|העברה|בנק|קישור|חשבונית/
+// astra חלק ב' (2): בקשות *הסבר/מידע* — קדימות על אישור, גם בלי סימן שאלה
+//   ("מה זה הוראת קבע", "כן אשמח לדעת יותר", "תסביר"). → LLM, נשארים בהצעה.
+const EXPLAIN_RE = /מה\s*(זה|זו|הם|היא)|מה\s*המשמעות|מה\s*(זה\s*)?כולל|תסביר|להסביר|הסבר|פרטים|עוד מידע|לדעת (עוד|יותר)|אשמח לדעת|רוצה לדעת|רוצה להבין|להבין (עוד|יותר|טוב)|איך זה עובד|מה היתרון/
+// סירוב/הימנעות (כולל אזכור "הוראת קבע" בהקשר שלילי כמו "מעדיף להימנע מהוראת קבע").
+const REFUSE_RE = /להימנע|מעדיף (לא|להימנע)|עדיף (לא|להימנע)|לא מעוני|לא רוצ|לא בא לי|לא צריך|בלי הוראת|אפשרות אחרת|משהו אחר|(^|\s)אחר(ת)?(\s|$)|חלופ|תפריט|אפשרויות/
 
-// §10-11: מסווג את תגובת ההורה להצעת הו"ק — accept (הו"ק) / refuse (תפריט חלופות) /
-//   question (LLM, נשאר בהצעה) / unclear (הבהרה, נשאר בהצעה). מרחיב אישורים טבעיים
-//   ("כן אשמח", "אני רוצה הוראת קבע") בלי להחליש הגנות שלילה/שאלה/הסתייגות.
+// §10-11: מסווג תגובה להצעת הו"ק. **סדר קדימות (astra חלק ב 2): שאלה/בקשת-הסבר → סירוב
+//   → אישור ברור → עמום.** לא מסתמכים על אזכור "הוראת קבע" או תחילת "כן" לבדם.
 function offerVerdict(msg: string): 'accept' | 'refuse' | 'question' | 'unclear' {
-  const core       = confirmCore(msg)
-  const qualified  = CONFIRM_QUALIFIER_RE.test(msg)                       // "כן אבל רגע"/"אולי"/מספר/שאלה
-  const negated    = /(^|\s)(לא|בלי|אינני|אין)(\s|$)/.test(core)
-  const otherMeth  = OTHER_METHOD_RE.test(core)
+  const core      = confirmCore(msg)
+  const qualified = CONFIRM_QUALIFIER_RE.test(msg)                        // "כן אבל רגע"/"אולי"/מספר/סימן שאלה
+  const negated   = /(^|\s)(לא|בלי|אינני|אין)(\s|$)/.test(core)
+  const otherMeth = OTHER_METHOD_RE.test(core)
   const wantsStand = /הוראת קבע|(^|\s)קבע(\s|$)/.test(core)
-  // אישור ברור: בלי הסתייגות/שלילה/שיטה אחרת
-  if (!qualified && !negated && !otherMeth) {
-    if (wantsStand) return 'accept'                                        // "אני רוצה הוראת קבע"
-    if (unambiguousMatch(msg, CONFIRM_STANDING) || STANDING_ACCEPT_RE.test(core)) return 'accept'  // "כן אשמח"
+
+  // 1. קדימות לשאלות ובקשות הסבר → LLM (נשאר בהצעה). לפני כל אישור.
+  if (isRealQuestion(msg) || EXPLAIN_RE.test(core)) return 'question'
+  // 2. סירוב / הימנעות / שיטה אחרת → תפריט חלופות.
+  if (negated || otherMeth || REFUSE_RE.test(core) || unambiguousMatch(msg, DECLINE_STANDING)) return 'refuse'
+  // 3. אישור *ברור* — לא רק אזכור "הוראת קבע" או "^כן".
+  if (!qualified) {
+    if (unambiguousMatch(msg, CONFIRM_STANDING)) return 'accept'                                   // "כן"/"מאשר"/"הוראת קבע"
+    // "רוצה/בוא/נעשה/כן ... הוראת קבע" — כוונה חיובית מפורשת, לא סתם אזכור.
+    if (wantsStand && /(רוצה|בוא|נעשה|בבקשה|כן|מאשר|לגמרי|בהחלט|קדימה)/.test(core)) return 'accept'
+    // אישור טבעי *קצר* ("כן אשמח", "בשמחה") — הגבלת אורך מונעת "כן ... משפט ארוך".
+    if (!wantsStand && STANDING_ACCEPT_RE.test(core) && core.split(' ').length <= 3) return 'accept'
   }
-  if (isRealQuestion(msg)) return 'question'                              // "אפשר לשלם באשראי?" → LLM
-  // סירוב מפורש / בקשת חלופה / נקיבת שיטה אחרת → תפריט
-  if (negated || otherMeth || unambiguousMatch(msg, DECLINE_STANDING) ||
-      /אפשרות אחרת|אחרת|חלופ|משהו אחר|תפריט|אפשרויות|מה עוד|מה יש/.test(core)) return 'refuse'
   return 'unclear'                                                        // עמום → הבהרה, נשארים בהצעה
 }
 
