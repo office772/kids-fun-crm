@@ -885,7 +885,8 @@ async function routingCases() {
     // astra סבב 10 (P2): "גם את X" = X בלבד; "לא, שניהם" (פסיק) = שניהם; ביטוי משותף מפורש
     ['גם את התשלום', 'payment_setup_method'], ['גם את הוראת הקבע', 'payment_setup_method'], ['לא, שניהם', 'cancel_child'],
     ['את שתי האפשרויות', 'cancel_child'], ['גם את הצהרון', 'cancel_child'],
-    ['רק את הרישום', 'cancel_child'], ['הרישום בלבד', 'cancel_child'], ['רק את התשלום', 'payment_setup_method'], ['גם הרישום גם התשלום', 'cancel_child']]) {
+    ['רק את הרישום', 'cancel_child'], ['הרישום בלבד', 'cancel_child'], ['רק את התשלום', 'payment_setup_method'],
+    ['גם את הוראת הקבע וגם את הרישום', 'cancel_child'], ['את הצהרון וגם את התשלום', 'cancel_child']]) {
     const s = makeSession('payment_setup_cancel_choice', { child_name: 'נועם', monthly_fee: '450' })
     const r = await processMessage(s, answer)
     check(`§10-11 cancel-choice — "${answer}" → ${expected}`,
@@ -898,7 +899,9 @@ async function routingCases() {
     'לא שניהם', 'לא הכל', 'לא גם וגם', 'לא את התשלום',
     // astra סבב 11 (P2): שתי מילות-מטרה בלי חיבור מפורש = תיאור, לא "שניהם" → בירור (לא ביטול רישום)
     'את הוראת הקבע לצהרון', 'הוראת הקבע של הצהרון', 'התשלום לצהרון', 'את הרישום ואת הוראת הקבע', 'לא שתי האפשרויות',
-    'לא בטוח, אולי את הרישום', 'אולי הרישום', 'הרישום, אבל רגע']) {
+    'לא בטוח, אולי את הרישום', 'אולי הרישום', 'הרישום, אבל רגע',
+    // astra סבב 12 (P2): "וגם" שמחבר שתי מסגרות / שני תיאורים כספיים אינו "רישום וגם תשלום"
+    'את התשלום לצהרון וגם לקייטנה', 'את הוראת הקבע לצהרון וגם את החיוב', 'גם הרישום גם התשלום']) {
     const s = makeSession('payment_setup_cancel_choice', { child_name: 'נועם', monthly_fee: '450' })
     const r = await processMessage(s, answer)
     check(`§10-11 cancel-choice-guard — "${answer}" → *לא* ביטול רישום`,
