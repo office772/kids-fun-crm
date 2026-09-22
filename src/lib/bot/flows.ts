@@ -275,6 +275,32 @@ const CONFIRM_CHILD_ID = ['כן', 'נכון', 'כן נכון', 'כן זה', 'ז�
 const DECLINE_CHILD_ID = ['לא', 'לא נכון', 'לא זה', 'טעות'] as const
 // §10-11: אישור להסדרת הוראת קבע (האופציה הראשית). סירוב/בקשת חלופות → תפריט השיטות.
 const CONFIRM_STANDING = ['כן', 'כן בבקשה', 'כן להסדיר', 'להסדיר', 'הוראת קבע', 'כן הוראת קבע', 'קבע', 'מאשר', 'מאשרת', 'אישור'] as const
+const DECLINE_STANDING = ['לא', 'לא תודה', 'לא רוצה', 'לא צריך', 'אפשרות אחרת', 'אחרת', 'משהו אחר', 'חלופה', 'חלופות', 'אפשרויות', 'תפריט'] as const
+// astra חלק ב': אישור *לא הרסני* → מרשים ניסוחים טבעיים רחבים יותר מרשימה סגורה
+//   ("כן אשמח", "בשמחה", "בטח"). שיטה אחרת נבדקת בנפרד כדי שלא ניפול לאישור הו"ק בטעות.
+const STANDING_ACCEPT_RE = /^(כן|בטח|בשמחה|אשמח|כן אשמח|סבבה|אוקיי|אוקי|בסדר|מעולה|יאללה|נשמע טוב|לגמרי|בהחלט|רוצה|אני רוצה|בוא נעשה|קדימה)/
+const OTHER_METHOD_RE = /אשראי|כרטיס|מזומן|צ.?ק|שיק|העברה|בנק|קישור|חשבונית/
+
+// §10-11: מסווג את תגובת ההורה להצעת הו"ק — accept (הו"ק) / refuse (תפריט חלופות) /
+//   question (LLM, נשאר בהצעה) / unclear (הבהרה, נשאר בהצעה). מרחיב אישורים טבעיים
+//   ("כן אשמח", "אני רוצה הוראת קבע") בלי להחליש הגנות שלילה/שאלה/הסתייגות.
+function offerVerdict(msg: string): 'accept' | 'refuse' | 'question' | 'unclear' {
+  const core       = confirmCore(msg)
+  const qualified  = CONFIRM_QUALIFIER_RE.test(msg)                       // "כן אבל רגע"/"אולי"/מספר/שאלה
+  const negated    = /(^|\s)(לא|בלי|אינני|אין)(\s|$)/.test(core)
+  const otherMeth  = OTHER_METHOD_RE.test(core)
+  const wantsStand = /הוראת קבע|(^|\s)קבע(\s|$)/.test(core)
+  // אישור ברור: בלי הסתייגות/שלילה/שיטה אחרת
+  if (!qualified && !negated && !otherMeth) {
+    if (wantsStand) return 'accept'                                        // "אני רוצה הוראת קבע"
+    if (unambiguousMatch(msg, CONFIRM_STANDING) || STANDING_ACCEPT_RE.test(core)) return 'accept'  // "כן אשמח"
+  }
+  if (isRealQuestion(msg)) return 'question'                              // "אפשר לשלם באשראי?" → LLM
+  // סירוב מפורש / בקשת חלופה / נקיבת שיטה אחרת → תפריט
+  if (negated || otherMeth || unambiguousMatch(msg, DECLINE_STANDING) ||
+      /אפשרות אחרת|אחרת|חלופ|משהו אחר|תפריט|אפשרויות|מה עוד|מה יש/.test(core)) return 'refuse'
+  return 'unclear'                                                        // עמום → הבהרה, נשארים בהצעה
+}
 
 // תפריט הבוט — נקרא מ-bot_messages (מפתח 'menu') עם fallback לקשיח. פונקציה כדי
 // שייקרא פר-בקשה מה-cache (const היה נטען פעם אחת בזמן טעינת המודול).
@@ -2140,12 +2166,14 @@ export async function handlePaymentSetupFlow(
 
     const childName  = session.collectedData.child_name  ?? ''
     const areaLabel  = session.collectedData.area_label  ?? ''
-    const amount     = session.collectedData.monthly_fee ?? String(getDefaultMonthlyFee())
-    const fromSpot   = session.collectedData.from_spot_offer === 'true'
+    // astra חלק ב': מציגים סכום *רק* כשיש מחיר מאומת (monthly_fee נקבע). הורה לא מזוהה
+    //   / מסגרת ללא מחיר ודאי → מציעים הו"ק בלי סכום (לא מבטיחים ברירת מחדל כמחיר החיוב).
+    const verifiedFee = session.collectedData.monthly_fee
+    const fromSpot    = session.collectedData.from_spot_offer === 'true'
 
-    // ── intro מותאם אישית ─────────────────────────────────────────────────
+    // ── intro מותאם אישית — הסכום מוצג רק כשהוא מאומת ──────────────────────
     const personalInfo = childName
-      ? `עבור *${childName}*${areaLabel ? ` (${areaLabel})` : ''} - *${amount}₪/חודש*\n\n`
+      ? `עבור *${childName}*${areaLabel ? ` (${areaLabel})` : ''}${verifiedFee ? ` - *${verifiedFee}₪/חודש*` : ''}\n\n`
       : ''
 
     const intro = fromSpot
@@ -2153,17 +2181,16 @@ export async function handlePaymentSetupFlow(
       : `*הסדרת תשלום - Kids & Fun* 💛\n\n${personalInfo}`
 
     // §10-11: מציעים הוראת קבע *ישירות* כאופציה הראשית (לא תפריט 6 שיטות מראש).
-    return {
-      text: botText('payset_offer_standing', { 'פתיחה': intro, 'סכום': String(amount) }),
-      nextFlow: 'payment_setup_offer',
-    }
+    return verifiedFee
+      ? { text: botText('payset_offer_standing',          { 'פתיחה': intro, 'סכום': verifiedFee }), nextFlow: 'payment_setup_offer' }
+      : { text: botText('payset_offer_standing_no_price', { 'פתיחה': intro }),                      nextFlow: 'payment_setup_offer' }
   }
 
   // ─── §10-11: תגובת ההורה להצעת הוראת קבע ─────────────────────────────────
   if (step === 'payment_setup_offer') {
-    const msg = userMessage.trim()
-    // אישור חד-משמעי → ממשיכים ישירות בהוראת קבע (זיהוי שם → לינק, כמו במסלול הקיים).
-    if (unambiguousMatch(msg, CONFIRM_STANDING)) {
+    const verdict = offerVerdict(userMessage.trim())
+    // אישור (מורחב) → ממשיכים ישירות בהוראת קבע (זיהוי שם → לינק, כמו במסלול הקיים).
+    if (verdict === 'accept') {
       session.collectedData.payment_method = 'standing_order'
       return {
         text: botText('payset_credit_ask_name', { 'סוג': '🏦 *הוראת קבע*' }),
@@ -2171,13 +2198,13 @@ export async function handlePaymentSetupFlow(
       }
     }
     // שאלה אמיתית → LLM עונה, המסלול נשמר.
-    if (isRealQuestion(msg)) return { text: '', useLLM: true }
-    // סירוב / בקשת חלופות / נקיבת שיטה אחרת → מציגים את תפריט החלופות ומעבירים למסלול הבחירה
-    //   הקיים (אם ההורה נקב שיטה מפורשת, יבחר אותה מהתפריט; אם רק "לא"/"אחרת" — מהאפשרויות).
-    return {
-      text: botText('payset_intro_menu', { 'פתיחה': '' }),
-      nextFlow: 'payment_setup_method',
+    if (verdict === 'question') return { text: '', useLLM: true }
+    // סירוב / בקשת חלופה / נקיבת שיטה אחרת → תפריט החלופות (רק *אחרי* סירוב; הו"ק נשארת אופציה 2).
+    if (verdict === 'refuse') {
+      return { text: botText('payset_intro_menu', { 'פתיחה': '' }), nextFlow: 'payment_setup_method' }
     }
+    // עמום ("כן אבל רגע"/"אולי") → הבהרה קצרה, נשארים בהצעה (לא קופצים לחלופות בלי סירוב).
+    return { text: botText('payset_offer_reask'), nextFlow: 'payment_setup_offer' }
   }
 
   // ─── עיבוד בחירת שיטת תשלום ──────────────────────────────────────────────

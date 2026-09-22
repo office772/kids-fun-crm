@@ -772,32 +772,41 @@ async function routingCases() {
   }
 
   // ═══ #7 §10-11 — הוראת קבע כאופציה ראשית (חלק ב) ═══════════════════════════
-  // כניסה למסלול התשלום → מציעים הו"ק *ישירות*, לא תפריט 6 שיטות
+  // כניסה בלי מחיר מאומת (הורה לא מזוהה) → מציעים הו"ק *בלי סכום* (astra חלק ב gap1)
   {
     const s = makeSession('payment_setup_start')
     const r = await processMessage(s, 'הסדרת תשלום')
-    check('§10-11 — כניסה למסלול תשלום מציעה הוראת קבע ראשית (לא תפריט מלא)',
+    check('§10-11 — כניסה מציעה הו"ק ראשית (לא תפריט מלא)',
       r.nextFlow === 'payment_setup_offer' && /הוראת קבע/.test(r.text) && !/כרטיס אשראי \(PayPlus\)/.test(r.text),
       `nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 90))}`)
+    check('§10-11 gap1 — בלי מחיר מאומת: לא מבטיחים סכום (אין ₪ מספרי)',
+      !/\d+\s*₪/.test(r.text), `text=${JSON.stringify(r.text)}`)
   }
-  // "כן" בהצעה → ממשיך ישירות בהוראת קבע
+  // כניסה *עם* מחיר מאומת → מוצג הסכום הנכון
   {
+    const s = makeSession('payment_setup_start', { child_name: 'נועם', monthly_fee: '880', area_label: 'חוף הכרמל' })
+    const r = await processMessage(s, 'הסדרת תשלום')
+    check('§10-11 gap1 — עם מחיר מאומת: מוצג הסכום (880₪)',
+      /880\s*₪/.test(r.text), `text=${JSON.stringify(r.text.slice(0, 120))}`)
+  }
+  // אישורים טבעיים מורחבים → הו"ק (astra חלק ב gap2)
+  for (const msg of ['כן', 'כן אשמח', 'בשמחה', 'אני רוצה הוראת קבע', 'הוראת קבע']) {
     const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
-    const r = await processMessage(s, 'כן')
-    check('§10-11 — "כן" בהצעה → הוראת קבע (שם → לינק)',
+    const r = await processMessage(s, msg)
+    check(`§10-11 gap2 — "${msg}" → הו"ק (אישור טבעי)`,
       s.collectedData.payment_method === 'standing_order' && r.nextFlow === 'payment_setup_child_name',
       `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow}`)
   }
-  // "הוראת קבע" בהצעה → אישור הו"ק
-  {
+  // עמימות → הבהרה, נשארים בהצעה (לא הו"ק, לא תפריט)
+  for (const msg of ['כן אבל רגע', 'אולי']) {
     const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
-    const r = await processMessage(s, 'הוראת קבע')
-    check('§10-11 — "הוראת קבע" בהצעה → אישור הו"ק',
-      s.collectedData.payment_method === 'standing_order' && r.nextFlow === 'payment_setup_child_name',
-      `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow}`)
+    const r = await processMessage(s, msg)
+    check(`§10-11 gap2 — "${msg}" → הבהרה (לא בחר הו"ק, לא תפריט)`,
+      s.collectedData.payment_method !== 'standing_order' && r.nextFlow === 'payment_setup_offer' && !/כרטיס אשראי/.test(r.text),
+      `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 50))}`)
   }
-  // סירוב / בקשת חלופות → מציג את תפריט השיטות (רק *אחרי* סירוב)
-  for (const msg of ['אני מעדיף אפשרות אחרת', 'לא', 'משהו אחר']) {
+  // סירוב / שיטה אחרת → תפריט חלופות (רק *אחרי* סירוב)
+  for (const msg of ['אני מעדיף אפשרות אחרת', 'לא', 'אשראי']) {
     const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
     const r = await processMessage(s, msg)
     check(`§10-11 — "${msg}" → תפריט חלופות (לא בחר הו"ק)`,
