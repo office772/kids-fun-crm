@@ -72,39 +72,36 @@ function dbFor(execute) {
 // ── Supabase מצבי בזיכרון: bot_sessions (עם rev), whatsapp_message_log (claim),
 //    conversations (היסטוריה), tasks. תואם למנגנון האמיתי (astra R3/R5). ────────────
 function makeSessionDB() {
-  const state = { sessions: new Map(), wml: new Map(), conv: [], tasks: [], failSave: false }
+  const state = { sessions: new Map(), wml: new Map(), conv: [], tasks: [], failSave: false, failClear: false }
   state.client = () => dbFor(q => {
     const { table, op, payload, filters } = q
     const eqv = (k) => (filters.find(f => f[0] === 'eq' && f[1] === k) || [])[2]
     if (table === 'parents' && op === 'select') return { data: [{ id: 'p1', name: 'הורה' }], error: null }
     if (table === 'whatsapp_message_log') {
       const id = (payload && payload.id_message) || eqv('id_message')
-      if (op === 'insert') { if (state.wml.has(id)) return { data: null, error: { code: '23505' } }; state.wml.set(id, { processed: false, created_at: new Date().toISOString() }); return { data: null, error: null } }
-      if (op === 'select') { const e = state.wml.get(id); return { data: e ? [{ processed: e.processed, created_at: e.created_at }] : [], error: null } }
-      if (op === 'update') { if (state.wml.has(id)) state.wml.get(id).processed = true; return { data: null, error: null } }
-      if (op === 'delete') { state.wml.delete(id); return { data: null, error: null } }
+      const sid = (payload && payload.session_id) || eqv('session_id')
+      if (op === 'insert') { if (state.wml.has(id)) return { data: null, error: { code: '23505' } }; state.wml.set(id, { processed: false, created_at: new Date().toISOString(), session_id: payload.session_id }); return { data: null, error: null } }
+      if (op === 'select') { const e = state.wml.get(id); return { data: e ? [{ processed: e.processed, created_at: e.created_at, session_id: e.session_id }] : [], error: null } }
+      if (op === 'update') { const e = state.wml.get(id); if (e && (!sid || e.session_id === sid)) e.processed = true; return { data: null, error: null } }   // מותנה-טוקן
+      if (op === 'delete') { const e = state.wml.get(id); if (e && (!sid || e.session_id === sid)) { state.wml.delete(id); return { data: [{ id_message: id }], error: null } } return { data: [], error: null } }   // מותנה-טוקן
     }
     if (table === 'bot_sessions') {
       const phone = (payload && payload.phone) || eqv('phone')
       const rev = eqv('rev')
-      if (op === 'update' && !rev) {                    // loadSession bump
-        const cur = state.sessions.get(phone)
-        if (!cur) return { data: [], error: null }
-        cur.rev = payload.rev
-        return { data: [{ parent_id: cur.parent_id ?? null, current_flow: cur.current_flow ?? null, collected_data: cur.collected_data ?? {}, last_message_at: cur.last_message_at ?? new Date().toISOString(), expires_at: cur.expires_at ?? new Date(Date.now() + 60000).toISOString() }], error: null }
+      if (op === 'upsert') {                            // loadSession — יוצר/מעדכן rev אטומי
+        let cur = state.sessions.get(phone)
+        if (cur) cur.rev = payload.rev
+        else { cur = { phone, rev: payload.rev, current_flow: null, collected_data: {}, expires_at: new Date(Date.now() + 30 * 60000).toISOString() }; state.sessions.set(phone, cur) }
+        return { data: [{ parent_id: cur.parent_id ?? null, current_flow: cur.current_flow ?? null, collected_data: cur.collected_data ?? {}, expires_at: cur.expires_at }], error: null }
       }
-      if (op === 'update' && rev) {                     // persistSession מותנה
+      if (op === 'update' && rev) {                     // persistSession מותנה-rev
         if (state.failSave) return { data: null, error: { message: 'save fail' } }
         const cur = state.sessions.get(phone)
         if (cur && cur.rev === rev) { state.sessions.set(phone, { ...payload }); return { data: [{ phone }], error: null } }
         return { data: [], error: null }                // stale
       }
-      if (op === 'insert') {                            // persistSession session חדש
-        if (state.failSave) return { data: null, error: { message: 'save fail' } }
-        if (state.sessions.has(phone)) return { data: null, error: { code: '23505' } }
-        state.sessions.set(phone, { ...payload }); return { data: null, error: null }
-      }
-      if (op === 'delete') {
+      if (op === 'delete') {                            // clearSessionIfCurrent מותנה-rev
+        if (state.failClear) return { data: null, error: { message: 'delete fail' } }
         if (rev) { const cur = state.sessions.get(phone); if (cur && cur.rev === rev) { state.sessions.delete(phone); return { data: [{ phone }], error: null } } return { data: [], error: null } }
         state.sessions.delete(phone); return { data: null, error: null }
       }
@@ -196,6 +193,7 @@ const request = (body) => ({ headers: { get: () => null }, json: async () => bod
         // חיפוש גלובלי (בלי parent) "מוצא" ילד של משפחה אחרת; מסונן לפי הורה - לא מוצא
         return { data: hasParentFilter ? [] : { area_code: 'telaviv', school: 'משפחה אחרת', framework: 'צהרון' }, error: null }
       }
+      if (q.table === 'bot_sessions') return { data: [{ phone: 'x' }], error: null }   // clear מצליח (לא stale)
       return { data: null, error: null }
     })
     const pickupResult = {
@@ -204,7 +202,7 @@ const request = (body) => ({ headers: { get: () => null }, json: async () => bod
       notifyFramework: { byChildName: 'נועם בדיקה' },
     }
     const session = { sessionId: 'p', phone: '+972500000009', collectedData: {}, messages: [] }
-    await route.applyResult(dbmod.createServiceClient(), session, { id: 'unknown-parent', name: 'הורה בדיקה' }, session.phone, pickupResult)
+    await route.applyResult(dbmod.createServiceClient(), session, { id: 'unknown-parent', name: 'הורה בדיקה' }, session.phone, pickupResult, { rev: 'r1' })
     const filteredByParent = childLookups.some(f => f.some(x => x[0] === 'eq' && x[1] === 'parent_id'))
     const notifiedFramework = notifications.some(n => n.framework)
     check('2.2 (#10) — חיפוש הילד מסונן לפי parent_id (לא גלובלי)', filteredByParent, `lookups=${JSON.stringify(childLookups)}`)
@@ -262,39 +260,22 @@ const request = (body) => ({ headers: { get: () => null }, json: async () => bod
     check('2.4 (#12) — התשובה הישנה (מחיר) לא נשלחה', !sent.some(t => /המחיר/.test(t)), `sent=${JSON.stringify(sent)}`)
   }
 
-  // ═══ 2.1 (#9) — הסימולטור אינו מבצע ביטול/כתיבה אמיתיים ═══════════════════════
+  // ═══ #9/R1 — הסימולטור מושבת (בקשת עינת): 0 עיבוד, 0 כתיבה, 0 סליקה ═══════════
+  // הבדיקות תמיד ישירות בוואטסאפ; הסימולטור כבוי כברירת מחדל (SIMULATOR_ENABLED!=='true').
   {
-    handler.processMessage = realProcess   // הסימולטור קורא ל-processMessage האמיתי
-    const simulator = require(path.join(ROOT, 'src/app/api/bot/simulate/route.ts'))
-    const writes = []
-    dbmod.createServiceClient = () => dbFor(q => {
-      if (q.op !== 'select') writes.push({ table: q.table, op: q.op })
-      if (q.table === 'parents' && q.op === 'select') return { data: q.fields === 'id' ? { id: 'p1' } : { payplus_recurring_uid: null }, error: null }
-      if (q.table === 'children' && q.op === 'select') return { data: [{ id: 'c1', name: 'נועם בדיקה', parent_id: 'p1' }], error: null }
-      if (q.table === 'registrations' && q.op === 'select') return { data: { id: 'r1', status: 'מאושר', notes: '' }, error: null }
-      return { data: null, error: null }
-    })
-    const res = await simulator.POST(request({ sessionId: 'sim-1', testPhone: '+972500000000', message: 'כן', clientState: { currentFlow: 'cancel_confirm_after15', collectedData: { child_name: 'נועם בדיקה' } } }))
-    await res.json()
-    check('2.1 (#9) — סימולטור: אין UPDATE אמיתי ל-registrations', !writes.some(w => w.table === 'registrations' && w.op === 'update'), `writes=${JSON.stringify(writes)}`)
-    check('2.1 (#9) — סימולטור: אין כתיבת timeline אמיתית', !writes.some(w => w.table === 'registration_timeline'), `writes=${JSON.stringify(writes)}`)
-  }
-
-  // ═══ R1 (#9) — סימולטור: sandbox חוסם *כל* כתיבה (גם children.update, לא רק ביטול) ══
-  {
-    const { sandboxWrites } = require(path.join(ROOT, 'src/lib/supabase/server.ts'))
-    const { isSimulated } = require(path.join(ROOT, 'src/lib/supabase/sim-context.ts'))
+    delete process.env.SIMULATOR_ENABLED
     handler.processMessage = realProcess
-    const simulator = require(path.join(ROOT, 'src/app/api/bot/simulate/route.ts'))
+    let processed = false
+    const origProc = handler.processMessage
+    handler.processMessage = async (...a) => { processed = true; return origProc(...a) }
     const writes = []
-    dbmod.createServiceClient = () => {
-      const base = dbFor(q => { if (q.op !== 'select') writes.push({ table: q.table, op: q.op }); return { data: null, error: null } })
-      return isSimulated() ? sandboxWrites(base) : base   // מחקה את createServiceClient האמיתי
-    }
-    const res = await simulator.POST(request({ sessionId: 'sim-r1', message: 'דני בדיקה', clientState: { currentFlow: 'register_complete_placeholder', collectedData: { placeholder_child_id: 'child-xyz' } } }))
-    await res.json()
-    check('R1 (#9) — סימולטור: אין UPDATE אמיתי ל-children (sandbox)', !writes.some(w => w.table === 'children' && w.op === 'update'), `writes=${JSON.stringify(writes)}`)
-    check('R1 (#9) — סימולטור: אין שום כתיבה אמיתית', writes.length === 0, `writes=${JSON.stringify(writes)}`)
+    dbmod.createServiceClient = () => dbFor(q => { if (q.op !== 'select') writes.push({ table: q.table, op: q.op }); return { data: null, error: null } })
+    const simulator = require(path.join(ROOT, 'src/app/api/bot/simulate/route.ts'))
+    const res = await simulator.POST(request({ sessionId: 'sim-x', testPhone: '+972500000000', message: 'כן', clientState: { currentFlow: 'cancel_confirm_after15', collectedData: { child_name: 'נועם בדיקה' } } }))
+    const json = await res.json()
+    check('#9/R1 — הסימולטור מושבת (403 disabled)', res.status === 403 && json.disabled === true, `status=${res.status} json=${JSON.stringify(json)}`)
+    check('#9/R1 — הסימולטור לא עיבד ולא כתב כלום', processed === false && writes.length === 0, `processed=${processed} writes=${JSON.stringify(writes)}`)
+    handler.processMessage = realProcess
   }
 
   // ═══ R3 (#12) — תשובה ישנה שמסיימת שיחה לא מוחקת מסלול חדש (rev) ══════════════
@@ -352,22 +333,60 @@ const request = (body) => ({ headers: { get: () => null }, json: async () => bod
     check('R5 — נוצרה פנייה אחת בלבד (לא כפולה ב-retry)', db.tasks.length === 1, `tasks=${db.tasks.length}`)
   }
 
-  // ═══ R1b — הסימולטור לא עושה fetch ל-PayPlus בענף חידוש כרטיס (renewRecurringCard) ══
+  // ═══ A (R3) — תשובה מיושנת אינה מוחזרת להורה (שתי הודעות מקבילות, מהיר) ═══════
   {
-    handler.processMessage = realProcess
-    // מפתחות PayPlus מוגדרים כדי שבלי השער renewRecurringCard *היה* מגיע ל-fetch:
-    process.env.PAYPLUS_API_KEY = 'k'; process.env.PAYPLUS_SECRET_KEY = 's'; process.env.PAYPLUS_TERMINAL_UID = 't'
-    const db = makeSessionDB(); dbmod.createServiceClient = db.client
-    const helpers = require(path.join(ROOT, 'src/lib/bot/payment-helpers.ts'))
-    helpers.findRecurringForRenewal = async () => ({ uid: 'sim-uid' })
-    const fetchUrls = []
-    global.fetch = async (url) => { fetchUrls.push(String(url)); throw new Error('NETWORK_BLOCKED_IN_TEST') }
-    const simulator = require(path.join(ROOT, 'src/app/api/bot/simulate/route.ts'))
-    const res = await simulator.POST(request({ sessionId: 'sim-pp', testPhone: '+972500000000', message: 'כן', clientState: { currentFlow: 'payment_fail_confirm_child', collectedData: { child_name: 'נועם בדיקה', payment_fail_branch: 'card' } } }))
-    await res.json()
-    global.fetch = async () => { throw new Error('NETWORK_BLOCKED_IN_TEST') }
-    delete process.env.PAYPLUS_API_KEY; delete process.env.PAYPLUS_SECRET_KEY; delete process.env.PAYPLUS_TERMINAL_UID
-    check('R1b — הסימולטור לא עשה fetch ל-PayPlus (renewRecurringCard חסום)', !fetchUrls.some(u => /payplus/i.test(u)), `fetchUrls=${JSON.stringify(fetchUrls)}`)
+    const PHONE = '+972500000000'
+    const db = makeSessionDB()
+    db.sessions.set(PHONE, { phone: PHONE, current_flow: 'register_child_name', collected_data: {}, rev: 'r0' })
+    dbmod.createServiceClient = db.client
+    handler.processMessage = async (s, msg) => ({ text: `ANS-${msg}`, intent: 'שאלה_כללית', nextFlow: 'register_child_name' })
+    const replies = await Promise.all([1, 2].map(i =>
+      route.POST(request({ phone: PHONE, message: `m${i}`, message_id: `id${i}` })).then(r => r.json())))
+    const answered = replies.filter(r => r.reply && /ANS/.test(r.reply))
+    const staleSkipped = replies.filter(r => r.stale === true && (!r.reply))
+    check('A (R3) — רק תשובה אחת (המנצחת) הוחזרה להורה', answered.length === 1, `replies=${JSON.stringify(replies)}`)
+    check('A (R3) — התשובה המיושנת הוחזרה כ-skip ריק (לא נשלחה)', staleSkipped.length === 1, `replies=${JSON.stringify(replies)}`)
+  }
+
+  // ═══ B (R3) — ללא session קודם: ההודעה המאוחרת מנצחת (בעלות בטעינה) ═══════════
+  {
+    const PHONE = '+972500000000'
+    const db = makeSessionDB()   // אין session מוקדם
+    dbmod.createServiceClient = db.client
+    handler.processMessage = async (s, msg) => (msg === 'רישום'
+      ? { text: 'שם?', intent: 'רישום_צהרון', nextFlow: 'register_child_name' }
+      : { text: 'לבטל?', intent: 'ביטול', nextFlow: 'cancel_child' })
+    await route.POST(request({ phone: PHONE, message: 'רישום', message_id: 'a' })).then(r => r.json())
+    await route.POST(request({ phone: PHONE, message: 'ביטול', message_id: 'b' })).then(r => r.json())
+    const flow = db.sessions.get(PHONE)?.current_flow
+    check('B (R3) — ללא session קודם: המסלול הסופי של ההודעה המאוחרת (לא נדרס)', flow === 'cancel_child', `flow=${flow}`)
+  }
+
+  // ═══ C (R5) — חידוש תפיסה אחרי timeout אטומי: שני retry מקבילים → עיבוד אחד ════
+  {
+    const db = makeSessionDB()
+    db.sessions.set('+972500000000', { phone: '+972500000000', current_flow: 'x', collected_data: {}, rev: 'r0' })
+    db.wml.set('old-msg', { processed: false, created_at: new Date(Date.now() - 3 * 60000).toISOString(), session_id: 'old-token' })
+    dbmod.createServiceClient = db.client
+    let calls = 0
+    handler.processMessage = async () => { calls++; return { text: 'ok', intent: 'שאלה_כללית', isComplete: true } }
+    await Promise.all([1, 2].map(() =>
+      route.POST(request({ phone: '+972500000000', message: 'x', message_id: 'old-msg' })).then(r => r.json())))
+    check('C (R5) — חידוש תפיסה מקבילי אחרי timeout → עיבוד אחד בלבד', calls === 1, `calls=${calls}`)
+  }
+
+  // ═══ D (R3/R5) — כשל מחיקת session בסיום → saveError, בלי פנייה/סימון השלמה ════
+  {
+    const PHONE = '+972500000000'
+    const db = makeSessionDB()
+    db.sessions.set(PHONE, { phone: PHONE, current_flow: 'cancel_confirm_after15', collected_data: {}, rev: 'r0' })
+    db.failClear = true
+    dbmod.createServiceClient = db.client
+    handler.processMessage = async () => ({ text: 'הביטול בוצע!', intent: 'ביטול', isComplete: true, createTask: { type: 'ביטול', description: 'x', priority: 'גבוה' } })
+    const json = await (await route.POST(request({ phone: PHONE, message: 'כן', message_id: 'del-fail' }))).json()
+    check('D — כשל מחיקת session: saveError (לא הצלחה)', json.saveError === true, `json=${JSON.stringify(json)}`)
+    check('D — כשל מחיקת session: לא נוצרה פנייה', db.tasks.length === 0, `tasks=${db.tasks.length}`)
+    check('D — כשל מחיקת session: לא סומן processed', (db.wml.get('del-fail') || {}).processed !== true, `wml=${JSON.stringify(db.wml.get('del-fail'))}`)
   }
 
   console.log(`\n────────────\nעברו: ${passed} | נכשלו: ${failed}`)

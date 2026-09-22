@@ -1720,6 +1720,10 @@ async function routePaymentFailBranch(session: BotSession): Promise<BotResponse>
     const recurringUid = found?.uid
 
     if (recurringUid) {
+      // ⚠️ astra E (חריג מוצרי מתועד): חידוש הכרטיס הוא at-least-once. אם שמירת ה-session
+      //    נכשלה *אחרי* קריאה מוצלחת זו, ניסיון חוזר על אותה הודעה יריץ אותה שוב → ייתכן
+      //    לינק/מייל חידוש שני. אין חיוב כפול (זה רק מייצר לינק לעדכון כרטיס). הפעולות
+      //    הכספיות הקריטיות (ביטול רישום, ביטול הו"ק) *כן* אידמפוטנטיות דרך בדיקת סטטוס.
       const { renewRecurringCard } = await import('@/lib/payplus-api')
       const r = await renewRecurringCard(recurringUid)
       if (r.success) {

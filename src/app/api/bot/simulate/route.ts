@@ -12,6 +12,15 @@ import { runSimulated } from '@/lib/supabase/sim-context'
 const simulatorSessions = new Map<string, BotSession>()
 
 export async function POST(req: NextRequest) {
+  // ⛔ הסימולטור מושבת (בקשת עינת 22.9): הבדיקות מתבצעות תמיד ישירות בוואטסאפ דרך
+  //    uChat, לא בסימולטור. השבתה מלאה ברמת הנתיב מונעת כל עיבוד/כתיבה/סליקה מכאן —
+  //    ומייתרת את סוגיית ה-sandbox (#9/R1). להחזרה: SIMULATOR_ENABLED=true ב-env.
+  if (process.env.SIMULATOR_ENABLED !== 'true') {
+    return NextResponse.json(
+      { error: 'הסימולטור מושבת. הבדיקות מתבצעות ישירות בוואטסאפ.', disabled: true },
+      { status: 403 }
+    )
+  }
   try {
     const { message, sessionId, parentName, reset, clientState, testPhone } = await req.json()
 

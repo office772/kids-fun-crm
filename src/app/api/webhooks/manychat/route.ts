@@ -111,52 +111,37 @@ function toTaskType(raw: string): string {
   return 'שאלה כללית'
 }
 
-// ─── Session helpers ───────────────────────────────────────────────────────────
-function makeNewSession(phone: string, parentId?: string, parentName?: string): BotSession {
-  return {
-    sessionId: `${phone}-${Date.now()}`,
-    phone,
-    parentId,
-    parentName,
-    messages: [],
-    currentFlow: undefined,
-    collectedData: {},
-  }
-}
 
-// astra R3: בקרת-מקביליות מבוססת-גרסה (עמודת bot_sessions.rev, מיגרציה
-// add_bot_sessions_rev). כל טעינה עושה *bump אטומי* של rev (UPDATE...RETURNING בפעולה
-// אחת = row lock), ומחזירה rev חדש. כל כתיבה (save/clear) מותנית ב-rev שנטען. שתי
-// הודעות מקבילות מקבלות revים שונים; רק זו שטענה אחרונה (המאוחרת) מצליחה לכתוב,
-// והישנה מיושנת (0 שורות). זה מכסה את *כל* הנתיבים — מהיר, דחוי, סינכרוני — ואת
-// כל סוגי הכתיבה (עדכון, מחיקה, סיום), לא רק את השמירה הדחויה.
+// astra R3: בקרת-מקביליות מבוססת-גרסה + בעלות (עמודת bot_sessions.rev). loadSession
+// עושה **upsert אטומי** — יוצר שורה אם אין (session חדש) *או* מעדכן rev אם יש — ומחזיר
+// rev חדש. כך לכל הודעה יש בעלות/גרסה כבר בטעינה, גם ללא session קודם (astra B). כל
+// כתיבה (save/clear) מותנית ב-rev. שתי הודעות מקבילות → זו שטענה אחרונה מנצחת; הישנה
+// מיושנת (0 שורות) — ולא כותבת, לא מוחקת, ולא נשלחת (בכל הנתיבים).
 async function loadSession(
   supabase: ReturnType<typeof createServiceClient>,
   phone: string
 ): Promise<{ session: BotSession; rev: string } | null> {
   const newRev = randomUUID()
+  // upsert שמעדכן רק rev בהתנגשות (phone הוא המפתח), ומשאיר current_flow/collected_data.
+  // שורה חדשה מקבלת ברירות-מחדל (current_flow=null, collected_data='{}', expires_at=+30ד').
   const { data, error } = await supabase.from('bot_sessions')
-    .update({ rev: newRev })
-    .eq('phone', phone)
-    .select('parent_id, current_flow, collected_data, last_message_at, expires_at')
+    .upsert({ phone, rev: newRev }, { onConflict: 'phone' })
+    .select('parent_id, current_flow, collected_data, expires_at')
   if (error) { console.error('[manychat] loadSession error:', error.message); return null }
   const row = (data as Array<Record<string, unknown>> | null)?.[0]
-  if (!row) return null   // אין session → חדש
+  if (!row) return null
 
+  // session שפג תוקפו → מצב טרי (אבל השורה קיימת עם ה-rev שלנו).
   const expiresAt = row.expires_at as string | null
-  const lastAt    = row.last_message_at as string | null
-  const expired = expiresAt
-    ? new Date(expiresAt).getTime() < Date.now()
-    : (lastAt ? Date.now() - new Date(lastAt).getTime() > 30 * 60 * 1000 : true)
-  if (expired) { await supabase.from('bot_sessions').delete().eq('phone', phone); return null }
+  const expired = expiresAt ? new Date(expiresAt).getTime() < Date.now() : false
 
   return {
     session: {
       sessionId:     `${phone}-session`,
       phone,
       parentId:      (row.parent_id as string | null) ?? undefined,
-      currentFlow:   (row.current_flow as string | null) ?? undefined,
-      collectedData: (row.collected_data as BotSession['collectedData']) ?? {},
+      currentFlow:   expired ? undefined : ((row.current_flow as string | null) ?? undefined),
+      collectedData: expired ? {} : ((row.collected_data as BotSession['collectedData']) ?? {}),
       messages:      [],
     },
     rev: newRev,
@@ -176,89 +161,88 @@ function sessionRow(session: BotSession, rev: string) {
   }
 }
 
-// שמירה מותנית-גרסה. expectedRev=null → session חדש → INSERT מותנה (23505 = נוצר
-// בינתיים ⇒ stale, astra R3 מקרה 2). expectedRev קיים → UPDATE ... WHERE rev=expectedRev.
+// שמירה מותנית-גרסה. ה-row תמיד קיים (loadSession יצר אותו), אז זה תמיד UPDATE ... WHERE
+// rev=expectedRev. 0 שורות = הודעה מאוחרת יותר לקחה בעלות ⇒ מיושן.
 async function persistSession(
   supabase: ReturnType<typeof createServiceClient>,
   session: BotSession,
-  expectedRev: string | null
+  expectedRev: string
 ): Promise<{ saved: boolean; stale: boolean }> {
-  const row = sessionRow(session, randomUUID())
-  if (expectedRev == null) {
-    const { error } = await supabase.from('bot_sessions').insert(row)
-    if (error?.code === '23505') return { saved: false, stale: true }   // נוצר בינתיים
-    if (error) { console.error('[manychat] persistSession insert error:', error.message); return { saved: false, stale: false } }
-    return { saved: true, stale: false }
-  }
   const { data, error } = await supabase.from('bot_sessions')
-    .update(row).eq('phone', session.phone).eq('rev', expectedRev).select('phone')
-  if (error) { console.error('[manychat] persistSession update error:', error.message); return { saved: false, stale: false } }
+    .update(sessionRow(session, randomUUID())).eq('phone', session.phone).eq('rev', expectedRev).select('phone')
+  if (error) { console.error('[manychat] persistSession error:', error.message); return { saved: false, stale: false } }
   return (data?.length ?? 0) > 0 ? { saved: true, stale: false } : { saved: false, stale: true }
 }
 
-// מחיקה מותנית-גרסה בסיום שיחה. expectedRev קיים → מוחק רק אם ה-rev עדיין שלנו
-// (astra R3 מקרה 1: תשובה ישנה שמסיימת לא מוחקת מסלול חדש). null → אין מה למחוק.
+// מחיקה מותנית-גרסה בסיום שיחה. מחזיר error=true בכשל DB (astra D: כשל מחיקה אינו
+// הצלחה) ו-stale=true אם ה-rev כבר לא שלנו (astra R3: לא מוחקים מסלול חדש).
 async function clearSessionIfCurrent(
   supabase: ReturnType<typeof createServiceClient>,
   phone: string,
-  expectedRev: string | null
-): Promise<{ stale: boolean }> {
-  if (expectedRev == null) return { stale: false }
+  expectedRev: string
+): Promise<{ stale: boolean; error: boolean }> {
   const { data, error } = await supabase.from('bot_sessions')
     .delete().eq('phone', phone).eq('rev', expectedRev).select('phone')
-  if (error) { console.error('[manychat] clearSessionIfCurrent error:', error.message); return { stale: false } }
-  return { stale: (data?.length ?? 0) === 0 }
+  if (error) { console.error('[manychat] clearSessionIfCurrent error:', error.message); return { stale: false, error: true } }
+  return { stale: (data?.length ?? 0) === 0, error: false }
 }
 
-// astra R5: תפיסת עיבוד *נפרדת* מיומן השיחה. whatsapp_message_log (id_message ייחודי +
-// processed + created_at) הוא מצב-העיבוד; conversations נשאר יומן היסטוריה בלבד. מחזיר:
-//  'new'        → נתפס עכשיו, ממשיכים לעבד.
-//  'duplicate'  → כבר הושלם (processed=true), *או* עיבוד מקביל בעיצומו (תפיסה עדכנית
-//                 שטרם הושלמה) → מדלגים. ניסיון שנכשל *משחרר* את התפיסה (releaseClaim),
-//                 ולכן retry מיידי יקבל 'new'. תפיסה ישנה (>2 דק') = קריסה → תופסים מחדש.
-//  'unclaimed'  → כשל תפיסה שאינו 23505 → אין תפיסה תקפה; לא מעבדים בלי הגנה.
+// astra R5: תפיסת עיבוד *נפרדת* מיומן השיחה, עם **טוקן בעלות** (session_id) שמונע מעובד
+// ישן לשחרר/לסיים/לדרוס בעלות שהוחלפה. whatsapp_message_log(id_message ייחודי + processed
+// + created_at + session_id=טוקן). מחזיר {status, token}:
+//  'new'       → נתפסה בעלות (token) — ממשיכים לעבד.
+//  'duplicate' → הושלם (processed) או עיבוד מקביל עדכני, או שמישהו אחר תפס-מחדש → מדלגים.
+//  'unclaimed' → כשל תפיסה שאינו 23505 → אין בעלות תקפה; לא מעבדים בלי הגנה.
+// תפיסה ישנה (>2ד', קריסה) → חידוש **אטומי**: מחיקה מותנית בטוקן הישן (רק זוכה אחד),
+// ואז הכנסה חדשה. שני retry מקבילים → רק אחד זוכה בבעלות, השני 'duplicate'.
 async function claimMessage(
   supabase: ReturnType<typeof createServiceClient>,
   phone: string,
   messageId: string,
   text: string
-): Promise<'new' | 'duplicate' | 'unclaimed'> {
-  const row = { id_message: messageId, phone, direction: 'נכנס', message_text: text || '(ריק)', processed: false }
+): Promise<{ status: 'new' | 'duplicate' | 'unclaimed'; token: string | null }> {
+  const token = randomUUID()
+  const row = { id_message: messageId, phone, direction: 'נכנס', message_text: text || '(ריק)', processed: false, session_id: token }
   const { error } = await supabase.from('whatsapp_message_log').insert(row)
-  if (!error) return 'new'
+  if (!error) return { status: 'new', token }
   if (error.code !== '23505') {
     console.error(`[manychat] claim insert failed (${error.code}) for ${messageId}: ${error.message}`)
-    return 'unclaimed'
+    return { status: 'unclaimed', token: null }
   }
   const { data } = await supabase.from('whatsapp_message_log')
-    .select('processed, created_at').eq('id_message', messageId).limit(1)
-  const existing = (data as { processed: boolean; created_at: string | null }[] | null)?.[0]
-  if (existing?.processed) return 'duplicate'
-  const claimedAt = existing?.created_at ? new Date(existing.created_at).getTime() : 0
-  if (Date.now() - claimedAt < 2 * 60_000) return 'duplicate'   // עיבוד מקביל בעיצומו
-  // תפיסה ישנה שלא הושלמה (קריסה) → תופסים מחדש
-  await supabase.from('whatsapp_message_log').delete().eq('id_message', messageId)
+    .select('processed, created_at, session_id').eq('id_message', messageId).limit(1)
+  const ex = (data as { processed: boolean; created_at: string | null; session_id: string | null }[] | null)?.[0]
+  if (ex?.processed) return { status: 'duplicate', token: null }
+  const claimedAt = ex?.created_at ? new Date(ex.created_at).getTime() : 0
+  if (Date.now() - claimedAt < 2 * 60_000) return { status: 'duplicate', token: null }   // עיבוד מקביל בעיצומו
+  // חידוש אטומי: מחיקה מותנית בטוקן הישן — רק בקשה אחת מצליחה למחוק ולתפוס מחדש.
+  const { data: del } = await supabase.from('whatsapp_message_log')
+    .delete().eq('id_message', messageId).eq('session_id', ex?.session_id ?? '__none__').select('id_message')
+  if (!del?.length) return { status: 'duplicate', token: null }   // מישהו אחר תפס-מחדש
   const { error: reErr } = await supabase.from('whatsapp_message_log').insert(row)
-  return reErr ? 'unclaimed' : 'new'
+  return reErr ? { status: 'unclaimed', token: null } : { status: 'new', token }
 }
 
-// astra R5: משחרר את תפיסת העיבוד (whatsapp_message_log — *לא* את יומן השיחה) בכשל
-// שמירה, כדי שניסיון חוזר מיידי על אותה הודעה יעובד. applyResult עצר לפני תופעות
-// לוואי בכשל, ולכן העיבוד החוזר יוצר אותן פעם אחת בלבד.
+// astra R5: משחרר את תפיסת העיבוד (whatsapp_message_log, *לא* יומן) — מותנה בטוקן הבעלות
+// שלנו, כדי לא למחוק בעלות שהוחלפה. בכשל שמירה → שחרור → retry מיידי יתפוס מחדש.
 async function releaseClaim(
   supabase: ReturnType<typeof createServiceClient>,
-  messageId: string | null
+  messageId: string | null,
+  token: string | null
 ): Promise<void> {
-  if (!messageId) return
-  await supabase.from('whatsapp_message_log').delete().eq('id_message', messageId)
+  if (!messageId || !token) return
+  await supabase.from('whatsapp_message_log').delete().eq('id_message', messageId).eq('session_id', token)
 }
 
+// astra R5: מסמן "הושלם" *מותנה בטוקן הבעלות* שלנו — עובד ישן שהוחלף לא יסמן את בעלות
+// המחליף כמושלמת.
 async function markProcessed(
   supabase: ReturnType<typeof createServiceClient>,
-  messageId: string | null
+  messageId: string | null,
+  token: string | null
 ): Promise<void> {
-  if (!messageId) return
-  await supabase.from('whatsapp_message_log').update({ processed: true }).eq('id_message', messageId)
+  if (!messageId || !token) return
+  await supabase.from('whatsapp_message_log').update({ processed: true }).eq('id_message', messageId).eq('session_id', token)
 }
 
 // טעינת היסטוריית שיחה אחרונה (ל-context של ה-LLM — שיבין הקשר ולא יתנהג כטופס)
@@ -426,9 +410,10 @@ async function finishMediaInBackground(
     phone: string
     parentId?: string
     parentName?: string | null
+    rev: string
   }
 ) {
-  const { session, media, userNs, phone, parentId, parentName } = opts
+  const { session, media, userNs, phone, parentId, parentName, rev } = opts
   try {
     const result = await handleMediaMessage(session, media)
     const sent = await sendText(userNs, result.text)
@@ -449,8 +434,8 @@ async function finishMediaInBackground(
         parentPhone: phone,
       })
     }
-    // מדיה מסיימת את המסלול — מחיקת ה-session (מדיה היא נתיב טרמינלי).
-    await supabase.from('bot_sessions').delete().eq('phone', phone)
+    // מדיה מסיימת את המסלול — מחיקה *מותנית-rev* (astra: לא לדרוס הודעה חדשה שהגיעה בזמן הניתוח).
+    await clearSessionIfCurrent(supabase, phone, rev)
     console.log(`[media-bg] phone=${phone} kind=${media.kind} sent=${sent}`)
   } catch (err) {
     console.error('[media-bg] failed:', err)
@@ -474,7 +459,7 @@ async function applyResult(
   parent: { id?: string; name?: string | null },
   phone: string,
   result: ProcResult,
-  opts?: { rev?: string | null },   // rev נמסר בנתיב הדחוי → שמירה מותנית-גרסה (astra #12)
+  opts?: { rev?: string },   // rev הבעלות שנטען → כל כתיבה מותנית בו (astra R3)
 ): Promise<{ saved: boolean; stale: boolean }> {
   if (result.nextFlow) {
     session.currentFlow = result.nextFlow
@@ -483,19 +468,20 @@ async function applyResult(
     session.collectedData = {}
   }
 
-  const rev = opts?.rev ?? null
+  const rev = opts?.rev ?? ''
   let saved = true, stale = false
   if (result.isComplete && !result.nextFlow) {
     const r = await clearSessionIfCurrent(supabase, phone, rev)
     stale = r.stale
+    if (r.error) saved = false   // astra D: כשל מחיקה אינו הצלחה — עוצר לפני תופעות לוואי
   } else {
     const r = await persistSession(supabase, session, rev)
     saved = r.saved; stale = r.stale
   }
 
-  // astra R3/R5: תוצאה מיושנת (השיחה התקדמה) *או* כשל שמירה → לא יוצרים שום תופעת
-  // לוואי (משימה/התראה/סליקה). זה גם מונע פנייה כפולה ב-retry (הניסיון שנכשל לא יוצר
-  // כלום; רק הניסיון שהשלים בהצלחה יוצר).
+  // astra R3/R5: תוצאה מיושנת (השיחה התקדמה) *או* כשל שמירה/מחיקה → לא יוצרים שום
+  // תופעת לוואי (משימה/התראה/סליקה). מונע גם פנייה כפולה ב-retry (הניסיון שנכשל לא
+  // יוצר כלום; רק זה שהשלים בהצלחה).
   if (stale || !saved) return { saved, stale }
 
   if (result.createTask) {
@@ -576,22 +562,22 @@ export async function POST(req: NextRequest) {
 
   const supabase = createServiceClient()
 
-  // ─── תפיסת עיבוד / כפילויות (astra R5, R13) ─────────────────────────────────
-  // עם מזהה: תפיסה אטומית ב-whatsapp_message_log (id_message ייחודי + processed) —
-  //   *נפרד* מיומן conversations. 'duplicate' = כבר הושלם → דילוג; 'retry' = נתפס אך
-  //   לא הושלם → מעבדים שוב בלי למחוק היסטוריה; 'unclaimed' = כשל תפיסה → לא מעבדים
-  //   בלי הגנה, מבקשים לשלוח שוב. בלי מזהה: best-effort לפי טקסט זהה ב-15ש'.
+  // ─── תפיסת עיבוד / כפילויות (astra R5) ──────────────────────────────────────
+  // עם מזהה: תפיסה אטומית עם טוקן-בעלות ב-whatsapp_message_log, *נפרד* מיומן conversations.
+  //   'duplicate' = הושלם/עיבוד מקביל → דילוג; 'unclaimed' = כשל תפיסה → לא מעבדים בלי
+  //   הגנה. token נושא את הבעלות ל-markProcessed/releaseClaim. בלי מזהה: best-effort טקסט.
+  let claimToken: string | null = null
   if (messageId) {
     const claim = await claimMessage(supabase, phone, messageId, messageText)
-    if (claim === 'duplicate') {
-      console.log(`[manychat] duplicate message_id ${messageId} (already processed) — skipped`)
+    if (claim.status === 'duplicate') {
+      console.log(`[manychat] duplicate message_id ${messageId} (processed/in-flight) — skipped`)
       return NextResponse.json({ reply: '', skip: true, duplicate: true }, { status: 200 })
     }
-    if (claim === 'unclaimed') {
+    if (claim.status === 'unclaimed') {
       console.error(`[manychat] could not claim ${messageId} — asking to resend`)
       return NextResponse.json({ reply: 'רגע, נסו שוב בעוד רגע 🙏', retry: true }, { status: 200 })
     }
-    // 'new' → ממשיכים לעבד (כולל תפיסה-מחדש אחרי כשל קודם ששחרר)
+    claimToken = claim.token
   } else {
     try {
       const cutoff = new Date(Date.now() - 15_000).toISOString()
@@ -617,19 +603,17 @@ export async function POST(req: NextRequest) {
     await supabase.from('parents').update({ uchat_user_ns: userNs }).eq('id', parent.id)
   }
 
-  // 2. טעינת session או יצירה חדשה. rev = טוקן העדכניות (last_message_at) לשמירה
-  //    מותנית-גרסה בנתיב הדחוי (astra #12).
+  // 2. טעינת session — loadSession עושה upsert אטומי (יוצר שורה אם אין) ומחזיר rev-בעלות.
+  //    null = כשל DB בטעינה → אין בעלות; לא מעבדים בלי הגנה, מבקשים לשלוח שוב (astra R3/D).
   const loaded = await loadSession(supabase, phone)
-  let session: BotSession
-  let sessionRev: string | null = null
   if (!loaded) {
-    session = makeNewSession(phone, parent.id, parent.name)
-  } else {
-    session = loaded.session
-    sessionRev = loaded.rev
-    session.parentId = parent.id
-    session.parentName = session.parentName || parent.name
+    if (messageId) await releaseClaim(supabase, messageId, claimToken)
+    return NextResponse.json({ reply: 'רגע, נסו שוב בעוד רגע 🙏', retry: true }, { status: 200 })
   }
+  const session: BotSession = loaded.session
+  const sessionRev: string = loaded.rev
+  session.parentId = parent.id
+  session.parentName = session.parentName || parent.name
 
   // טעינת היסטוריית שיחה ל-context של ה-LLM (לפני רישום ההודעה הנוכחית)
   session.messages = await loadRecentMessages(supabase, phone)
@@ -666,9 +650,9 @@ export async function POST(req: NextRequest) {
         intent: 'לא_ידוע', sessionId: session.sessionId,
       })
       waitUntil(finishMediaInBackground(supabase, {
-        session, media, userNs: ns, phone, parentId: parent.id, parentName: parent.name,
+        session, media, userNs: ns, phone, parentId: parent.id, parentName: parent.name, rev: sessionRev,
       }))
-      await markProcessed(supabase, messageId)
+      await markProcessed(supabase, messageId, claimToken)
       console.log(`[manychat] phone=${phone} media=${media.kind} → ack now, analysis in background`)
       return NextResponse.json({ reply: mediaAck(), intent: 'לא_ידוע', deferred: true }, { status: 200 })
     }
@@ -685,19 +669,25 @@ export async function POST(req: NextRequest) {
   if (raced !== DEFER) {
     const result = raced
     const { saved, stale } = await applyResult(supabase, session, parent, phone, result, { rev: sessionRev })
-    if (!saved && !stale) {
-      // astra #14/R5: כשל שמירה אמיתי (לא מיושן) → retry בטוח. משחררים את התפיסה כדי
-      // שניסיון חוזר יעובד; לא נוצרו תופעות לוואי (applyResult עצר לפניהן).
+    if (stale) {
+      // astra A: תוצאה מיושנת (הודעה מאוחרת יותר לקחה בעלות) — *לא* מחזירים אותה להורה,
+      // כדי שלא תסתור את המצב שהשרת יקבל בהודעה הבאה. מסמנים כמטופלת (הוחלפה).
+      await markProcessed(supabase, messageId, claimToken)
+      console.log(`[manychat] fast result for ${phone} stale — not replying (superseded)`)
+      return NextResponse.json({ reply: '', skip: true, stale: true }, { status: 200 })
+    }
+    if (!saved) {
+      // astra #14/R5: כשל שמירה אמיתי → retry בטוח. משחררים את התפיסה כדי שניסיון חוזר
+      // יעובד; לא נוצרו תופעות לוואי (applyResult עצר לפניהן).
       console.error(`[manychat] session save failed for ${phone} — returning safe retry`)
-      await releaseClaim(supabase, messageId)
+      await releaseClaim(supabase, messageId, claimToken)
       return NextResponse.json({ reply: 'רגע, הייתה תקלה קטנה אצלנו 🙏 אפשר לשלוח שוב?', intent: result.intent, saveError: true }, { status: 200 })
     }
-    // stale = הודעה מקבילה מאוחרת יותר ניצחה; עדיין עונים על ההודעה הזו בלי לדרוס מצב.
     if (result.text) {
       await logConversation(supabase, { phone, parentId: parent.id, direction: 'יוצא', text: result.text, intent: result.intent, sessionId: session.sessionId })
     }
-    await markProcessed(supabase, messageId)   // טופל — לא לעבד שוב ב-retry
-    console.log(`[manychat] phone=${phone} intent=${result.intent} flow=${session.currentFlow ?? 'done'}${stale ? ' (stale-but-answered)' : ''}`)
+    await markProcessed(supabase, messageId, claimToken)   // טופל — לא לעבד שוב ב-retry
+    console.log(`[manychat] phone=${phone} intent=${result.intent} flow=${session.currentFlow ?? 'done'}`)
     return NextResponse.json({ reply: result.text, intent: result.intent }, { status: 200 })
   }
 
@@ -713,14 +703,14 @@ export async function POST(req: NextRequest) {
         const { stale, saved } = await applyResult(supabase, session, parent, phone, result, { rev: sessionRev })
         if (stale) {
           console.log(`[manychat] deferred result for ${phone} is stale — not sending (conversation advanced)`)
-          await markProcessed(supabase, messageId)   // טופל (הוחלף) — לא לעבד שוב
+          await markProcessed(supabase, messageId, claimToken)   // טופל (הוחלף) — לא לעבד שוב
           return
         }
         if (!saved) {
           // astra R4/R5: כשל שמירה בנתיב הדחוי — לא שולחים מצב לא-מעודכן, ומשחררים
           // את התפיסה כדי שניסיון חוזר יעובד.
           console.error(`[manychat] deferred save failed for ${phone} — not sending stale-state answer`)
-          await releaseClaim(supabase, messageId)
+          await releaseClaim(supabase, messageId, claimToken)
           return
         }
         if (result.text) {
@@ -730,7 +720,7 @@ export async function POST(req: NextRequest) {
             await createTask(supabase, { parentId: parent.id, type: 'שאלה כללית', description: `תשובת הבוט לא נמסרה בוואטסאפ (send-text נכשל). ההודעה: "${result.text.slice(0, 120)}"`, priority: 'גבוה', parentName: parent.name ?? undefined, parentPhone: phone })
           }
         }
-        await markProcessed(supabase, messageId)
+        await markProcessed(supabase, messageId, claimToken)
         console.log(`[manychat] phone=${phone} deferred answer sent (intent=${result.intent})`)
       } catch (err) {
         console.error('[manychat] deferred processing failed:', err)
@@ -742,17 +732,22 @@ export async function POST(req: NextRequest) {
 
   // ── אין user_ns — נתיב סינכרוני (מחכים לתשובה גם אם איטית) ─────────────────
   const result = await resultP
-  // astra R3: שמירה מותנית-גרסה גם בנתיב הסינכרוני.
   const { saved: syncSaved, stale: syncStale } = await applyResult(supabase, session, parent, phone, result, { rev: sessionRev })
-  if (!syncSaved && !syncStale) {
+  if (syncStale) {
+    // astra A: מיושן → לא מחזירים תשובה סותרת.
+    await markProcessed(supabase, messageId, claimToken)
+    console.log(`[manychat] sync result for ${phone} stale — not replying (superseded)`)
+    return NextResponse.json({ reply: '', skip: true, stale: true }, { status: 200 })
+  }
+  if (!syncSaved) {
     console.error(`[manychat] session save failed for ${phone} (sync) — returning safe retry`)
-    await releaseClaim(supabase, messageId)
+    await releaseClaim(supabase, messageId, claimToken)
     return NextResponse.json({ reply: 'רגע, הייתה תקלה קטנה אצלנו 🙏 אפשר לשלוח שוב?', intent: result.intent, saveError: true }, { status: 200 })
   }
   if (result.text) {
     await logConversation(supabase, { phone, parentId: parent.id, direction: 'יוצא', text: result.text, intent: result.intent, sessionId: session.sessionId })
   }
-  await markProcessed(supabase, messageId)
+  await markProcessed(supabase, messageId, claimToken)
   console.log(`[manychat] phone=${phone} slow, no user_ns — synchronous (intent=${result.intent})${syncStale ? ' (stale-but-answered)' : ''}`)
   return NextResponse.json({ reply: result.text, intent: result.intent }, { status: 200 })
 }
