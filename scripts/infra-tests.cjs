@@ -257,6 +257,97 @@ const request = (body) => ({ headers: { get: () => null }, json: async () => bod
     check('2.1 (#9) — סימולטור: אין כתיבת timeline אמיתית', !writes.some(w => w.table === 'registration_timeline'), `writes=${JSON.stringify(writes)}`)
   }
 
+  // ═══ R1 (#9) — סימולטור: sandbox חוסם *כל* כתיבה (גם children.update, לא רק ביטול) ══
+  {
+    const { sandboxWrites } = require(path.join(ROOT, 'src/lib/supabase/server.ts'))
+    const { isSimulated } = require(path.join(ROOT, 'src/lib/supabase/sim-context.ts'))
+    handler.processMessage = realProcess
+    const simulator = require(path.join(ROOT, 'src/app/api/bot/simulate/route.ts'))
+    const writes = []
+    dbmod.createServiceClient = () => {
+      const base = dbFor(q => { if (q.op !== 'select') writes.push({ table: q.table, op: q.op }); return { data: null, error: null } })
+      return isSimulated() ? sandboxWrites(base) : base   // מחקה את createServiceClient האמיתי
+    }
+    const res = await simulator.POST(request({ sessionId: 'sim-r1', message: 'דני בדיקה', clientState: { currentFlow: 'register_complete_placeholder', collectedData: { placeholder_child_id: 'child-xyz' } } }))
+    await res.json()
+    check('R1 (#9) — סימולטור: אין UPDATE אמיתי ל-children (sandbox)', !writes.some(w => w.table === 'children' && w.op === 'update'), `writes=${JSON.stringify(writes)}`)
+    check('R1 (#9) — סימולטור: אין שום כתיבה אמיתית', writes.length === 0, `writes=${JSON.stringify(writes)}`)
+  }
+
+  // ═══ R3 (#12) — תשובה ישנה שמסיימת שיחה לא מוחקת מסלול חדש (שער "הודעה חדשה יותר") ══
+  {
+    let stored = { phone: '+972500000000', current_flow: 'register_child_name', collected_data: {}, last_message_at: 'T0', expires_at: new Date(Date.now() + 60000).toISOString() }
+    const incoming = []
+    let releaseSlow; const gate = new Promise(r => (releaseSlow = r))
+    const sent = []
+    uchat.getUserNsByPhone = async () => 'ns'; uchat.sendText = async (n, t) => { sent.push(t); return true }
+    dbmod.createServiceClient = () => dbFor(q => {
+      if (q.table === 'parents' && q.op === 'select') return { data: [{ id: 'p1', name: 'הורה' }], error: null }
+      if (q.table === 'conversations' && q.op === 'insert') { if (q.payload.direction === 'נכנס') incoming.push(q.payload.id_message); return { data: null, error: null } }
+      if (q.table === 'conversations' && q.op === 'select') return { data: incoming.length ? [{ id_message: incoming[incoming.length - 1] }] : [], error: null }
+      if (q.table === 'bot_sessions' && q.op === 'select') return { data: stored ? JSON.parse(JSON.stringify(stored)) : null, error: null }
+      if (q.table === 'bot_sessions' && q.op === 'upsert') { stored = { ...q.payload }; return { data: [{ phone: q.payload.phone }], error: null } }
+      if (q.table === 'bot_sessions' && q.op === 'update') { const rev = q.filters.find(f => f[0] === 'eq' && f[1] === 'last_message_at'); if (stored && rev && stored.last_message_at === rev[2]) { stored = { ...q.payload, phone: stored.phone }; return { data: [{ phone: stored.phone }], error: null } } return { data: [], error: null } }
+      if (q.table === 'bot_sessions' && q.op === 'delete') { stored = null; return { data: null, error: null } }
+      return { data: [], error: null }
+    })
+    process.env.LLM_DEFER_TIMEOUT_MS = '10'
+    handler.processMessage = async (s, msg) => {
+      if (msg === 'שאלה איטית') { await gate; return { text: 'תשובה ישנה', intent: 'שאלה_כללית', isComplete: true } }  // ישן: מסיים שיחה
+      return { text: 'מה שם הילד לביטול?', intent: 'ביטול', nextFlow: 'cancel_child' }  // חדש: מתקדם
+    }
+    const bgBefore = background.length
+    await route.POST(request({ phone: '+972500000000', message: 'שאלה איטית', user_ns: 'ns', message_id: 'old' }))
+    await route.POST(request({ phone: '+972500000000', message: 'לבטל', user_ns: 'ns', message_id: 'new' }))
+    releaseSlow(); await Promise.all(background.slice(bgBefore))
+    check('R3 (#12) — תשובה ישנה שמסיימת לא מחקה מסלול חדש', !!stored && stored.current_flow === 'cancel_child', `stored=${JSON.stringify(stored)}`)
+    check('R3 (#12) — התשובה הישנה לא נשלחה', !sent.some(t => /תשובה ישנה/.test(t)), `sent=${JSON.stringify(sent)}`)
+  }
+
+  // ═══ R4 (#14) — כשל שמירה בנתיב הדחוי לא שולח את התשובה ═══════════════════════
+  {
+    const stored = { phone: '+972500000000', current_flow: 'x', collected_data: {}, last_message_at: 'T0', expires_at: new Date(Date.now() + 60000).toISOString() }
+    const incoming = []
+    let releaseSlow; const gate = new Promise(r => (releaseSlow = r))
+    const sent = []
+    uchat.getUserNsByPhone = async () => 'ns'; uchat.sendText = async (n, t) => { sent.push(t); return true }
+    dbmod.createServiceClient = () => dbFor(q => {
+      if (q.table === 'parents' && q.op === 'select') return { data: [{ id: 'p1' }], error: null }
+      if (q.table === 'conversations' && q.op === 'insert') { if (q.payload.direction === 'נכנס') incoming.push(q.payload.id_message); return { data: null, error: null } }
+      if (q.table === 'conversations' && q.op === 'select') return { data: incoming.length ? [{ id_message: incoming[incoming.length - 1] }] : [], error: null }
+      if (q.table === 'bot_sessions' && q.op === 'select') return { data: JSON.parse(JSON.stringify(stored)), error: null }
+      if (q.table === 'bot_sessions' && q.op === 'update') return { data: null, error: { message: 'deferred save fail' } }
+      return { data: [], error: null }
+    })
+    process.env.LLM_DEFER_TIMEOUT_MS = '10'
+    handler.processMessage = async () => { await gate; return { text: 'מה שם הילד?', intent: 'רישום_צהרון', nextFlow: 'register_child_name' } }
+    const bgBefore = background.length
+    await route.POST(request({ phone: '+972500000000', message: 'איטי', user_ns: 'ns', message_id: 'only' }))
+    releaseSlow(); await Promise.all(background.slice(bgBefore))
+    check('R4 (#14) — כשל שמירה דחוי → התשובה לא נשלחה', !sent.some(t => /מה שם הילד/.test(t)), `sent=${JSON.stringify(sent)}`)
+  }
+
+  // ═══ R5 (#13/#14) — הודעה שנכשלה משוחררת, וניסיון חוזר לא נחסם ככפילות ═════════
+  {
+    const claimed = new Set()
+    let failNext = true, calls = 0
+    dbmod.createServiceClient = () => dbFor(q => {
+      if (q.table === 'parents' && q.op === 'select') return { data: [{ id: 'p1' }], error: null }
+      if (q.table === 'conversations' && q.op === 'insert' && q.payload && q.payload.id_message) {
+        if (claimed.has(q.payload.id_message)) return { data: null, error: { code: '23505' } }
+        claimed.add(q.payload.id_message); return { data: null, error: null }
+      }
+      if (q.table === 'conversations' && q.op === 'delete') { const id = q.filters.find(f => f[0] === 'eq' && f[1] === 'id_message')?.[2]; if (id) claimed.delete(id); return { data: null, error: null } }
+      if (q.table === 'bot_sessions' && q.op === 'upsert') { if (failNext) { failNext = false; return { data: null, error: { message: 'save fail once' } } } return { data: [{ phone: q.payload.phone }], error: null } }
+      return { data: [], error: null }
+    })
+    handler.processMessage = async () => { calls++; return { text: 'מה שם הילד?', intent: 'רישום_צהרון', nextFlow: 'register_child_name' } }
+    const r1 = await (await route.POST(request({ phone: '+972500000000', message: '2', message_id: 'retry-1' }))).json()
+    const r2 = await (await route.POST(request({ phone: '+972500000000', message: '2', message_id: 'retry-1' }))).json()
+    check('R5 — ניסיון ראשון נכשל בשמירה (saveError)', r1.saveError === true, `r1=${JSON.stringify(r1)}`)
+    check('R5 — ניסיון חוזר לא נחסם ככפילות (עובד שוב)', r2.duplicate !== true && calls === 2, `r2=${JSON.stringify(r2)} calls=${calls}`)
+  }
+
   console.log(`\n────────────\nעברו: ${passed} | נכשלו: ${failed}`)
   process.exit(failed === 0 ? 0 : 1)
 })().catch(e => { console.error('FATAL', e); process.exit(1) })

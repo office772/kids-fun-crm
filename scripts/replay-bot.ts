@@ -338,6 +338,31 @@ async function cancelSafetyCases() {
       r.isComplete !== true && !/דחה הצעת מקום|waitlist_declined/.test(r.text),
       `isComplete=${r.isComplete} text=${JSON.stringify(r.text.slice(0, 90))}`)
   }
+
+  // ─── astra R2: נרמול אישור לא מוחק תוכן משמעותי (מספר/תאריך/סימן שאלה לא-לטיני) ──
+  console.log('\n── R2: אישור עם תוכן נוסף אינו "כן" ──')
+  for (const msg of ['כן 15/10', 'כן؟', 'כן 20 לחודש', 'כן אבל 15']) {
+    const s = makeSession('cancel_confirm_after15', { child_name: 'נועם בירן' })
+    const r = await processMessage(s, msg)
+    check(`R2 — "${msg}" לא מבצע ביטול`,
+      !/הביטול בוצע|בקשת הביטול נקלטה/.test(r.text) && r.isComplete !== true,
+      `isComplete=${r.isComplete} text=${JSON.stringify(r.text.slice(0, 80))}`)
+  }
+  // R2: הסתייגות (לא שאלה) → שאלת אישור *מחדש* דטרמיניסטית (לא ריק/LLM), המסלול נשמר
+  {
+    const s = makeSession('cancel_confirm_after15', { child_name: 'נועם בירן' })
+    const r = await processMessage(s, 'כן אבל רגע')
+    check('R2 — הסתייגות → אישור חוזר דטרמיניסטי',
+      r.nextFlow === 'cancel_confirm_after15' && r.text.length > 0 && /לאשר|ביטול/.test(r.text) && r.isComplete !== true,
+      `nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 80))}`)
+  }
+  // R2: אישור נקי עם פיסוק *בטוח* עדיין עובד
+  {
+    const s = makeSession('cancel_confirm_after15', { child_name: 'נועם בירן' })
+    const r = await processMessage(s, 'כן, בבקשה')
+    check('R2 — "כן, בבקשה" עדיין מבצע ביטול', r.isComplete === true && /ביטול/.test(r.text),
+      `isComplete=${r.isComplete} text=${JSON.stringify(r.text.slice(0, 80))}`)
+  }
 }
 
 // ─── S2 #4: החלפת נושא מפורשת בשלב טקסט חופשי ────────────────────────────────
@@ -711,6 +736,25 @@ async function routingCases() {
     const s = makeSession('payment_setup_method')
     await processMessage(s, 'אני לא רוצה הוראת קבע')
     check('#6 — "לא רוצה הוראת קבע" לא נבחר כהוראת קבע', s.collectedData.payment_method !== 'standing_order',
+      `method=${s.collectedData.payment_method}`)
+  }
+  // astra R6 — ניסוחי סירוב נוספים + בקשה משולבת
+  for (const msg of ['לא הוראת קבע', 'אני לא מעוניין בהוראת קבע', 'בלי הוראת קבע']) {
+    const s = makeSession('payment_setup_method')
+    await processMessage(s, msg)
+    check(`R6 — "${msg}" לא נבחר כהו"ק`, s.collectedData.payment_method !== 'standing_order',
+      `method=${s.collectedData.payment_method}`)
+  }
+  {
+    const s = makeSession('payment_setup_method')
+    await processMessage(s, 'לא הוראת קבע, כן אשראי')
+    check('R6 — "לא הו"ק, כן אשראי" → בוחר אשראי', s.collectedData.payment_method === 'credit',
+      `method=${s.collectedData.payment_method}`)
+  }
+  {
+    const s = makeSession('payment_setup_method')
+    await processMessage(s, 'הוראת קבע')
+    check('R6 — "הוראת קבע" (חיובי) עדיין נבחר', s.collectedData.payment_method === 'standing_order',
       `method=${s.collectedData.payment_method}`)
   }
 }

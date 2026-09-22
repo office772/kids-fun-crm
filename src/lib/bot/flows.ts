@@ -238,16 +238,30 @@ function isNo(msg: string): boolean {
 // מנורמלת. ההחלטה בקוד בלבד, לא בפרשנות LLM. "כן אבל רגע"/"אולי כן"/"בסדר" אינם
 // אישור; הם נופלים ל-LLM (והמסלול נשמר), לא מכריעים פעולה.
 // נמצא בלוגים (09/2026): "לא הבנתי עד מתי אני משלם בפועל?" נקרא כ-"לא"/"כן".
-const CONFIRM_QUALIFIER_RE = /\?|אבל|רגע|חכ[הי]|שנייה|שניה|תכף|עוד מעט|לא עכשיו|אולי|המתן|רק\s/
+// astra R2: פוסלים גם *מספר/תאריך* (למשל "כן 15/10") וסימני שאלה לא-לטיניים (؟)
+// לפני ההשוואה — אלה תוכן משמעותי, לא רעש. ספרות ערביות/פרסיות נתפסות על הגולמי.
+const CONFIRM_QUALIFIER_RE = /[?؟？]|\d|[٠-٩۰-۹]|אבל|רגע|חכ[הי]|שנייה|שניה|תכף|עוד מעט|לא עכשיו|אולי|המתן|רק\s/
 
+// astra R2: מסירים *רק* פיסוק וסמלים (כולל אמוג'י) — לא ספרות ולא אותיות. כך
+// "כן 15/10" לא מצטמצם ל-"כן" (הספרות נשארות → לא מתאים לרשימה), ו-"כן, בבקשה"
+// כן מתאים ל-"כן בבקשה". (לפני התיקון \p{P}/מספרים נמחקו והופכים תוכן ל-"כן".)
 function confirmCore(msg: string): string {
-  return normalizeMessage(msg).replace(/[^א-תA-Za-z\s]+/g, ' ').replace(/\s+/g, ' ').trim()
+  // שומרים אותיות (עברית/לטינית), ספרות ורווח; כל השאר (פיסוק/אמוג'י) → רווח.
+  return normalizeMessage(msg).replace(/[^א-תA-Za-z0-9\s]+/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-// אישור/שלילה = אין הסתייגות/שאלה (על הגולמי), וההודעה כולה מתאימה לרשימה (מנורמל).
+// אישור/שלילה = אין הסתייגות/שאלה/מספר (על הגולמי), וההודעה כולה מתאימה לרשימה.
 function unambiguousMatch(msg: string, whitelist: readonly string[]): boolean {
   if (CONFIRM_QUALIFIER_RE.test(msg)) return false
   return whitelist.includes(confirmCore(msg))
+}
+
+// astra R2: בצומת אישור ביטול — הודעה שאינה אישור/שלילה חד-משמעיים: שאלה אמיתית
+// → LLM עונה (המסלול נשמר); הסתייגות/עמימות ("כן אבל רגע"/"כן 15/10") → שאלת
+// האישור *מחדש* באופן דטרמיניסטי, בלי לתת ל-LLM להכריע פעולה.
+function isRealQuestion(msg: string): boolean {
+  const t = msg.trim()
+  return /[?؟]/.test(t) || /^(האם|מה|מתי|איך|כמה|איפה|למה|אילו|מי|יש|אפשר)([^א-תA-Za-z0-9]|$)/.test(t)
 }
 
 // רשימות פר-הקשר — *לא* משותפות ("לבטל" אינו אישור להצטרפות לרשימת המתנה).
@@ -922,8 +936,10 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
       }
     }
 
-    // לא כן ולא לא — שאלה/הבהרה. ל-LLM, והשלב נשמר (handler מחזיר nextFlow).
-    return { text: '', useLLM: true }
+    // astra R2: לא אישור ולא שלילה חד-משמעיים. שאלה אמיתית → LLM עונה (המסלול נשמר);
+    // הסתייגות/עמימות ("כן אבל רגע"/"כן 15/10") → שאלת האישור *מחדש* דטרמיניסטית.
+    if (isRealQuestion(userMessage)) return { text: '', useLLM: true }
+    return buildCancelConfirm(childName, dayOfMonth)
   }
 
   // אחרי 15 — אישור תקנון או בקשת חריג
@@ -931,7 +947,8 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
     const childName = session.collectedData.child_name || 'הילד/ה'
 
     // הורה מציין נסיבות מיוחדות → הסלמה לנציגה
-    if (/מחלה|רפואי|מעבר|חריג|נסיבות|בעיה|קשה|אי אפשר|לא יכול/i.test(userMessage)) {
+    // "קשה" עם גבול-מילה ידני — אחרת "בב*קשה*" ("בבקשה") נתפס כנסיבות מיוחדות (astra R2)
+    if (/מחלה|רפואי|מעבר|חריג|נסיבות|בעיה|(^|[^א-ת])קשה|אי אפשר|לא יכול/i.test(userMessage)) {
       return {
         text: botText('cancel_exception', {
           'המשך': isBusinessHours()
@@ -988,8 +1005,10 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
       }
     }
 
-    // לא כן ולא לא — שאלה/הבהרה. ל-LLM, והשלב נשמר (handler מחזיר nextFlow).
-    return { text: '', useLLM: true }
+    // astra R2: לא אישור ולא שלילה חד-משמעיים. שאלה אמיתית → LLM עונה (המסלול נשמר);
+    // הסתייגות/עמימות ("כן אבל רגע"/"כן 15/10") → שאלת האישור *מחדש* דטרמיניסטית.
+    if (isRealQuestion(userMessage)) return { text: '', useLLM: true }
+    return buildCancelConfirm(childName, dayOfMonth)
   }
 
   return { text: botText('cancel_restart') }
@@ -2130,23 +2149,42 @@ export async function handlePaymentSetupFlow(
     const amount    = parseInt(session.collectedData.monthly_fee ?? String(getDefaultMonthlyFee()), 10)
     const firstName = session.parentName?.split(' ')[0] ?? ''
 
-    // astra #6: שלילה מפורשת ("אני לא רוצה הוראת קבע"/"בלי אשראי") אינה בחירה של
-    // אותה שיטה — לא בוחרים את מה שההורה דחה; מציגים שוב את האפשרויות לבחירה אחרת.
-    if (/לא רוצה|לא מתאים|לא צריך|בלי /.test(msg)) {
-      return {
-        text: botText('payset_method_invalid'),
-        nextFlow: 'payment_setup_method',
-      }
+    // astra R6: בוחרים שיטה רק אם מילת המפתח מופיעה *ולא* בהקשר שלילה. כך
+    // "לא הוראת קבע" / "אני לא מעוניין בהוראת קבע" אינם בוחרים הו"ק, ובקשה משולבת
+    // "לא הוראת קבע, כן אשראי" בוחרת אשראי. ספרה מפורשת (1-6) גוברת על ניתוח טקסט.
+    const digitPick: Record<string, PaymentMethod> = {
+      '1': 'credit', '2': 'standing_order', '3': 'cash', '4': 'checks', '5': 'bank_transfer', '6': 'invoice_link',
+    }
+    const methodKeywords: Array<[PaymentMethod, RegExp]> = [
+      ['credit',         /אשראי|כרטיס|credit/i],
+      ['standing_order', /הוראת קבע|קבע|standing/i],
+      ['cash',           /מזומן|cash/i],
+      ['checks',         /צ.?ק|שיק|check/i],
+      ['bank_transfer',  /העברה|בנק|transfer/i],
+      ['invoice_link',   /קישור|חשבונית|invoice|link/i],
+    ]
+    // שלילה צמודה לשיטה: מילת שלילה ממש לפני מילת המפתח, או "לא רוצה/מתאים/מעוניין"
+    const negatedBefore = (idx: number): boolean => {
+      const pre = msg.slice(Math.max(0, idx - 22), idx)
+      return /(לא|בלי|אינני|אין)[^א-ת]*$/.test(pre) ||
+             /לא\s*(רוצה|מתאים|צריכ|מעוני)|אינני\s*(רוצה|מעוני)/.test(pre)
     }
 
-    let chosenMethod: PaymentMethod | null = null
-
-    if (msg === '1' || /אשראי|כרטיס|credit/i.test(msg))        chosenMethod = 'credit'
-    if (msg === '2' || /הוראת קבע|קבע|standing/i.test(msg))    chosenMethod = 'standing_order'
-    if (msg === '3' || /מזומן|cash/i.test(msg))                 chosenMethod = 'cash'
-    if (msg === '4' || /צ.?ק|שיק|check/i.test(msg))            chosenMethod = 'checks'
-    if (msg === '5' || /העברה|בנק|transfer/i.test(msg))        chosenMethod = 'bank_transfer'
-    if (msg === '6' || /קישור|חשבונית|invoice|link/i.test(msg)) chosenMethod = 'invoice_link'
+    let chosenMethod: PaymentMethod | null = digitPick[msg] ?? null
+    let sawNegatedMethod = false
+    if (!chosenMethod) {
+      for (const [method, kw] of methodKeywords) {
+        const m = kw.exec(msg)
+        if (!m || m.index == null) continue
+        if (negatedBefore(m.index)) { sawNegatedMethod = true; continue }
+        chosenMethod = method
+        break
+      }
+    }
+    // שיטה נשללה בלי בחירה חלופית מפורשת → מציגים שוב את האפשרויות (astra R6)
+    if (!chosenMethod && sawNegatedMethod) {
+      return { text: botText('payset_method_invalid'), nextFlow: 'payment_setup_method' }
+    }
 
     if (!chosenMethod) {
       return {

@@ -210,6 +210,38 @@ async function clearSession(
   await supabase.from('bot_sessions').delete().eq('phone', phone)
 }
 
+// astra R3: סדר הודעות לכל שיחה. מחזיר true אם *ההודעה האחרונה שנקלטה* לטלפון אינה
+// זו שאנחנו מעבדים כרגע — כלומר הגיעה הודעה חדשה יותר בזמן העיבוד (בעיקר בנתיב הדחוי).
+// שער אחד זה מכסה את שלושת מקרי #12: דריסת מסלול חדש, מחיקת session מתשובה ישנה
+// שמסיימת, וסדר בין שתי תשובות דחויות (המאוחרת מנצחת). בלי id_message אי אפשר לסדר
+// אמין → נופלים לשמירה המותנית. (הערה: uChat לא תמיד שולח מזהה — לכן זה חיזוק, לא יחיד.)
+async function newerMessageArrived(
+  supabase: ReturnType<typeof createServiceClient>,
+  phone: string,
+  myMessageId: string | null,
+): Promise<boolean> {
+  if (!myMessageId) return false
+  const { data } = await supabase
+    .from('conversations').select('id_message')
+    .eq('phone', phone).eq('direction', 'נכנס')
+    .order('created_at', { ascending: false }).limit(1)
+  const latest = (data as { id_message: string | null }[] | null)?.[0]?.id_message
+  return !!latest && latest !== myMessageId
+}
+
+// astra R5: משחרר את תפיסת ה-id_message (מוחק את שורת ההודעה הנכנסת) כדי שניסיון
+// חוזר על אותה הודעה, אחרי כשל שמירה, לא ייחסם ככפילות. הפעולות העסקיות הקריטיות
+// (ביטול רישום, ביטול הו"ק) אידמפוטנטיות ממילא דרך בדיקת סטטוס — רישום שכבר 'בוטל'
+// לא יימצא כפעיל, והו"ק שכבר בוטלה אינה 'active' — ולכן עיבוד חוזר לא יבצע אותן פעמיים.
+async function releaseClaim(
+  supabase: ReturnType<typeof createServiceClient>,
+  myMessageId: string | null,
+): Promise<void> {
+  if (!myMessageId) return
+  await supabase.from('conversations').delete()
+    .eq('id_message', myMessageId).eq('direction', 'נכנס')
+}
+
 // טעינת היסטוריית שיחה אחרונה (ל-context של ה-LLM — שיבין הקשר ולא יתנהג כטופס)
 // ⏱️ רק 6 השעות האחרונות: הודעות מאתמול הן שיחה אחרת, וגררו את ה-LLM להקשר שגוי.
 async function loadRecentMessages(
@@ -584,6 +616,11 @@ export async function POST(req: NextRequest) {
     console.log(`[manychat] duplicate message_id ${messageId} (atomic insert) — skipped`)
     return NextResponse.json({ reply: '', skip: true, duplicate: true }, { status: 200 })
   }
+  if (incoming.error) {
+    // astra R5: כשל הכנסת יומן שאינו 23505 = אין תפיסה אטומית מוצלחת להישען עליה.
+    // ממשיכים לענות להורה (לא חוסמים מענה), אבל מתעדים שאין הגנת כפילות לבקשה הזו.
+    console.error(`[manychat] incoming log insert failed (no dedup claim) for ${phone}: ${incoming.error.message ?? incoming.error.code}`)
+  }
 
   // 3.5 קובץ/תמונה שדורשים ניתוח → ack מיידי + המשך ברקע (A7). קבצים שלא
   //     מנתחים (וורד/אקסל/אודיו) נשארים בנתיב הרגיל — האישור שלהם מיידי ממילא.
@@ -622,8 +659,9 @@ export async function POST(req: NextRequest) {
     const { saved } = await applyResult(supabase, session, parent, phone, result)
     if (!saved) {
       // astra #14: שמירת ה-session נכשלה — לא שולחים את השאלה הבאה כאילו התקדמנו.
-      // תשובת retry בטוחה; ההודעה הבאה תיטופל מהמצב הקודם ולא כאילו כבר נשמר.
+      // astra R5: משחררים את התפיסה כדי שניסיון חוזר על אותה הודעה לא ייחסם ככפילות.
       console.error(`[manychat] session save failed for ${phone} — returning safe retry`)
+      await releaseClaim(supabase, messageId)
       return NextResponse.json({ reply: 'רגע, הייתה תקלה קטנה אצלנו 🙏 אפשר לשלוח שוב?', intent: result.intent, saveError: true }, { status: 200 })
     }
     if (result.text) {
@@ -640,11 +678,23 @@ export async function POST(req: NextRequest) {
     waitUntil((async () => {
       try {
         const result = await resultP
-        // astra #12: שמירה מותנית-גרסה. אם השיחה התקדמה בינתיים (הורה שלח הודעה
-        // חדשה) — התוצאה הישנה מיושנת: לא שומרים ולא שולחים אותה.
-        const { stale } = await applyResult(supabase, session, parent, phone, result, { rev: sessionRev })
+        // astra R3: אם הגיעה הודעה חדשה יותר בזמן ההמתנה — התוצאה הזו מיושנת. לא נוגעים
+        // ב-session כלל (לא שומרים, לא מוחקים, לא מסיימים) ולא שולחים — כך מסלול/יצירה
+        // חדשים לא נדרסים והמאוחר מבין שתי תשובות דחויות מנצח.
+        if (await newerMessageArrived(supabase, phone, messageId)) {
+          console.log(`[manychat] newer message arrived for ${phone} — dropping stale deferred result`)
+          return
+        }
+        // astra #12: שמירה מותנית-גרסה (fallback כשאין id_message לסדר לפיו).
+        const { stale, saved } = await applyResult(supabase, session, parent, phone, result, { rev: sessionRev })
         if (stale) {
           console.log(`[manychat] deferred result for ${phone} is stale — not sending (conversation advanced)`)
+          return
+        }
+        if (!saved) {
+          // astra R4: כשל שמירה בנתיב הדחוי — לא שולחים מצב לא-מעודכן.
+          console.error(`[manychat] deferred save failed for ${phone} — not sending stale-state answer`)
+          await releaseClaim(supabase, messageId)
           return
         }
         if (result.text) {
@@ -665,9 +715,15 @@ export async function POST(req: NextRequest) {
 
   // ── אין user_ns — נתיב סינכרוני (מחכים לתשובה גם אם איטית) ─────────────────
   const result = await resultP
-  const { saved: syncSaved } = await applyResult(supabase, session, parent, phone, result)
+  // astra R3: הודעה חדשה יותר נקלטה בזמן העיבוד → התוצאה מיושנת, לא דורסים מצב חדש.
+  if (await newerMessageArrived(supabase, phone, messageId)) {
+    console.log(`[manychat] newer message arrived (sync) for ${phone} — dropping stale result`)
+    return NextResponse.json({ reply: '', skip: true, stale: true }, { status: 200 })
+  }
+  const { saved: syncSaved } = await applyResult(supabase, session, parent, phone, result, { rev: sessionRev })
   if (!syncSaved) {
     console.error(`[manychat] session save failed for ${phone} (sync) — returning safe retry`)
+    await releaseClaim(supabase, messageId)
     return NextResponse.json({ reply: 'רגע, הייתה תקלה קטנה אצלנו 🙏 אפשר לשלוח שוב?', intent: result.intent, saveError: true }, { status: 200 })
   }
   if (result.text) {

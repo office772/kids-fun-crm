@@ -6,6 +6,7 @@ import { primeSettingsCache } from '@/lib/bot/settings-db'
 import { primeSchoolsCache } from '@/lib/bot/schools-db'
 import { primeBotMessagesCache } from '@/lib/bot/bot-messages-db'
 import { BotSession } from '@/lib/types'
+import { runSimulated } from '@/lib/supabase/sim-context'
 
 // Sessions in-memory לסימולטור
 const simulatorSessions = new Map<string, BotSession>()
@@ -56,8 +57,10 @@ export async function POST(req: NextRequest) {
 
     // טעינת settings + מסגרות פעם אחת לבקשה — flows קורא סינכרונית מה-cache.
     await Promise.all([primeSettingsCache(), primeSchoolsCache(), primeBotMessagesCache()])
-    // processMessage הוא עכשיו async (LLM fallback)
-    const response = await processMessage(session, message)
+    // processMessage הוא עכשיו async (LLM fallback).
+    // astra R1: מריצים בהקשר "מדומה" → כל כתיבה ל-Supabase בתוך ה-flows היא no-op
+    // (ביטול, children.update, רשימת המתנה וכו') — הסימולטור לא נוגע בנתונים אמיתיים.
+    const response = await runSimulated(() => processMessage(session, message))
 
     // עדכון session
     if (response.nextFlow) {
@@ -79,6 +82,10 @@ export async function POST(req: NextRequest) {
     // הסימולטור עד עכשיו רק החזיר createTask ב-response — אבל לא שמר ב-DB.
     // עכשיו שומרים בדיוק כמו ב-webhook הראשי (manychat/route.ts).
     if (response.createTask) {
+      // astra R1: גם כתיבת ה-task נעשית בהקשר המדומה → no-op. הפנייה עדיין מוצגת
+      // ב-response של הסימולטור, אבל לא נכתבת לטבלת tasks האמיתית.
+      const taskData = response.createTask
+      await runSimulated(async () => {
       try {
         const { createServiceClient } = await import('@/lib/supabase/server')
         const supabase = createServiceClient()
@@ -95,14 +102,15 @@ export async function POST(req: NextRequest) {
         }
         await supabase.from('tasks').insert({
           parent_id:   parentId,
-          type:        response.createTask.type,
-          description: `[סימולטור] ${response.createTask.description}`,
-          priority:    response.createTask.priority,
+          type:        taskData.type,
+          description: `[סימולטור] ${taskData.description}`,
+          priority:    taskData.priority,
           status:      'פתוח',
         })
       } catch (err) {
         console.error('[simulator] task insert error:', err)
       }
+      })
     }
 
     return NextResponse.json({
