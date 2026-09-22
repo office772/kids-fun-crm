@@ -298,6 +298,9 @@ const REFUSE_RE = /להימנע|מעדיף (לא|להימנע)|עדיף (לא|ל
 // דחייה/היסוס — "לא עכשיו"/"רוצה לחשוב"/"נראה" אינם סירוב לחלופות אלא בקשת זמן → הבהרה
 //   (קדימות לפני הסירוב, כדי ש"לא עכשיו" לא יפורש כסירוב שמוביל לתפריט).
 const DEFER_RE = /לחשוב|אחשוב|בהמשך|אחר כך|אחכ|עוד מעט|לא עכשיו|לא היום|מחר|נראה|תלוי|(^|\s)רגע(\s|$)|שנייה|שניה|(^|\s)חכ[הי]|תכף/
+// §10-11: זיהוי מטרת-הביטול — רישום (צהרון/קייטנה) מול אמצעי-תשלום (הו"ק). שתיהן יחד → בירור.
+const CANCEL_REG_TARGET = /רישום|הרשמה|צהרון|קייטנה/
+const CANCEL_PAY_TARGET = /הוראת\s*ה?קבע|(^|\s)הו\s*ק(\s|$)|התשלום|אמצעי/
 // §10-11: מסווג תגובה להצעת הו"ק. **סדר קדימות: שאלה/בקשת-הסבר → דחייה → סירוב → אישור → עמום.**
 //   האישור הוא **התאמה מלאה לביטוי שלם** (לא מילים-בודדות מאוצר). כל קלט לא-מסווג נופל
 //   ל-unclear (הבהרה) — הצד הבטוח (לא לאשר תשלום בטעות).
@@ -2210,20 +2213,21 @@ export async function handlePaymentSetupFlow(
     //   *אמצעי התשלום* ("לבטל את הוראת הקבע") → בירור. לא כל אזכור ביטול = בקשת ביטול רישום.
     if (/לבטל|ביטול|להפסיק|לעזוב/.test(core)) {
       if (isRealQuestion(msg)) return { text: '', useLLM: true }                         // שאלה על ביטול → הסבר
-      const negated   = /(^|\s)(לא|בלי|אינני|אין)(\s|$)/.test(core)
-      const regTarget = /רישום|הרשמה|צהרון|קייטנה/.test(core)                            // ביטול *רישום* מפורש
-      const payTarget = /הוראת\s*ה?קבע|(^|\s)הו\s*ק(\s|$)|התשלום|אמצעי/.test(core)        // ביטול *אמצעי תשלום*
-      // astra חלק ב' (7): עוברים לביטול-רישום *רק* בבקשה חיובית עם מטרת-רישום מפורשת.
-      //   היעדר "הוראת קבע" אינו מוכיח שרוצים לבטל צהרון — עמימות → בירור מה לבטל.
-      if (!negated && regTarget) {                                                       // ביטול רישום מפורש → מסלול הביטול
+      const negated = /(^|\s)(לא|בלי|אינני|אין)(\s|$)/.test(core)
+      if (negated) return { text: botText('payset_offer_reask'), nextFlow: 'payment_setup_offer' }  // שלילה → החזרה להצעה
+      const regTarget = CANCEL_REG_TARGET.test(core)                                     // ביטול *רישום*
+      const payTarget = CANCEL_PAY_TARGET.test(core)                                     // ביטול *אמצעי תשלום*
+      // astra חלק ב' (8): מנתבים לפי המטרה. רישום *בלבד* → ביטול; אמצעי-תשלום *בלבד* →
+      //   חלופות; שתי המטרות יחד ("לבטל את הו"ק לצהרון") *או* עמימות ("רוצה לבטל") → בירור
+      //   בשלב ייעודי, כדי שהתשובה הבאה תיקרא כמענה לבירור (לא כפתיחת רישום/כוונה חדשה).
+      if (regTarget && !payTarget) {
         session.currentFlow = 'cancel_start'
         return handleCancellationFlow(session, msg)
       }
-      if (!negated && payTarget) {                                                       // ביטול הו"ק (אין עדיין) → חלופות, לא re-ask מעגלי
+      if (payTarget && !regTarget) {
         return { text: botText('payset_intro_menu', { 'פתיחה': '' }), nextFlow: 'payment_setup_method' }
       }
-      if (negated) return { text: botText('payset_offer_reask'), nextFlow: 'payment_setup_offer' }  // שלילה → החזרה להצעה
-      return { text: botText('payset_cancel_clarify'), nextFlow: 'payment_setup_offer' }  // עמום → בירור מה לבטל
+      return { text: botText('payset_cancel_clarify'), nextFlow: 'payment_setup_cancel_choice' }
     }
     const verdict = offerVerdict(msg)
     // אישור (ביטוי שלם) → ממשיכים ישירות בהוראת קבע (זיהוי שם → לינק, כמו במסלול הקיים).
@@ -2242,6 +2246,23 @@ export async function handlePaymentSetupFlow(
     }
     // עמום ("כן אבל רגע"/"אולי") → הבהרה קצרה, נשארים בהצעה (לא קופצים לחלופות בלי סירוב).
     return { text: botText('payset_offer_reask'), nextFlow: 'payment_setup_offer' }
+  }
+
+  // ─── §10-11 (astra ב 8): מענה לבירור "מה תרצו לבטל?" ─────────────────────
+  //   התשובה נקראת *כאן* (לא כפתיחת רישום/כוונה חדשה — השלב מחזיק את הכוונות הרלוונטיות).
+  if (step === 'payment_setup_cancel_choice') {
+    const core = confirmCore(userMessage.trim())
+    const wantsReg = CANCEL_REG_TARGET.test(core)
+    const wantsPay = CANCEL_PAY_TARGET.test(core) || /תשלום|אמצעי|אפשרות|(^|\s)אחר(ת)?(\s|$)|חלופ/.test(core)
+    if (wantsReg && !wantsPay) {                                                        // "את הרישום"/"צהרון" → ביטול רישום
+      session.currentFlow = 'cancel_start'
+      return handleCancellationFlow(session, userMessage.trim())
+    }
+    if (wantsPay && !wantsReg) {                                                        // "אפשרות אחרת"/"תשלום" → חלופות
+      return { text: botText('payset_intro_menu', { 'פתיחה': '' }), nextFlow: 'payment_setup_method' }
+    }
+    if (isRealQuestion(userMessage)) return { text: '', useLLM: true }
+    return { text: botText('payset_cancel_clarify'), nextFlow: 'payment_setup_cancel_choice' }  // עדיין לא ברור → בירור שוב
   }
 
   // ─── עיבוד בחירת שיטת תשלום ──────────────────────────────────────────────

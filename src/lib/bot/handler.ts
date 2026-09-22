@@ -335,6 +335,7 @@ const CHOICE_STEPS = new Set([
   'payment_status_menu',
   'payment_setup_start',
   'payment_setup_offer',
+  'payment_setup_cancel_choice',
   'payment_setup_method',
   'payment_setup_area',
   'payment_setup_school',
@@ -371,6 +372,8 @@ const STEP_OWN_INTENTS: Record<string, BotIntent[]> = {
   // 'ביטול' כאן: בשלב הצעת הו"ק "לא רוצה" הוא סירוב *להצעה*, לא בקשה לבטל רישום —
   //   כדי שלא ייחטף למסלול הביטול (הבלבול שהלקוח דיווח עליו). offerVerdict מטפל בו.
   payment_setup_offer:        ['בדיקת_תשלום', 'אפשרויות_תשלום', 'ביטול'],
+  // שלב הבירור "מה לבטל" — התשובה ("את הרישום"/"צהרון") אסור שתיחטף לרישום/כוונה חדשה.
+  payment_setup_cancel_choice: ['בדיקת_תשלום', 'אפשרויות_תשלום', 'ביטול', 'רישום_צהרון', 'רישום_קייטנה'],
   payment_setup_method:       ['בדיקת_תשלום', 'אפשרויות_תשלום'],
   payment_setup_area:         ['בדיקת_תשלום', 'אפשרויות_תשלום', 'רישום_צהרון'],
   payment_setup_school:       ['בדיקת_תשלום', 'אפשרויות_תשלום', 'רישום_צהרון'],

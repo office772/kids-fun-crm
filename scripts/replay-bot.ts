@@ -849,13 +849,22 @@ async function routingCases() {
       r.nextFlow === 'cancel_child' && s.collectedData.payment_method !== 'standing_order',
       `nextFlow=${r.nextFlow} method=${s.collectedData.payment_method} text=${JSON.stringify(r.text.slice(0, 40))}`)
   }
-  // ביטול *עמום* (בלי מטרה ברורה) → *בירור* מה לבטל, לא ניתוב אוטומטי לביטול-רישום. astra חלק ב 7.
-  for (const msg of ['רוצה לבטל', 'לבטל', 'אני רוצה לבטל']) {
+  // ביטול *עמום* / *שתי מטרות יחד* → בירור בשלב הייעודי (astra חלק ב 7/8).
+  //   "לבטל את הו"ק לצהרון" — שתי מטרות → בירור (לא ביטול-רישום כי "צהרון" גבר על "הו"ק").
+  for (const msg of ['רוצה לבטל', 'לבטל', 'אני רוצה לבטל', 'לבטל את הוראת הקבע לצהרון']) {
     const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
     const r = await processMessage(s, msg)
-    check(`§10-11 cancel-ambiguous — "${msg}" → בירור (לא מסלול ביטול)`,
-      r.nextFlow === 'payment_setup_offer' && /מה תרצו לבטל/.test(r.text) && s.collectedData.payment_method !== 'standing_order',
+    check(`§10-11 cancel-ambiguous — "${msg}" → בירור (שלב ייעודי, לא מסלול ביטול)`,
+      r.nextFlow === 'payment_setup_cancel_choice' && /מה תרצו לבטל/.test(r.text) && s.collectedData.payment_method !== 'standing_order',
       `nextFlow=${r.nextFlow} method=${s.collectedData.payment_method} text=${JSON.stringify(r.text.slice(0, 40))}`)
+  }
+  // מענה לבירור: "את הרישום" → ביטול; "אפשרות אחרת" → חלופות (astra חלק ב 8 — התשובה נקראת כמענה)
+  for (const [answer, expected] of [['את הרישום', 'cancel_child'], ['הרישום', 'cancel_child'], ['צהרון', 'cancel_child'], ['אפשרות אחרת', 'payment_setup_method'], ['הוראת קבע', 'payment_setup_method']]) {
+    const s = makeSession('payment_setup_cancel_choice', { child_name: 'נועם', monthly_fee: '450' })
+    const r = await processMessage(s, answer)
+    check(`§10-11 cancel-choice — "${answer}" → ${expected}`,
+      r.nextFlow === expected && s.collectedData.payment_method !== 'standing_order',
+      `nextFlow=${r.nextFlow} method=${s.collectedData.payment_method}`)
   }
   // "לא רוצה" נשאר סירוב-להצעה (לא ביטול-רישום) → תפריט חלופות
   {
