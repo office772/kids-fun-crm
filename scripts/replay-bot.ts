@@ -881,7 +881,10 @@ async function routingCases() {
   for (const [answer, expected] of [['את הרישום', 'cancel_child'], ['הרישום', 'cancel_child'], ['צהרון', 'cancel_child'], ['אפשרות אחרת', 'payment_setup_method'], ['הוראת קבע', 'payment_setup_method'], ['את התשלום', 'payment_setup_method'],
     // astra חלק ב 10: "לא," בפסוקית נפרדת; שניהם → ביטול רישום (מבטל גם הו"ק, עם אישור); חלופה מפורשת + שלילת הו"ק
     ['לא, את הרישום', 'cancel_child'], ['שניהם', 'cancel_child'], ['הכל', 'cancel_child'], ['גם את הרישום וגם את הוראת הקבע', 'cancel_child'],
-    ['משהו אחר, לא הוראת קבע', 'payment_setup_method'], ['אפשרות אחרת בבקשה', 'payment_setup_method']]) {
+    ['משהו אחר, לא הוראת קבע', 'payment_setup_method'], ['אפשרות אחרת בבקשה', 'payment_setup_method'],
+    // astra סבב 10 (P2): "גם את X" = X בלבד; "לא, שניהם" (פסיק) = שניהם; ביטוי משותף מפורש
+    ['גם את התשלום', 'payment_setup_method'], ['גם את הוראת הקבע', 'payment_setup_method'], ['לא, שניהם', 'cancel_child'],
+    ['את שתי האפשרויות', 'cancel_child'], ['גם את הצהרון', 'cancel_child']]) {
     const s = makeSession('payment_setup_cancel_choice', { child_name: 'נועם', monthly_fee: '450' })
     const r = await processMessage(s, answer)
     check(`§10-11 cancel-choice — "${answer}" → ${expected}`,
@@ -889,7 +892,9 @@ async function routingCases() {
       `nextFlow=${r.nextFlow} method=${s.collectedData.payment_method}`)
   }
   // הגנות בשלב הבירור (astra חלק ב 9): שאלה → LLM; שלילה → בירור שוב — *לא* ביטול רישום.
-  for (const answer of ['לא את הרישום', 'מה יקרה לרישום?', 'לא בטוח', 'מה זה אומר לגבי הרישום', 'לא את הצהרון', 'בלי לבטל את הרישום']) {
+  for (const answer of ['לא את הרישום', 'מה יקרה לרישום?', 'לא בטוח', 'מה זה אומר לגבי הרישום', 'לא את הצהרון', 'בלי לבטל את הרישום',
+    // astra סבב 10 (P2): שלילת "שניהם" / שלילת התשלום אינן בחירה → נשארים בבירור (לא ביטול, לא חלופות)
+    'לא שניהם', 'לא הכל', 'לא גם וגם', 'לא את התשלום']) {
     const s = makeSession('payment_setup_cancel_choice', { child_name: 'נועם', monthly_fee: '450' })
     const r = await processMessage(s, answer)
     check(`§10-11 cancel-choice-guard — "${answer}" → *לא* ביטול רישום`,

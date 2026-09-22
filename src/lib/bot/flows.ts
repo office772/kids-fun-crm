@@ -355,7 +355,9 @@ function negatedInClause(raw: string, start: number, end: number): boolean {
 }
 // astra חלק ב' (10): "שניהם"/"הכל" בבירור "מה לבטל" — ביטול הרישום מבטל ממילא גם את הו"ק
 //   (ראו handleCancellationFlow), ויש בו שלב אישור משלו → מנתבים לביטול רישום.
-const CANCEL_BOTH_RE = /שניהם|שתיהן|(^|\s)הכל(\s|$)|גם וגם|גם את/
+//   astra סבב 10 (P2): "גם את" לבדו אינו "שניהם" ("גם את התשלום" = תשלום בלבד) - רק ביטוי משותף
+//   מפורש, או שתי מטרות מזוהות וחיוביות. השלילה נבדקת גם על ביטוי ה"שניהם" עצמו ("לא שניהם" → בירור).
+const CANCEL_BOTH_RE = /שניהם|שתיהן|(^|\s)הכל(\s|$)|גם וגם|שתי האפשרויות|שני הדברים/
 const WANT_ALTERNATIVE_RE = /אפשרות אחרת|משהו אחר|חלופ|אפשרויות|תפריט|(^|\s)אחר(ת)?(\s|$)/
 const CANCEL_PAY_TARGET = /הוראת\s*ה?קבע|(^|\s)הו\s*ק(\s|$)|התשלום|אמצעי/
 // §10-11: מסווג תגובה להצעת הו"ק. **סדר קדימות: שאלה/בקשת-הסבר → דחייה → סירוב → אישור → עמום.**
@@ -2331,22 +2333,34 @@ export async function handlePaymentSetupFlow(
     if (isRealQuestion(msg) || EXPLAIN_RE.test(core)) return { text: '', useLLM: true }
     // astra חלק ב' (10): שלילה נספרת רק כשהיא באותה פסוקית של מטרת-הרישום ("לא את הרישום" → בירור);
     //   "לא, את הרישום" (פסיק) → ניתוב רגיל. בקשה מפורשת לחלופה ("משהו אחר, לא הוראת קבע") → חלופות.
+    // astra סבב 10 (P2): כל ביטוי-מטרה (רישום / תשלום / "שניהם") נקרא עם השלילה שבפסוקית שלו.
+    //   שלילה של מטרה או של "שניהם" ("לא שניהם", "לא את התשלום") אינה בחירה בשום דבר → בירור.
     const raw  = normalizeMessage(msg)
-    const rm   = CANCEL_REG_TARGET.exec(raw)
-    const regNegated = !!rm && negatedInClause(raw, rm.index, rm.index + rm[0].length)
-    const wantsReg = !!rm && !regNegated
-    const wantsAlt = WANT_ALTERNATIVE_RE.test(core)
-    const wantsPay = wantsAlt || CANCEL_PAY_TARGET.test(core) || /תשלום|אמצעי/.test(core)
-    if (CANCEL_BOTH_RE.test(core) && !regNegated) {                                     // "שניהם"/"הכל" → ביטול רישום (כולל הו"ק, עם אישור)
+    const target = (re: RegExp): 'yes' | 'negated' | 'none' => {
+      const m = re.exec(raw)
+      if (!m) return 'none'
+      return negatedInClause(raw, m.index, m.index + m[0].length) ? 'negated' : 'yes'
+    }
+    const reg  = target(CANCEL_REG_TARGET)
+    const pay  = target(/הוראת\s*ה?קבע|(^|\s)הו["'׳״]?\s*ק(\s|$)|תשלום|אמצעי/)
+    const both = target(CANCEL_BOTH_RE)
+    const wantsAlt = WANT_ALTERNATIVE_RE.test(core) && both !== 'yes'                   // "שתי האפשרויות" אינה בקשת חלופה
+    // בקשת חלופה מפורשת (ביטוי שלם: "אפשרות אחרת"/"משהו אחר") בלי בחירה חיובית ברישום → חלופות,
+    //   גם כשיש שלילה של הו"ק ("משהו אחר, לא הוראת קבע") - השלילה מחזקת את הבקשה, לא סותרת אותה.
+    if (wantsAlt && reg !== 'yes') {
+      return { text: botText('payset_intro_menu', { 'פתיחה': '' }), nextFlow: 'payment_setup_method' }
+    }
+    if (both === 'negated' || reg === 'negated' || pay === 'negated') {                // "לא שניהם"/"לא את הרישום"/"לא את התשלום" → בירור שוב
+      return { text: botText('payset_cancel_clarify'), nextFlow: 'payment_setup_cancel_choice' }
+    }
+    // "שניהם"/"הכל" מפורש, או שתי מטרות חיוביות ("גם את הרישום וגם את הוראת הקבע") → ביטול רישום
+    //   (מבטל ממילא גם את הו"ק ב-PayPlus; יש שלב אישור נפרד לפני ביצוע).
+    if (both === 'yes' || (reg === 'yes' && pay === 'yes')) {
       session.currentFlow = 'cancel_start'
       return handleCancellationFlow(session, msg)
     }
-    if (wantsAlt && !wantsReg) {                                                        // "אפשרות אחרת"/"משהו אחר, לא הו"ק" → חלופות
-      return { text: botText('payset_intro_menu', { 'פתיחה': '' }), nextFlow: 'payment_setup_method' }
-    }
-    if (regNegated) {                                                                   // "לא את הרישום" → בירור שוב
-      return { text: botText('payset_cancel_clarify'), nextFlow: 'payment_setup_cancel_choice' }
-    }
+    const wantsReg = reg === 'yes'
+    const wantsPay = pay === 'yes' || wantsAlt
     if (wantsReg && !wantsPay) {                                                        // "את הרישום"/"צהרון" → ביטול רישום
       session.currentFlow = 'cancel_start'
       return handleCancellationFlow(session, msg)
