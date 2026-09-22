@@ -813,6 +813,14 @@ async function routingCases() {
       s.collectedData.payment_method !== 'standing_order' && r.nextFlow !== 'payment_setup_child_name',
       `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 50))}`)
   }
+  // דחייה/היסוס ("רוצה לחשוב"/"כן בהמשך") → *לא* אישור, נשארים בהבהרה (astra חלק ב 3)
+  for (const msg of ['רוצה לחשוב', 'אני רוצה לחשוב', 'כן בהמשך', 'אני צריך לחשוב על זה']) {
+    const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
+    const r = await processMessage(s, msg)
+    check(`§10-11 gap2c — "${msg}" → *לא* הו"ק (הבהרה, לא אישור)`,
+      s.collectedData.payment_method !== 'standing_order' && r.nextFlow === 'payment_setup_offer',
+      `method=${s.collectedData.payment_method} nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 50))}`)
+  }
   // סירוב / שיטה אחרת → תפריט חלופות (רק *אחרי* סירוב)
   for (const msg of ['אני מעדיף אפשרות אחרת', 'לא', 'אשראי']) {
     const s = makeSession('payment_setup_offer', { child_name: 'נועם', monthly_fee: '450' })
