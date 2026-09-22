@@ -338,14 +338,25 @@ async function createTask(
     parentName?: string
     parentPhone?: string
   }
-) {
-  await supabase.from('tasks').insert({
+): Promise<{ saved: boolean }> {
+  // astra סבב 6 gap2: עד כה תוצאת ה-insert *נבלעה* — בכשל DB האירוע סומן "הושלם"
+  //   בלי פנייה שמורה. עכשיו בודקים: כשל חולף → ניסיון חוזר יחיד; כשל מתמשך → CRITICAL
+  //   בלוג + saved=false (הקורא לא יסמן "הושלם" בשקט). ⚠️ הבדיקה *לא* מריצה מחדש את
+  //   הפעולה העסקית (ביטול/שליחה) — היא כבר בוצעה; זו רק שמירת התיעוד. ה-notify/email
+  //   למטה הם ערוץ גיבוי בלתי-תלוי לפנייה, כך שגם בכשל שמירה הצוות מקבל התראה.
+  const taskRow = {
     parent_id: opts.parentId ?? null,
     type: toTaskType(opts.type),
     description: opts.description,
     priority: opts.priority,
     status: 'פתוח',
-  })
+  }
+  let taskErr = (await supabase.from('tasks').insert(taskRow)).error
+  if (taskErr) taskErr = (await supabase.from('tasks').insert(taskRow)).error   // ניסיון חוזר לכשל חולף
+  if (taskErr) {
+    console.error(`[createTask] CRITICAL: task insert failed for ${opts.parentPhone ?? opts.parentId ?? '—'} — ${toTaskType(opts.type)}: ${opts.description} | ${(taskErr as { message?: string; code?: string }).message ?? (taskErr as { code?: string }).code}`)
+  }
+  const taskSaved = !taskErr
 
   // התראה לאדמין + צוות המסגרת (אם הוגדר framework). פעיל ברגע ש-uChat מחובר.
   const { notifyStaff, sendCorliEscalationTemplate } = await import('@/lib/notify')
@@ -394,6 +405,8 @@ async function createTask(
       console.error('[manychat] admin alert email failed:', err)
     }
   }
+
+  return { saved: taskSaved }
 }
 
 // ─── A7: קובץ/תמונה — אישור מיידי, ניתוח ברקע, הודעה שנייה דרך uChat API ────
@@ -491,12 +504,19 @@ async function applyResult(
       // astra סבב 5 (התאוששות מכשל חלקי): בשלב isComplete הפעולה העסקית הבלתי-הפיכה
       //   כבר בוצעה *בתוך* processMessage (ביטול רישום/הו"ק, רשימת המתנה, לינק תשלום).
       //   כשל *ניקוי* הסשן אחריה אינו מצדיק replay — replay יריץ את אותה פעולה שוב
-      //   ויכפיל תשובות/פניות (astra round5: ביטול+מדיה). לכן מחייבים COMMIT: המשימה
-      //   נוצרת (התיעוד המדויק, למשל "לבטל ידנית הו"ק"), התשובה נשלחת, ההודעה מסומנת
-      //   processed; הסשן שנותר rev-guarded ויפוג לבד. שונה מ-D (סבב 4): הכשל *לא נבלע*
-      //   (נרשם + המשימה נוצרת); מה שהשתנה — אין replay שמשכפל פעולה שכבר הצליחה.
-      console.error(`[applyResult] clearSession failed for ${phone} after a completed action — committing task+reply, session left to expire (rev-guarded); NOT replaying (avoids duplicate side-effects)`)
-      // saved נשאר true → הקורא ישלח את התשובה ויסמן processed (בלי release/replay).
+      //   ויכפיל תשובות/פניות (astra round5). לכן מחייבים COMMIT (המשימה נוצרת, התשובה
+      //   נשלחת, ההודעה processed). שונה מ-D (סבב 4): הכשל *לא נבלע*.
+      // astra סבב 6 gap1: "לתת לסשן לפוג" לא הספיק — הודעה חדשה תוך 30ד' נטענה לצומת
+      //   שהסתיים והחזירה מידע סותר (למשל "שמחים שנשארים" אחרי שהרישום כבר בוטל). לכן
+      //   סגירה *לוגית* עמידה: UPDATE מותנה-rev שמרוקן את ה-flow (session.currentFlow כבר
+      //   undefined כאן). הפעולה העסקית *לא* רצה שוב — רק הסגירה מושלמת בדרך אחרת.
+      const up = await persistSession(supabase, session, rev)
+      stale = up.stale
+      if (!up.saved && !up.stale) {
+        // קצה נדיר: גם המחיקה וגם ה-UPDATE נכשלו (כשל-DB כפול). הסשן rev-guarded ויפוג;
+        //   נרשם CRITICAL כדי שלא ייבלע. אין replay של הפעולה העסקית.
+        console.error(`[applyResult] CRITICAL: could not close session for ${phone} (delete+update failed) — a new message may re-enter the finished flow until expiry`)
+      }
     }
   } else {
     const r = await persistSession(supabase, session, rev)

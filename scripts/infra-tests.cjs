@@ -72,7 +72,7 @@ function dbFor(execute) {
 // ── Supabase מצבי בזיכרון: bot_sessions (עם rev), whatsapp_message_log (claim),
 //    conversations (היסטוריה), tasks. תואם למנגנון האמיתי (astra R3/R5). ────────────
 function makeSessionDB(extra) {
-  const state = { sessions: new Map(), wml: new Map(), conv: [], tasks: [], failSave: false, failClear: false }
+  const state = { sessions: new Map(), wml: new Map(), conv: [], tasks: [], failSave: false, failClear: false, failTaskInsert: 0 }
   state.client = () => dbFor(q => {
     const { table, op, payload, filters } = q
     const eqv = (k) => (filters.find(f => f[0] === 'eq' && f[1] === k) || [])[2]
@@ -109,7 +109,7 @@ function makeSessionDB(extra) {
       }
     }
     if (table === 'conversations') { if (op === 'insert') { if (payload.direction === 'נכנס') state.conv.push(payload); return { data: null, error: null } } if (op === 'select') return { data: [], error: null } }
-    if (table === 'tasks' && op === 'insert') { state.tasks.push(payload); return { data: null, error: null } }
+    if (table === 'tasks' && op === 'insert') { if (state.failTaskInsert > 0) { state.failTaskInsert--; return { data: null, error: { message: 'task insert fail' } } } state.tasks.push(payload); return { data: null, error: null } }
     return { data: null, error: null }
   })
   return state
@@ -510,6 +510,76 @@ const request = (body) => ({ headers: { get: () => null }, json: async () => bod
       db.tasks.some(t => /לבטל ידנית/.test(t.description || '')) && !db.tasks.some(t => /לא אותר אוטומטית/.test(t.description || '')),
       `tasks=${JSON.stringify(db.tasks.map(t => t.description))}`)
     check('ביטול-משולב — האירוע processed (בלי replay)', (db.wml.get('cxl-combo') || {}).processed === true, `wml=${JSON.stringify(db.wml.get('cxl-combo'))}`)
+    handler.processMessage = realProcess
+  }
+
+  // ═══ סבב 6 gap1 — כשל מחיקה → סגירה לוגית עמידה (UPDATE ל-flow ריק), לא צומת פתוח ══
+  //   astra: הודעה חדשה לא צריכה להיטען לצומת שהסתיים. אחרי ביטול + failClear, שורת
+  //   הסשן חייבת להיסגר (current_flow=null) כדי שהודעה הבאה לא תחזור ל-cancel_confirm.
+  {
+    const PHONE = '+972500000000'
+    let regStatus = 'מאושר'
+    const db = makeSessionDB((q) => {
+      const { table, op, filters } = q
+      if (table === 'parents' && op === 'select') return (q.fields || '').includes('payplus') ? { data: { payplus_recurring_uid: null, payplus_recurring_status: null }, error: null } : { data: [{ id: 'p1', name: 'הורה' }], error: null }
+      if (table === 'children' && op === 'select') return { data: [{ id: 'c1', name: 'נועם בדיקה', parent_id: 'p1' }], error: null }
+      if (table === 'registrations' && op === 'select') return { data: ['מאושר', 'ממתין לאישור'].includes(regStatus) ? { id: 'r1', status: regStatus, notes: '' } : null, error: null }
+      if (table === 'registrations' && op === 'update') { const idOk = filters.some(f => f[0] === 'eq' && f[1] === 'id' && f[2] === 'r1'); const inS = filters.find(f => f[0] === 'in' && f[1] === 'status'); const sOk = !inS || inS[2].includes(regStatus); if (idOk && sOk) { regStatus = 'בוטל'; return { data: [{ id: 'r1' }], error: null } } return { data: [], error: null } }
+      if (table === 'registration_timeline') return { data: null, error: null }
+      return undefined
+    })
+    db.sessions.set(PHONE, { phone: PHONE, current_flow: 'cancel_confirm_after15', collected_data: { child_name: 'נועם בדיקה' }, rev: 'r0' })
+    db.failClear = true   // מחיקה נכשלת — ה-fallback חייב לסגור ב-UPDATE מותנה-rev
+    dbmod.createServiceClient = db.client
+    handler.processMessage = realProcess
+    await route.POST(request({ phone: PHONE, message: 'כן', message_id: 'g1-close' })).then(r => r.json())
+    const s = db.sessions.get(PHONE)
+    check('gap1 (סגירה עמידה) — הרישום בוטל', regStatus === 'בוטל', `regStatus=${regStatus}`)
+    check('gap1 (סגירה עמידה) — הסשן נסגר לוגית (flow ריק, לא cancel_confirm)', !!s && (s.current_flow === null || s.current_flow === undefined), `session=${JSON.stringify(s)}`)
+    handler.processMessage = realProcess
+  }
+
+  // ═══ סבב 6 gap2 — כשל שמירת פנייה: נבדק, לא מריץ מחדש את הפעולה, לא נבלע ═══════════
+  //   astra: בדיקת השגיאה נחוצה, אבל אסור שתריץ מחדש את הביטול/השליחה. PayPlus כשל +
+  //   כשל insert מתמשך → הביטול רץ *פעם אחת*, האירוע processed. (מגבלה מתועדת: אין פנייה
+  //   שמורה; ה-CRITICAL בלוג + notify/email הם ערוץ הגיבוי.)
+  {
+    const PHONE = '+972500000000'
+    let regStatus = 'מאושר', ppCalls = 0
+    const db = makeSessionDB((q) => {
+      const { table, op, filters } = q
+      if (table === 'parents' && op === 'select') return (q.fields || '').includes('payplus') ? { data: { payplus_recurring_uid: 'uid1', payplus_recurring_status: 'active' }, error: null } : { data: [{ id: 'p1', name: 'הורה' }], error: null }
+      if (table === 'parents' && op === 'update') return { data: null, error: null }
+      if (table === 'children' && op === 'select') return { data: [{ id: 'c1', name: 'נועם בדיקה', parent_id: 'p1' }], error: null }
+      if (table === 'registrations' && op === 'select') return { data: ['מאושר', 'ממתין לאישור'].includes(regStatus) ? { id: 'r1', status: regStatus, notes: '' } : null, error: null }
+      if (table === 'registrations' && op === 'update') { const idOk = filters.some(f => f[0] === 'eq' && f[1] === 'id' && f[2] === 'r1'); const inS = filters.find(f => f[0] === 'in' && f[1] === 'status'); const sOk = !inS || inS[2].includes(regStatus); if (idOk && sOk) { regStatus = 'בוטל'; return { data: [{ id: 'r1' }], error: null } } return { data: [], error: null } }
+      if (table === 'registration_timeline') return { data: null, error: null }
+      return undefined
+    })
+    db.sessions.set(PHONE, { phone: PHONE, current_flow: 'cancel_confirm_after15', collected_data: { child_name: 'נועם בדיקה' }, rev: 'r0' })
+    db.failTaskInsert = 5   // הכנסת הפנייה נכשלת מתמשך (כולל הניסיון החוזר)
+    dbmod.createServiceClient = db.client
+    const payplus = require(path.join(ROOT, 'src/lib/payplus-api.ts'))
+    payplus.isPayPlusApiConfigured = () => true
+    payplus.cancelRecurringPayment = async () => { ppCalls++; return { success: false, error: 'timeout' } }
+    handler.processMessage = realProcess
+    const json = await (await route.POST(request({ phone: PHONE, message: 'כן', message_id: 'g2-verify' }))).json()
+    check('gap2 (אימות פנייה) — הביטול רץ *פעם אחת* (לא הורץ מחדש)', regStatus === 'בוטל' && ppCalls === 1, `regStatus=${regStatus} ppCalls=${ppCalls}`)
+    check('gap2 (אימות פנייה) — כשל השמירה לא יצר פנייה (נבדק, לא נבלע כהצלחה)', db.tasks.length === 0, `tasks=${db.tasks.length}`)
+    check('gap2 (אימות פנייה) — התשובה נשלחה, האירוע processed', !!json.reply && (db.wml.get('g2-verify') || {}).processed === true, `json=${JSON.stringify(json)} wml=${JSON.stringify(db.wml.get('g2-verify'))}`)
+    handler.processMessage = realProcess
+  }
+
+  // ═══ סבב 6 gap2b — כשל *חולף* בשמירת פנייה → הניסיון החוזר מצליח (הפנייה נשמרת) ═════
+  {
+    const PHONE = '+972500000000'
+    const db = makeSessionDB()
+    db.sessions.set(PHONE, { phone: PHONE, current_flow: 'x', collected_data: {}, rev: 'r0' })
+    db.failTaskInsert = 1   // נכשל פעם אחת, הניסיון החוזר מצליח
+    dbmod.createServiceClient = db.client
+    handler.processMessage = async () => ({ text: 'טופל', intent: 'שאלה_כללית', isComplete: true, createTask: { type: 'שאלה כללית', description: 'בדיקה חולפת', priority: 'רגיל' } })
+    await route.POST(request({ phone: PHONE, message: 'x', message_id: 'g2b' })).then(r => r.json())
+    check('gap2b — כשל חולף בשמירת פנייה → הניסיון החוזר שמר את הפנייה', db.tasks.length === 1, `tasks=${db.tasks.length}`)
     handler.processMessage = realProcess
   }
 
