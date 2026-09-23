@@ -85,9 +85,12 @@ export function looksLikeChildName(text: string): boolean {
 }
 
 // תגובה אחידה כשהקלט לא נראה כמו שם — נשארים באותו שלב
+// astra (סולם בוט חכם): הבהרה שלא סומנה notUnderstood לא נספרה ע"י בumpMiss/clearMiss —
+//   ההורה יכול היה להיתקע כאן לנצח בלי לעבור ל-LLM/קורלי (GAP 1).
 function buildNotAName(nextFlow: string): BotResponse {
   return {
     text: botText('not_a_name'),
+    notUnderstood: true,
     nextFlow,
   }
 }
@@ -627,6 +630,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
 
       return {
         text: botText('register_area_not_recognized', { 'אזורים': servedAreasText() }),
+        notUnderstood: true,
         nextFlow: 'register_area',
       }
     }
@@ -660,6 +664,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
     if (parts.length < 2) {
       return {
         text: botText('register_name_need_full'),
+        notUnderstood: true,
         nextFlow: 'register_child_name',
       }
     }
@@ -827,9 +832,13 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
         isComplete: true,
       }
     }
-    // עמימות ("כן אבל רגע"/שאלה) → שאלת אישור מפורשת, המסלול נשמר (astra)
+    // שאלה אמיתית ("כמה זמן מחכים בדרך כלל?") → LLM עונה, המסלול נשמר (לא הבהרה)
+    if (isRealQuestion(userMessage)) return { text: '', useLLM: true }
+    // עמימות ("כן אבל רגע") → שאלת אישור מפורשת, המסלול נשמר (astra); GAP 1 — notUnderstood
+    // כדי שהסולם (bumpMiss/clearMiss) יספור את זה כ"תקיעות" ויוביל ל-LLM ואז לקורלי.
     return {
       text: `להוסיף את *${childName}* לרשימת ההמתנה? (כן / לא)`,
+      notUnderstood: true,
       nextFlow: 'register_waiting_confirm',
     }
   }
@@ -1492,6 +1501,7 @@ export function handleEarlyPickupFlow(session: BotSession, userMessage: string):
       if (misses >= 2) return { text: '', useLLM: true }
       return {
         text: botText('pickup_time_retry'),
+        notUnderstood: true,
         nextFlow: 'pickup_time',
       }
     }
@@ -2298,7 +2308,7 @@ export async function handlePaymentSetupFlow(
       // שלילה *באותה פסוקית* של פועל הביטול ("לא רוצה לבטל") → החזרה להצעה.
       //   "לא, לבטל את הרישום" — ה-"לא" בפסוקית נפרדת (תשובה להצעה) → ממשיכים לניתוב.
       if (negatedInClause(raw, cm.index, cm.index + cm[0].length)) {
-        return { text: botText('payset_offer_reask'), nextFlow: 'payment_setup_offer' }
+        return { text: botText('payset_offer_reask'), notUnderstood: true, nextFlow: 'payment_setup_offer' }
       }
       // astra חלק ב' (10): המטרה נקראת מהפסוקית של פועל הביטול — "לא רוצה הוראת קבע, תבטלו לי את
       //   הרישום" = ביטול רישום (ה-"הוראת קבע" בפסוקית הסירוב, לא במושא הביטול).
@@ -2334,7 +2344,7 @@ export async function handlePaymentSetupFlow(
       return { text: botText('payset_intro_menu', { 'פתיחה': '' }), nextFlow: 'payment_setup_method' }
     }
     // עמום ("כן אבל רגע"/"אולי") → הבהרה קצרה, נשארים בהצעה (לא קופצים לחלופות בלי סירוב).
-    return { text: botText('payset_offer_reask'), nextFlow: 'payment_setup_offer' }
+    return { text: botText('payset_offer_reask'), notUnderstood: true, nextFlow: 'payment_setup_offer' }
   }
 
   // ─── §10-11 (astra ב 8): מענה לבירור "מה תרצו לבטל?" ─────────────────────
@@ -2365,7 +2375,7 @@ export async function handlePaymentSetupFlow(
       return { text: botText('payset_intro_menu', { 'פתיחה': '' }), nextFlow: 'payment_setup_method' }
     }
     if (both === 'negated' || reg === 'negated' || pay === 'negated' || HESITATION_RE.test(core)) {  // שלילה/היסוס → בירור שוב
-      return { text: botText('payset_cancel_clarify'), nextFlow: 'payment_setup_cancel_choice' }
+      return { text: botText('payset_cancel_clarify'), notUnderstood: true, nextFlow: 'payment_setup_cancel_choice' }
     }
     // "שניהם"/"הכל" מפורש, או משפט שלם מהרשימה הסגורה (התאמה מלאה) → ביטול רישום
     //   (מבטל ממילא גם את הו"ק ב-PayPlus; יש שלב אישור נפרד לפני ביצוע).
@@ -2383,7 +2393,7 @@ export async function handlePaymentSetupFlow(
     if (wantsPay && !wantsReg) {                                                        // "אפשרות אחרת"/"תשלום" → חלופות
       return { text: botText('payset_intro_menu', { 'פתיחה': '' }), nextFlow: 'payment_setup_method' }
     }
-    return { text: botText('payset_cancel_clarify'), nextFlow: 'payment_setup_cancel_choice' }  // עדיין לא ברור → בירור שוב
+    return { text: botText('payset_cancel_clarify'), notUnderstood: true, nextFlow: 'payment_setup_cancel_choice' }  // עדיין לא ברור → בירור שוב
   }
 
   // ─── עיבוד בחירת שיטת תשלום ──────────────────────────────────────────────
@@ -2581,6 +2591,7 @@ export async function handlePaymentSetupFlow(
     if (!chosen) {
       return {
         text: botText('payset_school_reselect', { 'מסגרות': list.map((s, i) => `*${i + 1}* - ${s}`).join('\n') }),
+        notUnderstood: true,
         nextFlow: 'payment_setup_school',
       }
     }

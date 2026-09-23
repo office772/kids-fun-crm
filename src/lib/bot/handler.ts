@@ -131,6 +131,14 @@ export async function processMessage(
       if (classifyIntent(userMessage) === 'בקשת_נציג') {
         return { text: botText('handoff_still_open'), intent: 'בקשת_נציג', nextFlow: HANDOFF_FLOW, isComplete: false }
       }
+      // astra (משני): תודה/פרידה אחרי ההעברה מקבלות תשובה חמה קבועה - בלי "לבזבז" עליהן
+      //   את ניסיון ה-LLM היחיד (__handoff_llm). השיחה נשארת ב-handoff (שקט אחרי זה).
+      if (isThanksClosing(userMessage)) {
+        return { text: botText('thanks_reply'), intent: 'שאלה_כללית', nextFlow: HANDOFF_FLOW, isComplete: false }
+      }
+      if (isFarewell(userMessage)) {
+        return { text: botText('farewell_reply'), intent: 'שאלה_כללית', nextFlow: HANDOFF_FLOW, isComplete: false }
+      }
       if (session.collectedData.__handoff_llm !== '1' && !isGibberish(userMessage)) {
         session.collectedData.__handoff_llm = '1'
         const r = await llmFallback(session, userMessage, 'לא_ידוע', { keepFlow: HANDOFF_FLOW, suppressTask: true })
@@ -299,8 +307,21 @@ async function processMessageCore(
   //   התפריט מצורף אחרי תשובת ה-LLM ("LLM להבהרה לפי ההקשר ואז תפריט").
   if (!isExplicitNumericChoice(userMessage)) {
     if (isThanksClosing(userMessage)) return { text: botText('thanks_reply'), intent: 'שאלה_כללית', isComplete: true }
-    if (isFarewell(userMessage) || FAREWELL_START_RE.test(normalizeMessage(userMessage).trim())) {
+    if (isFarewell(userMessage)) {
       return { text: botText('farewell_reply'), intent: 'שאלה_כללית', isComplete: true }
+    }
+    // astra (GAP 2): פרידה *בתחילת* הודעה בלעה בקשה שבאה אחריה - "שבת שלום, אפשר לדעת
+    //   מה שעות הפעילות?" קיבל farewell_reply במקום תשובה על השעות. פרידת-פתיח נחשבת
+    //   פרידה *רק* אם השארית (אחרי מילת הפרידה + הפיסוק שאחריה) ריקה, או שהיא עצמה
+    //   פרידה/תודה/דחייה - אחרת (בקשה/שאלה אמיתית בהמשך) לא נחשב פרידה בכלל, וההודעה
+    //   *השלמה* ממשיכה לנתיב הרגיל (FAQ/כוונה/LLM).
+    const normalized = normalizeMessage(userMessage).trim()
+    const farewellStart = FAREWELL_START_RE.exec(normalized)
+    if (farewellStart) {
+      const remainder = normalized.slice(farewellStart[0].length).replace(/^[\s,.!?;:־-]+/, '').trim()
+      if (!remainder || isFarewell(remainder) || isThanksClosing(remainder) || isDeferral(remainder)) {
+        return { text: botText('farewell_reply'), intent: 'שאלה_כללית', isComplete: true }
+      }
     }
     if (isDeferral(userMessage))      return { text: botText('defer_reply'), intent: 'שאלה_כללית', isComplete: true }
     if (isShortGreeting(userMessage)) return { text: buildWelcomeMessage(session.parentName), intent: 'שאלה_כללית', isComplete: true }
@@ -401,9 +422,21 @@ const FAREWELL_PHRASES = ['יום טוב', 'יום נעים', 'המשך יום �
 //   לא מתחילים מסלול. (א) פרידה בראש ההודעה → farewell; (ב) כוונה דחויה (פועל-חזרה + זמן) → defer_reply.
 const FAREWELL_START_RE = /^(ביי|להתראות|לילה טוב|שבת שלום|נתראה|יאללה ביי|טוב ביי)([^א-ת]|$)/
 const DEFER_INTENT_RE = /(אחזור|נחזור|אדבר|נדבר|אמשיך|נמשיך|אשלים|נשלים|אעשה|נעשה|ארשום|נרשום)\s+(את זה\s+)?(מחר|אחר כך|אחכ|בהמשך|יותר מאוחר|מאוחר יותר|בערב|בשבוע הבא|בהזדמנות)|(מחר|אחר כך|בהמשך|יותר מאוחר|מאוחר יותר|בערב)\s+(אני\s+)?(אחזור|נחזור|אדבר|נדבר|אמשיך|נמשיך|אשלים|נשלים|ארשום|נרשום)/
+// astra (GAP 3): פועל הדחייה עצמו בשלילה ("לא אחזור מחר") - לא דחייה, ההורה אומר שהוא *לא* חוזר.
+const DEFER_NEGATED_RE = /(^|[^א-ת])לא\s+(אחזור|נחזור|אדבר|נדבר|אמשיך|נמשיך|אשלים|נשלים|אעשה|נעשה|ארשום|נרשום)/
+// astra (GAP 3): הודעה מעורבת - "אחזור מחר *אבל* *עכשיו* רוצה להשלים" - ההורה גם דוחה וגם מבקש
+//   משהו עכשיו. אלה לא באמת דחייה: יש בקשה/ניגוד בהווה שדורש טיפול, לא רק "אני חוזר אחר כך".
+//   ⚠️ "רק" בגבול מילה ידני (לא \b) - כדי לא לתפוס "פרק"/"דרק" וכו'.
+//   "עכשיו"/"כרגע" לבד אינם ניגוד ("נדבר מחר, אין לי זמן עכשיו" = דחייה) - רק כשהם צמודים לבקשה בהווה
+//   ("עכשיו רוצה", "צריך כרגע").
+const DEFER_CONTRAST_RE = /אבל|בינתיים|(^|[^א-ת])רק([^א-ת]|$)|קודם|לפני זה|רוצה להשלים|רוצה להמשיך|צריך עזרה|צריכה עזרה|(עכשיו|כרגע)\s+(אני\s+)?(רוצה|צריך|צריכה|אפשר|בוא|בואו)|(רוצה|צריך|צריכה|אפשר)\s+(עכשיו|כרגע)/
 function isDeferral(msg: string): boolean {
   const t = normalizeMessage(msg).trim()
-  return !/[?؟]/.test(t) && DEFER_INTENT_RE.test(t)
+  if (/[?؟]/.test(t)) return false
+  if (!DEFER_INTENT_RE.test(t)) return false
+  if (DEFER_NEGATED_RE.test(t)) return false
+  if (DEFER_CONTRAST_RE.test(t)) return false
+  return true
 }
 function isFarewell(msg: string): boolean {
   const raw = msg.trim()

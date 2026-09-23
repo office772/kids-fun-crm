@@ -12,7 +12,7 @@
  */
 
 import { classifyIntent } from '@/lib/bot/intent-classifier'
-import { processMessage } from '@/lib/bot/handler'
+import { processMessage, HANDOFF_FLOW } from '@/lib/bot/handler'
 import { parsePickupTime, splitNameAndClass, scheduleFaqAnchors, isHolidayQuestion, isBusinessHours } from '@/lib/bot/flows'
 import { parseLLMResponse, sanitizeForWhatsApp } from '@/lib/bot/llm-fallback'
 import { detectMedia } from '@/lib/bot/media-handler'
@@ -1113,6 +1113,138 @@ async function nameAndDeferCases() {
   }
 }
 
+// ─── astra: סולם בשלבים החדשים + פרידת-פתיח/דחייה מעורבת (GAP 1-3) + משני handoff ──
+// כל מקרה כאן שחזור מהתחקיר של astra (P2). ⚠️ בלי LLM חי: תשובת LLM מזוהה ע"י
+// 'נציגה שלנו תחזור' (buildLLMErrorFallback); שתי "לא-תשובות" רצופות עלולות להסליم
+// שומר-התסכול תור מוקדם - לכן הבדיקות כאן בודקות "לא אותה הבהרה שוב"/"קורלי עד תור 3"
+// ולא את התור המדויק שבו ה-LLM עונה (מסומן היכן שרלוונטי).
+async function astraSmartHumanCases() {
+  console.log('\n── astra: סולם בשלבים חדשים + פרידת-פתיח + דחייה מעורבת + handoff ──')
+  const llmish = (t: string) => /נציגה שלנו תחזור/.test(t)
+
+  // GAP 1(a) — register_child_name: שם חלקי (מילה אחת) × 3 → הבהרה, ואז לא אותה
+  //   הבהרה שוב (LLM/מעבר), ועד תור 3 מגיעים לקורלי. ⚠️ הרנס-מוגבל: לא קובעים באיזה
+  //   תור בדיוק ה-LLM עונה, רק שהתור השלישי (לכל המאוחר) הוא קורלי.
+  {
+    const s = makeSession('register_child_name', {})
+    const r1 = await processMessage(s, 'נועה')
+    check('astra name-ladder 1 — הבהרת שם מלא, המסלול נשמר',
+      r1.nextFlow === 'register_child_name' && /שם משפחה/.test(r1.text),
+      `text=${JSON.stringify(r1.text.slice(0, 50))} nextFlow=${r1.nextFlow}`)
+    const r2 = await processMessage(s, 'נועה')
+    check('astra name-ladder 2 — לא אותה הבהרה שוב',
+      r2.text !== r1.text, `r1=${JSON.stringify(r1.text.slice(0, 40))} r2=${JSON.stringify(r2.text.slice(0, 40))}`)
+    const r3 = await processMessage(s, 'נועה')
+    check('astra name-ladder 3 — קורלי עד תור 3 (לכל המאוחר)',
+      /קורלי/.test(r3.text) && r3.nextFlow === 'handoff_paused',
+      `text=${JSON.stringify(r3.text.slice(0, 60))} nextFlow=${r3.nextFlow}`)
+  }
+
+  // GAP 1(b) — register_waiting_confirm: שאלה אמיתית → LLM, השלב נשמר (לא הבהרה, לא הצטרפות)
+  {
+    const s = makeSession('register_waiting_confirm', { child_name: 'נועם בירן', area_code: 'sharon' })
+    const r = await processMessage(s, 'כמה זמן מחכים בדרך כלל?')
+    check('astra waitlist-question — LLM, השלב נשמר',
+      llmish(r.text) && r.nextFlow === 'register_waiting_confirm',
+      `text=${JSON.stringify(r.text.slice(0, 50))} nextFlow=${r.nextFlow}`)
+  }
+
+  // GAP 1(b) — register_waiting_confirm: היסוס × 3 → סולם (הבהרה → לא אותה הבהרה → קורלי),
+  //   אף פעם לא מצטרף בפועל לרשימת ההמתנה (register_waitlist_added).
+  {
+    const s = makeSession('register_waiting_confirm', { child_name: 'נועם בירן', area_code: 'sharon' })
+    const isWaitlistAdded = (t: string) => /נוסף לרשימת ההמתנה|נרשמת לרשימת ההמתנה/.test(t)
+    const r1 = await processMessage(s, 'אולי')
+    check('astra waitlist-hesitation 1 — הבהרה, לא הצטרפות',
+      r1.nextFlow === 'register_waiting_confirm' && !isWaitlistAdded(r1.text),
+      `text=${JSON.stringify(r1.text.slice(0, 50))}`)
+    const r2 = await processMessage(s, 'אני מתלבטת')
+    check('astra waitlist-hesitation 2 — לא אותה הבהרה שוב, לא הצטרפות',
+      r2.text !== r1.text && !isWaitlistAdded(r2.text),
+      `r1=${JSON.stringify(r1.text.slice(0, 40))} r2=${JSON.stringify(r2.text.slice(0, 40))}`)
+    const r3 = await processMessage(s, 'רגע')
+    check('astra waitlist-hesitation 3 — קורלי עד תור 3, אף פעם לא הצטרפות',
+      /קורלי/.test(r3.text) && !isWaitlistAdded(r3.text) && r3.nextFlow === 'handoff_paused',
+      `text=${JSON.stringify(r3.text.slice(0, 50))} nextFlow=${r3.nextFlow}`)
+  }
+
+  // GAP 1(a) — שם חלקי ואז שם מלא: התקדמות אמיתית מתקדמת ומאפסת את __miss
+  {
+    const s = makeSession('register_child_name', {})
+    await processMessage(s, 'נועה')
+    const r = await processMessage(s, 'נועה כהן')
+    check('astra name partial→full — מתקדם, __miss מתאפס',
+      r.nextFlow !== 'register_child_name' && s.collectedData.__miss === undefined,
+      `nextFlow=${r.nextFlow} miss=${s.collectedData.__miss}`)
+  }
+
+  // GAP 2 — פרידת-פתיח + בקשה/שאלה אמיתית בהמשך → לא פרידה בכלל, ממשיכים לנתיב הרגיל
+  {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, 'שבת שלום, אפשר לדעת מה שעות הפעילות?')
+    check('astra farewell-start + שאלת שעות — לא farewell_reply',
+      r.text !== botText('farewell_reply'), `text=${JSON.stringify(r.text.slice(0, 60))}`)
+  }
+  {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, 'לילה טוב, אני רוצה לדבר עם קורלי')
+    check('astra farewell-start + בקשת נציג — הסלמה לקורלי (לא פרידה)',
+      r.nextFlow === 'handoff_paused' || !!r.createTask,
+      `nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 60))}`)
+  }
+  {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, 'ביי, רק תגידו מתי אתם פותחים מחר')
+    check('astra farewell-start + בקשה — לא farewell_reply',
+      r.text !== botText('farewell_reply'), `text=${JSON.stringify(r.text.slice(0, 60))}`)
+  }
+  {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, 'ביי, אני אחזור מחר לרשום')
+    check('astra farewell-start + דחייה — עדיין farewell_reply (ללא שינוי)',
+      r.text === botText('farewell_reply'), `text=${JSON.stringify(r.text.slice(0, 60))}`)
+  }
+
+  // GAP 3 — דחייה מעורבת באמצע מסלול: לא נחשבת דחייה, המסלול וה-collectedData נשמרים
+  {
+    const s = makeSession('register_child_name', { area_code: 'carmel' })
+    const r = await processMessage(s, 'אחזור מחר אבל עכשיו רוצה להשלים')
+    check('astra mixed-defer mid-flow — המסלול נשמר (LLM עם keepFlow)',
+      r.nextFlow === 'register_child_name', `nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 50))}`)
+    check('astra mixed-defer mid-flow — area_code נשמר',
+      s.collectedData.area_code === 'carmel', `area_code=${s.collectedData.area_code}`)
+  }
+
+  // GAP 3 — דחייה מעורבת / שלילה בלי מסלול → לא defer_reply (ממשיכים לנתיב הרגיל)
+  for (const msg of ['אחזור מחר אבל עכשיו צריך עזרה', 'לא אחזור מחר']) {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, msg)
+    check(`astra not-defer — "${msg}" → לא defer_reply`,
+      r.text !== botText('defer_reply'), `text=${JSON.stringify(r.text.slice(0, 50))}`)
+  }
+  // GAP 3 — דחייה "נקייה" (כולל "עכשיו" תמים בלי בקשה בהווה) נשארת דחייה
+  for (const msg of ['אחזור מחר לרשום', 'נדבר אחר כך', 'נדבר מחר, אין לי זמן עכשיו']) {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, msg)
+    check(`astra clean-defer — "${msg}" → defer_reply`,
+      r.text === botText('defer_reply'), `text=${JSON.stringify(r.text.slice(0, 50))}`)
+  }
+
+  // משני — אחרי handoff: תודה מקבלת תשובה קבועה בלי לצרוך את ניסיון ה-LLM היחיד;
+  //   שאלה אחריה כן צורכת אותו (__handoff_llm), עם תזכורת "קורלי תחזור".
+  {
+    const s = makeSession(HANDOFF_FLOW, {})
+    const r1 = await processMessage(s, 'תודה')
+    check('astra handoff-thanks — thanks_reply, __handoff_llm לא נצרך',
+      r1.text === botText('thanks_reply') && s.collectedData.__handoff_llm === undefined,
+      `text=${JSON.stringify(r1.text.slice(0, 50))} llm=${s.collectedData.__handoff_llm}`)
+    const r2 = await processMessage(s, 'מתי אתם פותחים מחר?')
+    check('astra handoff-question — ניסיון LLM יחיד, "קורלי תחזור"',
+      /קורלי תחזור/.test(r2.text) && s.collectedData.__handoff_llm === '1',
+      `text=${JSON.stringify(r2.text.slice(0, 80))} llm=${s.collectedData.__handoff_llm}`)
+  }
+}
+
 async function main() {
   intentCases()
   await flowCases()
@@ -1120,6 +1252,7 @@ async function main() {
   await thanksClosingCases()
   await smartLadderCases()
   await nameAndDeferCases()
+  await astraSmartHumanCases()
   await privacyCases()
   await humanRequestCases()
   await cancelSafetyCases()
