@@ -315,6 +315,22 @@ function asksAboutRegistrationStatus(msg: string): boolean {
 // ברכה = הודעה קצרה (עד 3 מילים / 15 תווים) שמכילה מילת ברכה כמילה שלמה
 const GREETING_WORDS = ['שלום', 'היי', 'הי', 'הלו', 'בוקר', 'ערב', 'צהריים', 'לילה', 'תודה', 'אהלן', 'היייי']
 
+// 23.9 (עינת, בדיקה חיה): "יופי תודה" אחרי סיום מסלול החזיר את *תפריט הפתיחה* - כלל ה"תודה" תפס רק
+//   הודעה שמתחילה ב"תודה", והמילה "תודה" נחשבה ברכה קצרה → תפריט. עכשיו: הודעת סגירה = כל המילים
+//   מאוצר סגור (תודה + מילות סגירה/הערכה), בלי סימן שאלה ובלי תוכן אחר → תשובה חמה, לא תפריט.
+const THANKS_CORE = ['תודה', 'תודה', 'ותודה', 'thanks', 'thank', 'you', 'תנקס', 'טנקס']
+const THANKS_FILLERS = ['יופי', 'רבה', 'לך', 'לכם', 'ענקית', 'גדולה', 'המון', 'מעולה', 'סבבה', 'אחלה', 'בסדר', 'אוקיי', 'אוקי',
+  'מושלם', 'נהדר', 'כיף', 'ברור', 'טוב', 'הבנתי', 'מצוין', 'מצויין', 'וואו', 'יאללה', 'ביי', 'להתראות', 'שלום', 'יום', 'ערב',
+  'לילה', 'בוקר', 'שבוע', 'סופש', 'נעים', 'אהבתי', 'מקסים', 'מדהים', 'אלוף', 'אלופה', 'צדיק', 'צדיקה', 'ok', 'okay', 'great']
+function isThanksClosing(msg: string): boolean {
+  const raw = msg.trim()
+  if (!raw || /[?؟]/.test(raw)) return false
+  const words = normalizeMessage(raw).toLowerCase().replace(/[^א-תa-z\s]+/g, ' ').split(/\s+/).filter(Boolean)
+  if (words.length === 0 || words.length > 6) return false
+  const hasThanks = words.some(w => THANKS_CORE.includes(w))
+  return hasThanks && words.every(w => THANKS_CORE.includes(w) || THANKS_FILLERS.includes(w))
+}
+
 function isShortGreeting(msg: string): boolean {
   const t = msg.trim()
   if (!t) return false
@@ -606,8 +622,8 @@ async function handleNewIntent(
       // ⚠️ startsWith('הי') החזיר את תפריט הפתיחה גם ל-"הי, מילאתי את הפרטים
       //    אבל זה יצא באמצע…" (3 פעמים ברצף לבודק מתוסכל). עכשיו: ברכה = הודעה
       //    *קצרה* שכולה ברכה, ובדיקת מילה שלמה (לא "היום").
-      // "תודה" / "תודה רבה" בסוף שיחה — לא צריך לזרוק שוב את כל התפריט
-      if (/^תודה( רבה| לך| ענקית)?[!.\s💛😊🙏❤️]*$/.test(userMessage.trim())) {
+      // "תודה" / "יופי תודה" / "תודה רבה, מעולה" בסוף שיחה — סגירה חמה, לא התפריט (אוצר סגור, ראו isThanksClosing)
+      if (isThanksClosing(userMessage)) {
         return { text: botText('thanks_reply'), intent, isComplete: true }
       }
       if (isShortGreeting(userMessage)) {
@@ -623,6 +639,7 @@ async function handleNewIntent(
 
     case 'לא_ידוע':
     default:
+      if (isThanksClosing(userMessage)) return { text: botText('thanks_reply'), intent, isComplete: true }
       // → LLM
       return null
   }

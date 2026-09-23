@@ -930,10 +930,32 @@ async function routingCases() {
   }
 }
 
+// ─── 23.9: סגירת שיחה ב"תודה" — תשובה חמה, לא תפריט (עינת, בדיקה חיה: "יופי תודה" → תפריט) ──
+async function thanksClosingCases() {
+  console.log('\n── סגירה ב"תודה" ──')
+  const isWelcome = (t: string) => t.includes('*1* - רישום לצהרון')
+  for (const msg of ['יופי תודה', 'תודה', 'תודה רבה', 'מעולה תודה!', 'תודה רבה, מעולה', 'סבבה תודה 🙏', 'אוקיי תודה לך', 'תודה, יום טוב', 'thanks', 'תודה ענקית אלופה', 'הבנתי תודה']) {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, msg)
+    check(`thanks — "${msg}" → תשובה חמה (לא תפריט, לא LLM)`,
+      !isWelcome(r.text) && /בשמחה|אני כאן/.test(r.text),
+      `text=${JSON.stringify(r.text.slice(0, 60))}`)
+  }
+  // תודה + תוכן/שאלה — *לא* סגירה: ממשיכים לטפל בתוכן
+  for (const msg of ['תודה, ומה השעות של הצהרון?', 'תודה אבל לא הבנתי מתי מחייבים', 'תודה, אני רוצה לבטל את הרישום']) {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, msg)
+    check(`thanks-guard — "${msg}" → לא תשובת-תודה`,
+      !/^בשמחה! אם צריך/.test(r.text),
+      `text=${JSON.stringify(r.text.slice(0, 60))}`)
+  }
+}
+
 async function main() {
   intentCases()
   await flowCases()
   await guardCases()
+  await thanksClosingCases()
   await privacyCases()
   await humanRequestCases()
   await cancelSafetyCases()

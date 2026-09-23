@@ -803,6 +803,6 @@ export async function GET() {
     status: 'ok',
     endpoint: 'POST /api/webhooks/manychat',
     description: 'Kids & Fun WhatsApp bot webhook (ManyChat / uchat)',
-    version: '2.3.0',
+    version: '2.3.1',
   })
 }
