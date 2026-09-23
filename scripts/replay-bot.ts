@@ -998,13 +998,34 @@ async function smartLadderCases() {
       llmish(r1.text) && llmish(r2.text) && /קורלי/.test(r3.text) && r3.nextFlow === 'handoff_paused',
       `r1=${JSON.stringify(r1.text.slice(0, 30))} r3=${JSON.stringify(r3.text.slice(0, 40))} nextFlow=${r3.nextFlow}`)
   }
-  // שלב אישור כספי לא נכנס לסולם: "כן אבל רגע" ×3 → עדיין שאלת אישור, לא קורלי, לא ביטול
+  // שלב אישור כספי בסולם: היסוס 1 → שאלת אישור מחדש · היסוס 2 → LLM + תזכורת "כן/לא" · היסוס 3 → קורלי. אף פעם לא ביטול.
   {
     const s = makeSession('cancel_confirm_after15', { child_name: 'נועם בירן' })
-    let r
-    for (let i = 0; i < 3; i++) r = await processMessage(s, 'כן אבל רגע')
-    check('ladder — שלב אישור כספי נשאר דטרמיניסטי (לא קורלי, לא ביטול)',
-      r!.nextFlow === 'cancel_confirm_after15' && !/הביטול בוצע|קורלי/.test(r!.text), `nextFlow=${r!.nextFlow} text=${JSON.stringify(r!.text.slice(0, 50))}`)
+    const r1 = await processMessage(s, 'כן אבל רגע')
+    check('confirm ladder 1 — היסוס → שאלת האישור מחדש', r1.nextFlow === 'cancel_confirm_after15' && !/הביטול בוצע/.test(r1.text), `nextFlow=${r1.nextFlow}`)
+    const r2 = await processMessage(s, 'אולי')
+    check('confirm ladder 2 — היסוס שני → LLM, השלב נשמר, תזכורת כן/לא, לא ביטול',
+      r2.nextFlow === 'cancel_confirm_after15' && /לאישור הביטול/.test(r2.text) && !/הביטול בוצע/.test(r2.text), `nextFlow=${r2.nextFlow} text=${JSON.stringify(r2.text.slice(0, 80))}`)
+    const r3 = await processMessage(s, 'לא בטוח')
+    check('confirm ladder 3 — היסוס שלישי → קורלי, לא ביטול', /קורלי/.test(r3.text) && !/הביטול בוצע/.test(r3.text), `text=${JSON.stringify(r3.text.slice(0, 60))}`)
+    check('confirm ladder — לעולם לא ביטול בפועל', !/הביטול בוצע|בקשת הביטול נקלטה/.test(r1.text + r2.text + r3.text), '')
+  }
+  // שאלה אמיתית באמצע שלב לא נספרת: 3 שאלות רצופות → עדיין בשלב, לא קורלי
+  {
+    const s = makeSession('waiting_spot_confirm', { child_name: 'נועם בירן' })
+    const r1 = await processMessage(s, 'כמה זה עולה בדיוק?')
+    check('question in confirm — "כמה זה עולה בדיוק?" → LLM, השלב נשמר', llmish(r1.text) && r1.nextFlow === 'waiting_spot_confirm', `text=${JSON.stringify(r1.text.slice(0, 40))} nextFlow=${r1.nextFlow}`)
+    // (עם LLM כבוי שומר-התסכול מסלים אחרי 2 תשובות-שגיאה, לכן כאן בודקים שאלה אחת: LLM, השלב נשמר, המונה לא זז)
+    const s2 = makeSession('payment_setup_method', { child_name: 'נועם', monthly_fee: '450' })
+    const rq = await processMessage(s2, 'כמה זה עולה?')
+    check('question in step — "כמה זה עולה?" בשלב שיטת תשלום → LLM, השלב נשמר, המונה לא זז',
+      llmish(rq.text) && rq.nextFlow === 'payment_setup_method' && s2.collectedData.__miss === undefined, `text=${JSON.stringify(rq.text.slice(0, 40))} nextFlow=${rq.nextFlow} miss=${s2.collectedData.__miss}`)
+  }
+  // הודעה ראשונה שהיא שאלה אמיתית → LLM בלי תפריט מצורף
+  {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, 'תודה. לא הבנתי מתי מחייבים')
+    check('first message question — LLM בלי תפריט', !r.text.includes('*1* - רישום לצהרון'), `text=${JSON.stringify(r.text.slice(0, 80))}`)
   }
 
   console.log('\n── סגירות / פתיחות / תודה ──')
@@ -1033,7 +1054,7 @@ async function smartLadderCases() {
   // פתיחה לא מוכרת בהודעה ראשונה → LLM ואז תפריט; באמצע שיחה (יש היסטוריה) → LLM בלי תפריט
   {
     const s = makeSession(undefined, {})
-    const r = await processMessage(s, 'אהלן וסהלן מה נשמע')
+    const r = await processMessage(s, 'הופה הגעתי')
     check('unknown opening (הודעה ראשונה) — LLM ואז תפריט', llmish(r.text) && isWelcome(r.text), `text=${JSON.stringify(r.text.slice(0, 80))}`)
     const s2 = makeSession(undefined, {})
     s2.messages = [{ role: 'user', content: 'מה השעות?', timestamp: new Date().toISOString() } as any, { role: 'assistant', content: 'השעות הן 13-17', timestamp: new Date().toISOString() } as any]

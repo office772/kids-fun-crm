@@ -1076,7 +1076,8 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
     // astra R2: לא אישור ולא שלילה חד-משמעיים. שאלה אמיתית → LLM עונה (המסלול נשמר);
     // הסתייגות/עמימות ("כן אבל רגע"/"כן 15/10") → שאלת האישור *מחדש* דטרמיניסטית.
     if (isRealQuestion(userMessage)) return { text: '', useLLM: true }
-    return buildCancelConfirm(childName, dayOfMonth)
+    // 23.9 סולם בוט חכם: היסוס חוזר → פעם 2 ה-LLM עונה (המסלול והתזכורת "כן/לא" נשמרים), פעם 3 קורלי. ההכרעה עצמה רק ב"כן" מפורש.
+    return { ...buildCancelConfirm(childName, dayOfMonth), notUnderstood: true }
   }
 
   // אחרי 15 — אישור תקנון או בקשת חריג
@@ -1145,7 +1146,8 @@ export async function handleCancellationFlow(session: BotSession, userMessage: s
     // astra R2: לא אישור ולא שלילה חד-משמעיים. שאלה אמיתית → LLM עונה (המסלול נשמר);
     // הסתייגות/עמימות ("כן אבל רגע"/"כן 15/10") → שאלת האישור *מחדש* דטרמיניסטית.
     if (isRealQuestion(userMessage)) return { text: '', useLLM: true }
-    return buildCancelConfirm(childName, dayOfMonth)
+    // 23.9 סולם בוט חכם: היסוס חוזר → פעם 2 ה-LLM עונה (המסלול והתזכורת "כן/לא" נשמרים), פעם 3 קורלי. ההכרעה עצמה רק ב"כן" מפורש.
+    return { ...buildCancelConfirm(childName, dayOfMonth), notUnderstood: true }
   }
 
   return { text: botText('cancel_restart') }
@@ -1779,8 +1781,9 @@ export async function handlePaymentFailureParentFlow(session: BotSession, userMe
         nextFlow: 'payment_fail_child_name',
       }
     }
+    if (isRealQuestion(userMessage)) return { text: '', useLLM: true }
     return {
-      text: botText('payfail_confirm_yesno'),
+      text: botText('payfail_confirm_yesno'), notUnderstood: true,
       nextFlow: 'payment_fail_confirm_child',
     }
   }
@@ -2771,9 +2774,11 @@ export async function handleWaitingListSpotFlow(
       }
     }
 
-    // תגובה לא ברורה
+    // שאלה אמיתית ("כמה זה עולה בדיוק?") → LLM עונה, השלב נשמר (23.9)
+    if (isRealQuestion(userMessage)) return { text: '', useLLM: true }
+    // תגובה לא ברורה → שאלת האישור מחדש (סולם: פעם 2 LLM, פעם 3 קורלי)
     return {
-      text: botText('waitlist_unclear', { 'ילד': childName }),
+      text: botText('waitlist_unclear', { 'ילד': childName }), notUnderstood: true,
       nextFlow: 'waiting_spot_confirm',
     }
   }

@@ -259,6 +259,12 @@ async function processMessageCore(
     //   התקדמות אמיתית מאפסת את המונה. שלבי אישור כספי לא מסמנים notUnderstood - הם נשארים דטרמיניסטיים.
     const stuck = !fpResult || !!fpResult.useLLM || (!!fpResult.notUnderstood && fpResult.nextFlow === flowBefore)
     if (!stuck) { clearMiss(session); return fpResult! }
+    // שאלה אמיתית באמצע שלב ("כמה זה עולה?") אינה "תקיעות" - ה-LLM עונה והמונה לא זז
+    //   (3 שאלות לגיטימיות לא אמורות להעביר לקורלי; כשל LLM חוזר נתפס ע"י שומר התסכול).
+    //   חל גם על שלבים שלא מזהים שאלות בעצמם (מחזירים "לא הבנתי" על "כמה זה עולה?").
+    if (isLikelyQuestion(userMessage)) {
+      return await llmFallback(session, userMessage, intent, { keepFlow: session.currentFlow ?? flowBefore })
+    }
     const miss = bumpMiss(session, flowBefore)
     if (miss >= 3) {
       clearMiss(session)
@@ -326,8 +332,10 @@ async function processMessageCore(
   const llmReply = await llmFallback(session, userMessage, intent)
   // 23.9: פתיחת שיחה לא מוכרת ("אהלן וסהלן", "מה נשמע") - ה-LLM מבהיר לפי ההקשר ואז מוצג התפריט.
   //   רק כשאין היסטוריה (הודעה ראשונה) ואין מסלול/הסלמה - אחרת "יופי"/"מעולה" באמצע שיחה היו מקבלים תפריט.
+  //   ורק להודעה קצרה שאינה שאלה - שאלה אמיתית בהודעה ראשונה מקבלת תשובה בלי תפריט מיותר.
   const firstMessage = (session.messages || []).length === 0
-  if (firstMessage && !llmReply.escalate && !llmReply.nextFlow && llmReply.text && !llmReply.text.includes('*1* - רישום לצהרון')) {
+  const shortOpening = userMessage.trim().split(/\s+/).filter(Boolean).length <= 3 && !isLikelyQuestion(userMessage)
+  if (firstMessage && shortOpening && !llmReply.escalate && !llmReply.nextFlow && llmReply.text && !llmReply.text.includes('*1* - רישום לצהרון')) {
     return { ...llmReply, text: `${llmReply.text}\n\n${botText('menu')}` }
   }
   return llmReply
