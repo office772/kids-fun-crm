@@ -17,6 +17,9 @@ import { normalizeMessage } from './intent-classifier'
 export interface BotResponse {
   text: string
   escalate?: boolean
+  // 23.9 (סולם "בוט חכם"): השלב לא זיהה את התשובה והחזיר הבהרה. הקוד המרכזי סופר:
+  //   פעם 1 הבהרת השלב · פעם 2 LLM עם הקשר (המסלול נשמר) · פעם 3 העברה לקורלי.
+  notUnderstood?: boolean
   // הקשר אופציונלי לפניות שצריכות להגיע לצוות המסגרת (איסוף מוקדם, חולה היום…)
   notifyFramework?: {
     byChildName?: string                  // לחלץ את המסגרת מתוך הילד
@@ -501,7 +504,7 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
     const words = name.split(' ').filter(w => w.length >= 2)
     if (words.length < 2 || /\d/.test(name) || name.length > 60) {
       return {
-        text: botText('register_placeholder_invalid'),
+        text: botText('register_placeholder_invalid'), notUnderstood: true,
         nextFlow: 'register_complete_placeholder',
       }
     }
@@ -1598,7 +1601,7 @@ async function handlePaymentStatusChildName(
   const words = nameInput.split(' ').filter(w => w.length >= 2)
   if (words.length < 2 || /\d/.test(nameInput)) {
     return {
-      text: botText('payment_status_name_invalid'),
+      text: botText('payment_status_name_invalid'), notUnderstood: true,
       nextFlow: 'payment_status_child_name',
     }
   }
@@ -1701,7 +1704,7 @@ export async function handleCostInfoFlow(
 
   // ─── לא הבין ────────────────────────────────────────────────────────────────
   return {
-    text: botText('cost_not_understood'),
+    text: botText('cost_not_understood'), notUnderstood: true,
     nextFlow: 'cost_info_start',
   }
 }
@@ -1788,7 +1791,7 @@ export async function handlePaymentFailureParentFlow(session: BotSession, userMe
     if (looksOffScript(name)) return { text: '', useLLM: true }
     if (name.split(' ').filter(w => w.length >= 2).length < 2 || /\d/.test(name)) {
       return {
-        text: botText('payfail_name_invalid'),
+        text: botText('payfail_name_invalid'), notUnderstood: true,
         nextFlow: 'payment_fail_child_name',
       }
     }
@@ -1975,7 +1978,7 @@ async function handlePaymentFailMethodChoice(session: BotSession, msg: string): 
     }
   }
   return {
-    text: botText('payfail_method_invalid'),
+    text: botText('payfail_method_invalid'), notUnderstood: true,
     nextFlow: 'payment_fail_method_choice',
   }
 }
@@ -1987,7 +1990,7 @@ async function handlePaymentFailNewDate(session: BotSession, msg: string): Promi
   const day       = dayMatch ? parseInt(dayMatch[0], 10) : NaN
   if (isNaN(day) || day < 1 || day > 28) {
     return {
-      text: botText('payfail_date_invalid'),
+      text: botText('payfail_date_invalid'), notUnderstood: true,
       nextFlow: 'payment_fail_new_date',
     }
   }
@@ -2048,7 +2051,7 @@ async function handlePaymentFailRemindWhen(session: BotSession, msg: string): Pr
   const scheduled = parseRemindWhen(msg)
   if (!scheduled) {
     return {
-      text: botText('payfail_remind_invalid'),
+      text: botText('payfail_remind_invalid'), notUnderstood: true,
       nextFlow: 'payment_fail_remind_when',
     }
   }
@@ -2432,12 +2435,12 @@ export async function handlePaymentSetupFlow(
     }
     // שיטה נשללה בלי בחירה חלופית מפורשת → מציגים שוב את האפשרויות (astra R6)
     if (!chosenMethod && sawNegatedMethod) {
-      return { text: botText('payset_method_invalid'), nextFlow: 'payment_setup_method' }
+      return { text: botText('payset_method_invalid'), notUnderstood: true, nextFlow: 'payment_setup_method' }
     }
 
     if (!chosenMethod) {
       return {
-        text: botText('payset_method_invalid'),
+        text: botText('payset_method_invalid'), notUnderstood: true,
         nextFlow: 'payment_setup_method',
       }
     }
@@ -2538,7 +2541,7 @@ export async function handlePaymentSetupFlow(
     // דרושים לפחות שם פרטי + שם משפחה (2 מילים), ללא ספרות
     if (words.length < 2 || /\d/.test(nameInput) || nameInput.length > 60) {
       return {
-        text: botText('payment_status_name_invalid'),
+        text: botText('payment_status_name_invalid'), notUnderstood: true,
         nextFlow: 'payment_setup_child_name',
       }
     }
@@ -2564,7 +2567,7 @@ export async function handlePaymentSetupFlow(
 
     if (!areaCode) {
       return {
-        text: botText('payset_area_invalid'),
+        text: botText('payset_area_invalid'), notUnderstood: true,
         nextFlow: 'payment_setup_area',
       }
     }
@@ -2696,7 +2699,7 @@ export async function handlePaymentSetupFlow(
     const validNum = !isNaN(numChecks) && numChecks >= 1 && numChecks <= 12
     if (!validNum) {
       return {
-        text: botText('payset_checks_invalid'),
+        text: botText('payset_checks_invalid'), notUnderstood: true,
         nextFlow: 'payment_setup_checks',
       }
     }

@@ -60,11 +60,12 @@ function looksFrustrated(msg: string): boolean {
 const LLM_REPHRASE_RE =
   /לא הבנתי|לא הצלחתי (להבין|לזהות)|(לא|אינ[הו])[^.!?]{0,14}(ברור|ברורה) לי|כתוב\/?י שוב|תכתבי שוב|נסה שוב|נסי שוב|בעיה בהקלדה|תוכל\/?י לפרט|אפשר לפרט|אשמח שתפרט|אשמח שתסביר|לא בטוח(ה)? שהבנתי|רק שאדייק|נראה שהודעת|בוא(י|ו)? נתחיל מחדש|מה בדיוק (אתה|את|אתם|תרצ)/
 
+const LLM_ERROR_MARKER = 'נציגה שלנו תחזור אליך בהקדם 💛'   // buildLLMErrorFallback
 function isNonAnswer(text: string): boolean {
   const t = (text || '').trim()
   if (!t) return false
   return LLM_REPHRASE_RE.test(t) ||
-    t.includes('נציגה שלנו תחזור אליך בהקדם 💛')   // buildLLMErrorFallback
+    t.includes(LLM_ERROR_MARKER)
 }
 
 // הודעה שאין בה תוכן ממשי ("...", "?", "asdf") — גם היא "תור שלא התקדם".
@@ -123,6 +124,19 @@ export async function processMessage(
   // ── אחרי העברה לקורלי — שתיקה (עד פקיעת ה-session), אלא אם מבקשים תפריט ──
   if (session.currentFlow === HANDOFF_FLOW) {
     if (!wantsMenuBack(userMessage)) {
+      // 23.9 (עינת): אחרי "אני מעביר לקורלי" לא משאירים הורה מול קיר.
+      //   בקשה מפורשת לנציגה/מענה אנושי → "הפנייה אצלה" (בלי LLM, בלי ויכוח).
+      //   שאלה אחרת → ניסיון LLM *אחד* עם תזכורת שקורלי תחזור; אחריו שתיקה עד שקורלי מחזירה את הבוט
+      //   (כדי לא לנהל דו-שיח כפול מולה). ג'יבריש/אמוג'י → שתיקה.
+      if (classifyIntent(userMessage) === 'בקשת_נציג') {
+        return { text: botText('handoff_still_open'), intent: 'בקשת_נציג', nextFlow: HANDOFF_FLOW, isComplete: false }
+      }
+      if (session.collectedData.__handoff_llm !== '1' && !isGibberish(userMessage)) {
+        session.collectedData.__handoff_llm = '1'
+        const r = await llmFallback(session, userMessage, 'לא_ידוע', { keepFlow: HANDOFF_FLOW, suppressTask: true })
+        session.currentFlow = HANDOFF_FLOW
+        return { ...r, text: r.text ? `${r.text}\n\n${botText('handoff_llm_note')}` : '', nextFlow: HANDOFF_FLOW, isComplete: false }
+      }
       return { text: '', intent: 'לא_ידוע', nextFlow: HANDOFF_FLOW, isComplete: false }
     }
     session.currentFlow = undefined
@@ -148,10 +162,13 @@ export async function processMessage(
     return { ...result, nextFlow: HANDOFF_FLOW, isComplete: false }
   }
 
+  // 23.9 (עינת, §5): כשה-LLM עצמו נפל (טקסט השגיאה הגנרי), לא סופרים גם את ההודעה הנוכחית כ"תסכול" -
+  //   אחרת "?" בודד בזמן תקלת API הסלים לקורלי מיד. הסלמה רק אחרי שני תורים אמיתיים.
+  const llmDown = (result.text || '').includes(LLM_ERROR_MARKER)
   const strikes =
     ((looksFrustrated(lastUser) || isGibberish(lastUser)) ? 1 : 0) +
     (isNonAnswer(lastBot) ? 1 : 0) +
-    ((looksFrustrated(userMessage) || isGibberish(userMessage)) ? 1 : 0) +
+    ((!llmDown && (looksFrustrated(userMessage) || isGibberish(userMessage))) ? 1 : 0) +
     ((isNonAnswer(result.text) || (!!result.text && result.text === lastBot)) ? 1 : 0)
 
   if (strikes >= 2) {
@@ -236,16 +253,41 @@ async function processMessageCore(
   if (session.currentFlow) {
     const flowBefore = session.currentFlow
     const fpResult = await handleActiveFlow(session, userMessage, intent)
-    // המסלול ביקש להעביר ל-LLM (המשתמש חרג — שאלה/הקשר ולא הקלט המבוקש)
+    // 23.9 (עינת) - סולם "בוט חכם" לתשובה שהשלב לא מזהה, אחיד לכל המסלולים:
+    //   פעם 1: הבהרת השלב (המסלול המהיר) · פעם 2: LLM עם הקשר, המסלול נשמר · פעם 3: העברה לקורלי.
+    //   "תקיעות" = השלב החזיר notUnderstood בלי להתקדם, או ביקש LLM (useLLM), או לא הכיר את ההודעה (null).
+    //   התקדמות אמיתית מאפסת את המונה. שלבי אישור כספי לא מסמנים notUnderstood - הם נשארים דטרמיניסטיים.
+    const stuck = !fpResult || !!fpResult.useLLM || (!!fpResult.notUnderstood && fpResult.nextFlow === flowBefore)
+    if (!stuck) { clearMiss(session); return fpResult! }
+    const miss = bumpMiss(session, flowBefore)
+    if (miss >= 3) {
+      clearMiss(session)
+      return {
+        text: buildEscalationMessage(),
+        intent,
+        escalate: true,
+        isComplete: true,
+        createTask: {
+          type:        'שאלה כללית',
+          description: `ההורה נתקע 3 פעמים בשלב ${flowBefore} - הבוט העביר לקורלי. ההודעה האחרונה: "${userMessage.slice(0, 80)}"`,
+          priority:    'גבוה',
+        },
+      }
+    }
+    if (fpResult?.notUnderstood && miss === 1) return fpResult          // הבהרת השלב, פעם אחת
     // ⚠️ keepFlow: בלעדיו כל תשובת LLM סיימה את המסלול (isComplete) והווב-הוק
     //    מחק את ה-session — ההורה נפל מהמסלול אחרי שאלה אחת (לוגים 09/2026).
-    if (fpResult?.useLLM) {
-      return await llmFallback(session, userMessage, intent, { keepFlow: session.currentFlow ?? flowBefore })
-    }
-    if (fpResult) return fpResult
-
-    // המסלול הפעיל לא הכיר את ההודעה — LLM עם הקשר, והמסלול נשמר
     return await llmFallback(session, userMessage, intent, { keepFlow: session.currentFlow ?? flowBefore })
+  }
+
+  // ── 23.9: רגעים אנושיים בלי מסלול - סגירה/תודה/פתיחה (לפני FAQ וכוונה) ──────────
+  //   סגירה ותודה → תשובה חמה קבועה (עריכה בדשבורד). פתיחה מוכרת → תפריט.
+  //   כל השאר (תגובה קצרה, שיחת חולין, פתיחה לא מוכרת) → LLM עם ההקשר; בהודעה *ראשונה* בשיחה
+  //   התפריט מצורף אחרי תשובת ה-LLM ("LLM להבהרה לפי ההקשר ואז תפריט").
+  if (!isExplicitNumericChoice(userMessage)) {
+    if (isThanksClosing(userMessage)) return { text: botText('thanks_reply'), intent: 'שאלה_כללית', isComplete: true }
+    if (isFarewell(userMessage))      return { text: botText('farewell_reply'), intent: 'שאלה_כללית', isComplete: true }
+    if (isShortGreeting(userMessage)) return { text: buildWelcomeMessage(session.parentName), intent: 'שאלה_כללית', isComplete: true }
   }
 
   // ── FP: "האם נרשמתי? הפרטים נשמרו?" → תשובה ישירה מה-DB ─────────────────
@@ -281,7 +323,14 @@ async function processMessageCore(
   if (fpIntent) return fpIntent
 
   // ── LLM: שום FP לא תפס ────────────────────────────────────────────────────
-  return await llmFallback(session, userMessage, intent)
+  const llmReply = await llmFallback(session, userMessage, intent)
+  // 23.9: פתיחת שיחה לא מוכרת ("אהלן וסהלן", "מה נשמע") - ה-LLM מבהיר לפי ההקשר ואז מוצג התפריט.
+  //   רק כשאין היסטוריה (הודעה ראשונה) ואין מסלול/הסלמה - אחרת "יופי"/"מעולה" באמצע שיחה היו מקבלים תפריט.
+  const firstMessage = (session.messages || []).length === 0
+  if (firstMessage && !llmReply.escalate && !llmReply.nextFlow && llmReply.text && !llmReply.text.includes('*1* - רישום לצהרון')) {
+    return { ...llmReply, text: `${llmReply.text}\n\n${botText('menu')}` }
+  }
+  return llmReply
 }
 
 // זיהוי אם ההודעה היא שאלת מידע (לא בקשה לפעולה כמו "רישום לצהרון")
@@ -312,23 +361,51 @@ function asksAboutRegistrationStatus(msg: string): boolean {
   return REGISTRATION_STATUS_PATTERNS.some(re => re.test(t))
 }
 
-// ברכה = הודעה קצרה (עד 3 מילים / 15 תווים) שמכילה מילת ברכה כמילה שלמה
-const GREETING_WORDS = ['שלום', 'היי', 'הי', 'הלו', 'בוקר', 'ערב', 'צהריים', 'לילה', 'תודה', 'אהלן', 'היייי']
+// ─── מונה "תקיעות" בשלב (סולם בוט חכם) ─────────────────────────────────────
+const MISS_KEY = '__miss'
+function bumpMiss(session: BotSession, flow: string): number {
+  const [f, n] = String(session.collectedData[MISS_KEY] ?? '').split(':')
+  const count = f === flow ? (Number(n) || 0) + 1 : 1
+  session.collectedData[MISS_KEY] = `${flow}:${count}`
+  return count
+}
+function clearMiss(session: BotSession): void { delete session.collectedData[MISS_KEY] }
+
+// ברכת *פתיחה* = הודעה קצרה (עד 3 מילים / 15 תווים) שמכילה מילת פתיחה כמילה שלמה → תפריט.
+//   23.9: "תודה"/"לילה"/"ערב" הוצאו מכאן - סגירה ("לילה טוב", "תודה על הכל") אינה פתיחה.
+const GREETING_WORDS = ['שלום', 'היי', 'הי', 'הלו', 'בוקר', 'צהריים', 'ערב', 'אהלן', 'היייי', 'אהלאן', 'הלואו', 'יו']
+// ברכת *סיום* - אוצר סגור עם עוגן חובה (מילה שמסמנת פרידה), כל שאר המילים מהאוצר → farewell_reply.
+const FAREWELL_ANCHORS = ['לילה', 'ביי', 'להתראות', 'ולהתראות', 'נתראה', 'שבת', 'חג', 'שנה', 'סופש', 'שבוע', 'בהצלחה', 'bye', 'goodbye']
+const FAREWELL_FILLERS = ['טוב', 'טובה', 'נעים', 'נעימה', 'נהדר', 'שלום', 'ומבורך', 'שמח', 'לכולם', 'ומתוקה', 'לכם', 'לך', 'תודה', 'ותודה', 'בקרוב', 'יום', 'המשך', 'מקסים', 'רבה', 'ערב', 'בוקר', 'good', 'night']
+// פרידות בלי מילת-עוגן ייחודית ("יום טוב") - ביטויים שלמים בלבד
+const FAREWELL_PHRASES = ['יום טוב', 'יום נעים', 'המשך יום טוב', 'המשך יום נעים', 'יום מקסים', 'המשך יום מקסים', 'ערב טוב ותודה', 'ערב נעים']
+function isFarewell(msg: string): boolean {
+  const raw = msg.trim()
+  if (!raw || /[?؟]/.test(raw)) return false
+  const words = normalizeMessage(raw).toLowerCase().replace(/[^א-תa-z\s]+/g, ' ').split(/\s+/).filter(Boolean)
+  if (words.length === 0 || words.length > 6) return false
+  if (FAREWELL_PHRASES.includes(words.join(' '))) return true
+  return words.some(w => FAREWELL_ANCHORS.includes(w)) &&
+    words.every(w => FAREWELL_ANCHORS.includes(w) || FAREWELL_FILLERS.includes(w))
+}
 
 // 23.9 (עינת, בדיקה חיה): "יופי תודה" אחרי סיום מסלול החזיר את *תפריט הפתיחה* - כלל ה"תודה" תפס רק
 //   הודעה שמתחילה ב"תודה", והמילה "תודה" נחשבה ברכה קצרה → תפריט. עכשיו: הודעת סגירה = כל המילים
 //   מאוצר סגור (תודה + מילות סגירה/הערכה), בלי סימן שאלה ובלי תוכן אחר → תשובה חמה, לא תפריט.
 const THANKS_CORE = ['תודה', 'תודה', 'ותודה', 'thanks', 'thank', 'you', 'תנקס', 'טנקס']
-const THANKS_FILLERS = ['יופי', 'רבה', 'לך', 'לכם', 'ענקית', 'גדולה', 'המון', 'מעולה', 'סבבה', 'אחלה', 'בסדר', 'אוקיי', 'אוקי',
-  'מושלם', 'נהדר', 'כיף', 'ברור', 'טוב', 'הבנתי', 'מצוין', 'מצויין', 'וואו', 'יאללה', 'ביי', 'להתראות', 'שלום', 'יום', 'ערב',
-  'לילה', 'בוקר', 'שבוע', 'סופש', 'נעים', 'אהבתי', 'מקסים', 'מדהים', 'אלוף', 'אלופה', 'צדיק', 'צדיקה', 'ok', 'okay', 'great']
+// 23.9 (עינת): "תודה על העזרה"/"תודה מכל הלב"/"תודה אני מסודר" נפלו לתפריט. במקום רשימת-מילוי שגדלה
+//   דוגמה-דוגמה: הודעה קצרה עם "תודה", בלי סימן שאלה, בלי מילת שאלה/ניגוד/בקשה, ובלי כוונה ממשית
+//   (המסווג לא זיהה מסלול) = סגירה. הצד הבטוח כאן הוא לא-כספי: טעות = תשובה חמה במקום LLM.
+const THANKS_BLOCKERS = ['אבל', 'למה', 'מה', 'מתי', 'איך', 'כמה', 'האם', 'איפה', 'אפשר', 'רוצה', 'צריך', 'צריכה', 'לא', 'אין', 'עוד', 'גם', 'שאלה', 'בעיה']
 function isThanksClosing(msg: string): boolean {
   const raw = msg.trim()
   if (!raw || /[?؟]/.test(raw)) return false
   const words = normalizeMessage(raw).toLowerCase().replace(/[^א-תa-z\s]+/g, ' ').split(/\s+/).filter(Boolean)
-  if (words.length === 0 || words.length > 6) return false
-  const hasThanks = words.some(w => THANKS_CORE.includes(w))
-  return hasThanks && words.every(w => THANKS_CORE.includes(w) || THANKS_FILLERS.includes(w))
+  if (words.length === 0 || words.length > 7) return false
+  const hasThanks = words.some(w => THANKS_CORE.includes(w) || /^ו?תודה+$/.test(w))
+  if (!hasThanks || words.some(w => THANKS_BLOCKERS.includes(w))) return false
+  const intent = classifyIntent(raw)
+  return intent === 'שאלה_כללית' || intent === 'לא_ידוע'
 }
 
 function isShortGreeting(msg: string): boolean {
@@ -622,24 +699,12 @@ async function handleNewIntent(
       // ⚠️ startsWith('הי') החזיר את תפריט הפתיחה גם ל-"הי, מילאתי את הפרטים
       //    אבל זה יצא באמצע…" (3 פעמים ברצף לבודק מתוסכל). עכשיו: ברכה = הודעה
       //    *קצרה* שכולה ברכה, ובדיקת מילה שלמה (לא "היום").
-      // "תודה" / "יופי תודה" / "תודה רבה, מעולה" בסוף שיחה — סגירה חמה, לא התפריט (אוצר סגור, ראו isThanksClosing)
-      if (isThanksClosing(userMessage)) {
-        return { text: botText('thanks_reply'), intent, isComplete: true }
-      }
-      if (isShortGreeting(userMessage)) {
-        return {
-          text: buildWelcomeMessage(session.parentName),
-          intent,
-          isComplete: true,
-        }
-      }
-      // שאלה כללית עם תוכן → LLM
+      // 23.9: ברכה/תודה/סיום מטופלים מרכזית ב-processMessageCore לפני הכוונות. כאן: תוכן → LLM
       return null
     }
 
     case 'לא_ידוע':
     default:
-      if (isThanksClosing(userMessage)) return { text: botText('thanks_reply'), intent, isComplete: true }
       // → LLM
       return null
   }

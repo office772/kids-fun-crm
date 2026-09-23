@@ -91,8 +91,10 @@ async function flowCases() {
   {
     const s = makeSession()
     const r = await processMessage(s, 'היום קר')
-    check('"היום קר" — לא מזוהה כברכה',
-      !isWelcomeMenu(r.text), `text=${JSON.stringify(r.text.slice(0, 90))}`)
+    // 23.9: הודעה ראשונה לא מוכרת → ה-LLM עונה לפי ההקשר *ואז* התפריט (לא תפריט לבד)
+    check('"היום קר" — לא מזוהה כברכה (ה-LLM עונה קודם, התפריט מצורף אחריו)',
+      !r.text.startsWith('היי') && !r.text.startsWith('שלום!') && !/^\*?1\* - רישום/.test(r.text),
+      `text=${JSON.stringify(r.text.slice(0, 90))}`)
   }
 
   // A3 — register_area: טקסט חופשי, פעם ראשונה = רשימת אזורים, שנייה = LLM עם שמירת מסלול
@@ -194,12 +196,22 @@ async function guardCases() {
       /קורלי/.test(r.text) && r.nextFlow === 'handoff_paused',
       `nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 80))}`)
   }
-  // אחרי handoff — שתיקה
+  // 23.9 (עינת §9): אחרי handoff — ניסיון LLM *אחד* עם תזכורת שקורלי תחזור, אחריו שתיקה;
+  //   בקשה מפורשת לנציגה → "הפנייה אצל קורלי" (בלי LLM)
   {
     const s = makeSession('handoff_paused')
-    const r = await processMessage(s, 'תודה, אני מחכה')
-    check('handoff — הודעה אחרי העברה = שתיקה', r.text === '' && r.nextFlow === 'handoff_paused',
-      `text=${JSON.stringify(r.text)} nextFlow=${r.nextFlow}`)
+    const r1 = await processMessage(s, 'ומה עם השעות של הקייטנה')
+    check('handoff — שאלה אחרי העברה = ניסיון אחד + "קורלי תחזור"', r1.text !== '' && /קורלי תחזור/.test(r1.text) && r1.nextFlow === 'handoff_paused',
+      `text=${JSON.stringify(r1.text.slice(0, 80))} nextFlow=${r1.nextFlow}`)
+    const r2 = await processMessage(s, 'ועוד שאלה, מה עם החגים')
+    check('handoff — שאלה שנייה אחרי העברה = שתיקה', r2.text === '' && r2.nextFlow === 'handoff_paused',
+      `text=${JSON.stringify(r2.text)} nextFlow=${r2.nextFlow}`)
+    const r3 = await processMessage(s, 'אני רוצה לדבר עם נציגה')
+    check('handoff — בקשת נציגה אחרי העברה = "הפנייה אצל קורלי"', /אצל קורלי/.test(r3.text) && r3.nextFlow === 'handoff_paused',
+      `text=${JSON.stringify(r3.text.slice(0, 80))}`)
+    const s2 = makeSession('handoff_paused')
+    const r4 = await processMessage(s2, '?')
+    check('handoff — ג\'יבריש אחרי העברה = שתיקה', r4.text === '', `text=${JSON.stringify(r4.text)}`)
   }
   // "1" מוציא מה-handoff
   {
@@ -951,11 +963,97 @@ async function thanksClosingCases() {
   }
 }
 
+// ─── 23.9: סולם "בוט חכם" באמצע מסלול + סגירות/פתיחות ─────────────────────────
+async function smartLadderCases() {
+  console.log('\n── סולם בוט חכם: הבהרה → LLM → קורלי ──')
+  const llmish = (t: string) => /נציגה שלנו תחזור/.test(t)   // בבדיקה ה-LLM כבוי → טקסט ה-fallback
+  // הסדרת תשלום, בחירת שיטה: תשובה לא מזוהה ×3
+  {
+    const s = makeSession('payment_setup_method', { child_name: 'נועם', monthly_fee: '450' })
+    const r1 = await processMessage(s, 'בלה בלה')
+    check('ladder 1 — הבהרת השלב (payset_method_invalid), המסלול נשמר',
+      /לא הבנתי/.test(r1.text) && r1.nextFlow === 'payment_setup_method', `text=${JSON.stringify(r1.text.slice(0, 50))} nextFlow=${r1.nextFlow}`)
+    const r2 = await processMessage(s, 'בלה בלה שוב')
+    check('ladder 2 — LLM עם הקשר, המסלול נשמר',
+      llmish(r2.text) && r2.nextFlow === 'payment_setup_method', `text=${JSON.stringify(r2.text.slice(0, 50))} nextFlow=${r2.nextFlow}`)
+    const r3 = await processMessage(s, 'בלה בלה שלישית')
+    check('ladder 3 — העברה לקורלי + פנייה',
+      /קורלי/.test(r3.text) && r3.nextFlow === 'handoff_paused' && !!r3.createTask, `text=${JSON.stringify(r3.text.slice(0, 50))} nextFlow=${r3.nextFlow}`)
+  }
+  // התקדמות מאפסת את המונה: הבהרה → תשובה תקינה → שוב הבהרה (לא LLM)
+  {
+    const s = makeSession('payment_setup_method', { child_name: 'נועם', monthly_fee: '450' })
+    await processMessage(s, 'בלה')
+    const ok = await processMessage(s, '3')                       // מזומן → מתקדם
+    check('ladder reset — תשובה תקינה מתקדמת', ok.nextFlow !== 'payment_setup_method', `nextFlow=${ok.nextFlow}`)
+    check('ladder reset — המונה נמחק', s.collectedData.__miss === undefined, `miss=${s.collectedData.__miss}`)
+  }
+  // שלב שכבר עבר ל-LLM בפעם הראשונה (תפריט סטטוס תשלום): LLM, LLM, ואז קורלי
+  {
+    const s = makeSession('payment_status_menu', { child_name: 'נועם' })
+    const r1 = await processMessage(s, 'משהו לא קשור בכלל')
+    const r2 = await processMessage(s, 'עדיין משהו לא קשור')
+    const r3 = await processMessage(s, 'ושוב משהו לא קשור')
+    check('ladder (שלב LLM-ראשון) — פעמיים LLM ואז קורלי',
+      llmish(r1.text) && llmish(r2.text) && /קורלי/.test(r3.text) && r3.nextFlow === 'handoff_paused',
+      `r1=${JSON.stringify(r1.text.slice(0, 30))} r3=${JSON.stringify(r3.text.slice(0, 40))} nextFlow=${r3.nextFlow}`)
+  }
+  // שלב אישור כספי לא נכנס לסולם: "כן אבל רגע" ×3 → עדיין שאלת אישור, לא קורלי, לא ביטול
+  {
+    const s = makeSession('cancel_confirm_after15', { child_name: 'נועם בירן' })
+    let r
+    for (let i = 0; i < 3; i++) r = await processMessage(s, 'כן אבל רגע')
+    check('ladder — שלב אישור כספי נשאר דטרמיניסטי (לא קורלי, לא ביטול)',
+      r!.nextFlow === 'cancel_confirm_after15' && !/הביטול בוצע|קורלי/.test(r!.text), `nextFlow=${r!.nextFlow} text=${JSON.stringify(r!.text.slice(0, 50))}`)
+  }
+
+  console.log('\n── סגירות / פתיחות / תודה ──')
+  const isWelcome = (t: string) => t.includes('*1* - רישום לצהרון')
+  for (const msg of ['לילה טוב', 'ביי', 'להתראות', 'יום טוב', 'שבוע טוב', 'שבת שלום', 'חג שמח', 'שנה טובה', 'תודה ולהתראות', 'ביי ביי', 'נתראה', 'סופש נעים', 'לילה טוב ותודה']) {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, msg)
+    check(`farewell — "${msg}" → פרידה חמה (לא תפריט, לא LLM)`,
+      !isWelcome(r.text) && /אני כאן/.test(r.text) && !llmish(r.text), `text=${JSON.stringify(r.text.slice(0, 60))}`)
+  }
+  for (const msg of ['תודה על העזרה', 'תודה על הכל', 'תודה מכל הלב', 'תודה אני מסודר', 'תודה לך מאוד', 'תודהה', 'wow תודה', 'איזו תודה']) {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, msg)
+    check(`thanks — "${msg}" → "בשמחה" (לא תפריט)`, /^בשמחה/.test(r.text), `text=${JSON.stringify(r.text.slice(0, 60))}`)
+  }
+  for (const msg of ['תודה, יש לי עוד שאלה על התשלום', 'תודה אבל לא הבנתי מתי מחייבים', 'תודה, אני רוצה לבטל את הרישום']) {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, msg)
+    check(`thanks-guard — "${msg}" → לא "בשמחה"`, !/^בשמחה/.test(r.text), `text=${JSON.stringify(r.text.slice(0, 60))}`)
+  }
+  for (const msg of ['אהלן', 'הלו', 'היייי', 'שלום', 'בוקר טוב']) {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, msg)
+    check(`opening — "${msg}" → תפריט פתיחה`, isWelcome(r.text), `text=${JSON.stringify(r.text.slice(0, 60))}`)
+  }
+  // פתיחה לא מוכרת בהודעה ראשונה → LLM ואז תפריט; באמצע שיחה (יש היסטוריה) → LLM בלי תפריט
+  {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, 'אהלן וסהלן מה נשמע')
+    check('unknown opening (הודעה ראשונה) — LLM ואז תפריט', llmish(r.text) && isWelcome(r.text), `text=${JSON.stringify(r.text.slice(0, 80))}`)
+    const s2 = makeSession(undefined, {})
+    s2.messages = [{ role: 'user', content: 'מה השעות?', timestamp: new Date().toISOString() } as any, { role: 'assistant', content: 'השעות הן 13-17', timestamp: new Date().toISOString() } as any]
+    const r2 = await processMessage(s2, 'יופי')
+    check('reaction באמצע שיחה — LLM בלי תפריט', llmish(r2.text) && !isWelcome(r2.text), `text=${JSON.stringify(r2.text.slice(0, 80))}`)
+  }
+  // §5: ג'יבריש בזמן שה-LLM נופל → לא הסלמה מיידית (תור אחד)
+  {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, '?')
+    check('§5 — "?" בודד כשה-LLM כבוי → לא הסלמה לקורלי', r.nextFlow !== 'handoff_paused', `nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 50))}`)
+  }
+}
+
 async function main() {
   intentCases()
   await flowCases()
   await guardCases()
   await thanksClosingCases()
+  await smartLadderCases()
   await privacyCases()
   await humanRequestCases()
   await cancelSafetyCases()
