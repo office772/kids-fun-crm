@@ -1069,12 +1069,57 @@ async function smartLadderCases() {
   }
 }
 
+// ─── 23.9: שם ילד לא נבלע; פרידה/דחייה לא מתחילות מסלול ────────────────────────
+async function nameAndDeferCases() {
+  console.log('\n── שם ילד / פרידה / דחייה ──')
+  const llmish = (t: string) => /נציגה שלנו תחזור/.test(t)
+  for (const [step, invalidRe] of [['register_complete_placeholder', /שם/], ['payment_setup_child_name', /שם/], ['payment_fail_child_name', /שם/], ['payment_status_child_name', /שם/]] as Array<[string, RegExp]>) {
+    for (const junk of ['אין לי מושג מה זה', 'משפט לא קשור לגמרי', 'תודה רבה', 'צהרון', 'מחר בבוקר']) {
+      const s = makeSession(step, { placeholder_child_id: 'x' })
+      const r = await processMessage(s, junk)
+      check(`name-guard [${step}] — "${junk}" לא נשמר כשם`,
+        (!s.collectedData.child_name || s.collectedData.child_name !== junk) && !/עדכנתי את/.test(r.text) && (llmish(r.text) || invalidRe.test(r.text) || r.nextFlow === step),
+        `child_name=${s.collectedData.child_name} text=${JSON.stringify(r.text.slice(0, 50))} nextFlow=${r.nextFlow}`)
+    }
+    const s = makeSession(step, { placeholder_child_id: 'x' })
+    const r = await processMessage(s, 'דני לוי')
+    check(`name-guard [${step}] — "דני לוי" מתקבל כשם`, r.nextFlow !== step || /דני לוי/.test(r.text), `nextFlow=${r.nextFlow} text=${JSON.stringify(r.text.slice(0, 50))}`)
+  }
+  const isWelcome = (t: string) => t.includes('*1* - רישום לצהרון')
+  for (const msg of ['ביי, אני אחזור מחר לרשום', 'להתראות, נדבר אחר כך', 'לילה טוב, מחר אמשיך']) {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, msg)
+    check(`farewell-start — "${msg}" → פרידה, לא מסלול`, /אני כאן/.test(r.text) && !r.nextFlow && !isWelcome(r.text), `text=${JSON.stringify(r.text.slice(0, 50))} nextFlow=${r.nextFlow}`)
+  }
+  for (const msg of ['אני אחזור מחר לרשום', 'נדבר אחר כך על התשלום', 'מחר אני אשלים את הרישום']) {
+    const s = makeSession(undefined, {})
+    const r = await processMessage(s, msg)
+    check(`defer — "${msg}" → "מחכה לכם", לא מסלול`, /מחכה לכם/.test(r.text) && !r.nextFlow, `text=${JSON.stringify(r.text.slice(0, 50))} nextFlow=${r.nextFlow}`)
+  }
+  // דחייה באמצע מסלול → המסלול מסתיים בשקט; בשלב אישור ביטול → לא ביטול
+  {
+    const s = makeSession('register_area', {})
+    const r = await processMessage(s, 'נדבר מחר, אין לי זמן עכשיו')
+    check('defer mid-flow — register_area → מסלול מסתיים', /מחכה לכם/.test(r.text) && !r.nextFlow && s.currentFlow === undefined, `text=${JSON.stringify(r.text.slice(0, 40))} flow=${s.currentFlow}`)
+    const s2 = makeSession('cancel_confirm_after15', { child_name: 'נועם בירן' })
+    const r2 = await processMessage(s2, 'אחזור מחר עם תשובה')
+    check('defer mid-flow — אישור ביטול → לא ביטול, מסלול מסתיים', !/הביטול בוצע/.test(r2.text) && /מחכה לכם/.test(r2.text), `text=${JSON.stringify(r2.text.slice(0, 50))}`)
+  }
+  // "מחר" לבד בשלב תאריך תזכורת - לא דחייה, תאריך
+  {
+    const s = makeSession('payment_fail_remind_when', { child_name: 'נועם' })
+    const r = await processMessage(s, 'מחר')
+    check('"מחר" בשלב תאריך — לא דחייה', !/מחכה לכם/.test(r.text), `text=${JSON.stringify(r.text.slice(0, 50))}`)
+  }
+}
+
 async function main() {
   intentCases()
   await flowCases()
   await guardCases()
   await thanksClosingCases()
   await smartLadderCases()
+  await nameAndDeferCases()
   await privacyCases()
   await humanRequestCases()
   await cancelSafetyCases()

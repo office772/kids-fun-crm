@@ -92,6 +92,19 @@ function buildNotAName(nextFlow: string): BotResponse {
   }
 }
 
+// 23.9 (עינת): "אין לי מושג מה זה" נשמר כשם ילד ב-register_complete_placeholder. כל שלבי שם-הילד עוברים
+//   דרך שומר אחד: שאלה/משפט/מילת-מטא → LLM (המסלול נשמר); לא נראה כמו שם (looksLikeChildName: 2-4 מילים,
+//   בלי ספרות/סימנים, בלי מילים כמו "תודה"/"מחר"/"צהרון") → הבהרה מסומנת notUnderstood (סולם: LLM, קורלי).
+function childNameGuard(input: string, invalidKey: string, step: string): BotResponse | null {
+  const name = input.trim().replace(/\s+/g, ' ')
+  if (looksOffScript(name)) return { text: '', useLLM: true }
+  const words = name.split(' ').filter(w => w.length >= 2)
+  if (words.length < 2 || !looksLikeChildName(name)) {
+    return { text: botText(invalidKey), notUnderstood: true, nextFlow: step }
+  }
+  return null
+}
+
 // ─── תיקון אזור באמצע הרישום ─────────────────────────────────────────────────
 // "רגע טעיתי באזור, זה השרון" באמצע שלב השם — לפני התיקון זה נשמר כשם הילד/ה.
 const AREA_FIX_RE = /טעיתי|בעצם|שיניתי|לא,? ?(זה|האזור)/
@@ -501,13 +514,8 @@ export async function handleRegistrationFlow(session: BotSession, userMessage: s
   // ─── השלמת שם ילד placeholder (הורה זוהה אבל חסר שם בילד) ─────────────
   if (step === 'register_complete_placeholder') {
     const name = userMessage.trim().replace(/\s+/g, ' ')
-    const words = name.split(' ').filter(w => w.length >= 2)
-    if (words.length < 2 || /\d/.test(name) || name.length > 60) {
-      return {
-        text: botText('register_placeholder_invalid'), notUnderstood: true,
-        nextFlow: 'register_complete_placeholder',
-      }
-    }
+    const guard = childNameGuard(name, 'register_placeholder_invalid', 'register_complete_placeholder')
+    if (guard) return guard
 
     const childId = session.collectedData.placeholder_child_id
     if (childId) {
@@ -1597,16 +1605,8 @@ async function handlePaymentStatusChildName(
 ): Promise<BotResponse> {
   const nameInput = userMessage.trim().replace(/\s+/g, ' ')
 
-  // חרג מהמסלול (שאלה/הקשר ולא שם) → LLM יבין עם ההקשר, לא נחפש את המשפט כשם
-  if (looksOffScript(nameInput)) return { text: '', useLLM: true }
-
-  const words = nameInput.split(' ').filter(w => w.length >= 2)
-  if (words.length < 2 || /\d/.test(nameInput)) {
-    return {
-      text: botText('payment_status_name_invalid'), notUnderstood: true,
-      nextFlow: 'payment_status_child_name',
-    }
-  }
+  const guard = childNameGuard(nameInput, 'payment_status_name_invalid', 'payment_status_child_name')
+  if (guard) return guard
 
   // ⚠️ S1 — חשיפת מידע: שם ילד/ה *לבדו* אינו זיהוי. כל מספר שהקליד שם מוכר
   // קיבל סטטוס תשלום, סכום ושם ההורה של משפחה אחרת (אתגור 17.9).
@@ -1791,13 +1791,8 @@ export async function handlePaymentFailureParentFlow(session: BotSession, userMe
   // ─── זיהוי לפי שם ילד (כשהטלפון לא מזוהה) ────────────────────────────────
   if (step === 'payment_fail_child_name') {
     const name = userMessage.trim().replace(/\s+/g, ' ')
-    if (looksOffScript(name)) return { text: '', useLLM: true }
-    if (name.split(' ').filter(w => w.length >= 2).length < 2 || /\d/.test(name)) {
-      return {
-        text: botText('payfail_name_invalid'), notUnderstood: true,
-        nextFlow: 'payment_fail_child_name',
-      }
-    }
+    const guard = childNameGuard(name, 'payfail_name_invalid', 'payment_fail_child_name')
+    if (guard) return guard
     session.collectedData.child_name = name
     return await routePaymentFailBranch(session)
   }
@@ -2539,15 +2534,8 @@ export async function handlePaymentSetupFlow(
   // ─── שלב זיהוי 1: שם הילד/ה המלא ─────────────────────────────────────────
   if (step === 'payment_setup_child_name') {
     const nameInput = userMessage.trim().replace(/\s+/g, ' ')
-    const words = nameInput.split(' ').filter(w => w.length >= 2)
-
-    // דרושים לפחות שם פרטי + שם משפחה (2 מילים), ללא ספרות
-    if (words.length < 2 || /\d/.test(nameInput) || nameInput.length > 60) {
-      return {
-        text: botText('payment_status_name_invalid'), notUnderstood: true,
-        nextFlow: 'payment_setup_child_name',
-      }
-    }
+    const guard = childNameGuard(nameInput, 'payment_status_name_invalid', 'payment_setup_child_name')
+    if (guard) return guard
 
     session.collectedData.child_name = nameInput
     session.collectedData.identity_confirmed = 'true'

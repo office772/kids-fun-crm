@@ -252,6 +252,13 @@ async function processMessageCore(
   // ── FP: מסלול פעיל — ממשיכים בו ──────────────────────────────────────────
   if (session.currentFlow) {
     const flowBefore = session.currentFlow
+    // "נדבר מחר" / "אחזור אחר כך" באמצע מסלול → ההורה דוחה. מסיימים את המסלול (בלי לבצע דבר) ומחכים.
+    //   לא בשלבי תיאור חופשי (שם ההודעה היא תוכן), ולא אחרי הפניה לקורלי.
+    if (!DESCRIPTION_STEPS.has(flowBefore) && !isExplicitNumericChoice(userMessage) && isDeferral(userMessage)) {
+      session.currentFlow = undefined
+      session.collectedData = {}
+      return { text: botText('defer_reply'), intent, isComplete: true }
+    }
     const fpResult = await handleActiveFlow(session, userMessage, intent)
     // 23.9 (עינת) - סולם "בוט חכם" לתשובה שהשלב לא מזהה, אחיד לכל המסלולים:
     //   פעם 1: הבהרת השלב (המסלול המהיר) · פעם 2: LLM עם הקשר, המסלול נשמר · פעם 3: העברה לקורלי.
@@ -292,7 +299,10 @@ async function processMessageCore(
   //   התפריט מצורף אחרי תשובת ה-LLM ("LLM להבהרה לפי ההקשר ואז תפריט").
   if (!isExplicitNumericChoice(userMessage)) {
     if (isThanksClosing(userMessage)) return { text: botText('thanks_reply'), intent: 'שאלה_כללית', isComplete: true }
-    if (isFarewell(userMessage))      return { text: botText('farewell_reply'), intent: 'שאלה_כללית', isComplete: true }
+    if (isFarewell(userMessage) || FAREWELL_START_RE.test(normalizeMessage(userMessage).trim())) {
+      return { text: botText('farewell_reply'), intent: 'שאלה_כללית', isComplete: true }
+    }
+    if (isDeferral(userMessage))      return { text: botText('defer_reply'), intent: 'שאלה_כללית', isComplete: true }
     if (isShortGreeting(userMessage)) return { text: buildWelcomeMessage(session.parentName), intent: 'שאלה_כללית', isComplete: true }
   }
 
@@ -387,6 +397,14 @@ const FAREWELL_ANCHORS = ['לילה', 'ביי', 'להתראות', 'ולהתרא�
 const FAREWELL_FILLERS = ['טוב', 'טובה', 'נעים', 'נעימה', 'נהדר', 'שלום', 'ומבורך', 'שמח', 'לכולם', 'ומתוקה', 'לכם', 'לך', 'תודה', 'ותודה', 'בקרוב', 'יום', 'המשך', 'מקסים', 'רבה', 'ערב', 'בוקר', 'good', 'night']
 // פרידות בלי מילת-עוגן ייחודית ("יום טוב") - ביטויים שלמים בלבד
 const FAREWELL_PHRASES = ['יום טוב', 'יום נעים', 'המשך יום טוב', 'המשך יום נעים', 'יום מקסים', 'המשך יום מקסים', 'ערב טוב ותודה', 'ערב נעים']
+// 23.9 (עינת): "ביי, אני אחזור מחר לרשום" התחיל רישום (המסווג תפס "לרשום"). ההורה *עוזב* או *דוחה* -
+//   לא מתחילים מסלול. (א) פרידה בראש ההודעה → farewell; (ב) כוונה דחויה (פועל-חזרה + זמן) → defer_reply.
+const FAREWELL_START_RE = /^(ביי|להתראות|לילה טוב|שבת שלום|נתראה|יאללה ביי|טוב ביי)([^א-ת]|$)/
+const DEFER_INTENT_RE = /(אחזור|נחזור|אדבר|נדבר|אמשיך|נמשיך|אשלים|נשלים|אעשה|נעשה|ארשום|נרשום)\s+(את זה\s+)?(מחר|אחר כך|אחכ|בהמשך|יותר מאוחר|מאוחר יותר|בערב|בשבוע הבא|בהזדמנות)|(מחר|אחר כך|בהמשך|יותר מאוחר|מאוחר יותר|בערב)\s+(אני\s+)?(אחזור|נחזור|אדבר|נדבר|אמשיך|נמשיך|אשלים|נשלים|ארשום|נרשום)/
+function isDeferral(msg: string): boolean {
+  const t = normalizeMessage(msg).trim()
+  return !/[?؟]/.test(t) && DEFER_INTENT_RE.test(t)
+}
 function isFarewell(msg: string): boolean {
   const raw = msg.trim()
   if (!raw || /[?؟]/.test(raw)) return false
