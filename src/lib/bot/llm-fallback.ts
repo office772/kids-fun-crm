@@ -234,12 +234,17 @@ export async function callLLMFallback(
     if (holidays) contextLines.push(`חגים וחופשות (מקור רשמי - אפשר לצטט): ${holidays}`)
   } catch { /* לא חוסם */ }
 
-  if (session.currentFlow) contextLines.push(`זרימה פעילה: ${session.currentFlow} - ההורה באמצע תהליך; ענה על שאלתו והזכר לו בעדינות איפה עצרנו. אל תתחיל תהליך אחר.`)
-  if (Object.keys(session.collectedData || {}).length > 0) {
-    const data = Object.entries(session.collectedData)
-      .map(([k, v]) => `${k}: ${v}`)
-      .join(', ')
-    contextLines.push(`נתונים שנאספו: ${data}`)
+  // 23.9 (סולם בוט חכם): שורת הקשר מדויקת לפני כל תור (דפוס Edry Connect).
+  //   אחרי הפניה לקורלי - תשובה קצרה וחמה, בלי תהליך. באמצע מסלול - ההורה כנראה סטה/נתקע:
+  //   קודם לענות לו כבן אדם, ואז להזכיר בעדינות את השאלה הפתוחה מההודעה הקודמת של הבוט.
+  if (session.currentFlow === 'handoff_paused') {
+    contextLines.push('השיחה כבר הועברה לקורלי (נציגה אנושית) והיא תחזור להורה. ענה קצר, חם ומועיל על מה שנשאל עכשיו. אל תתחיל תהליך, אל תבקש פרטים, אל תבטיח פעולות.')
+  } else if (session.currentFlow) {
+    contextLines.push(`ההורה באמצע תהליך (${session.currentFlow}) וכנראה ענה משהו שהתהליך לא הבין, או סטה לשאלה אחרת. קודם ענה לו כבן אדם על מה שכתב עכשיו, ואז הזכר בעדינות ובמשפט אחד את השאלה הפתוחה מההודעה הקודמת שלך. אל תתחיל תהליך אחר ואל תמציא אפשרויות.`)
+  }
+  const visibleData = Object.entries(session.collectedData || {}).filter(([k]) => !k.startsWith('__'))
+  if (visibleData.length > 0) {
+    contextLines.push(`נתונים שנאספו: ${visibleData.map(([k, v]) => `${k}: ${v}`).join(', ')}`)
   }
   // הגנה מהזיה: אם אין שם ילד/ה - לומר ל-LLM מפורשות שאין, ושיבקש (לא ימציא).
   // מדלגים אם כבר זיהינו את ההורה+ילדים לפי הטלפון (אז אנחנו באמת מכירים אותם).
