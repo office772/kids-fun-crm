@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
   const { createServiceClient } = await import('@/lib/supabase/server')
   const supabase = createServiceClient()
 
-  const stats = { reconciled: 0, new_charges: 0, failures_recorded: 0, failures_nomatch: 0, marked_expired: 0, errors: 0 }
+  const stats = { reconciled: 0, new_charges: 0, failures_recorded: 0, failures_backfilled: 0, failures_nomatch: 0, marked_expired: 0, errors: 0 }
 
   // ─── חיובים שבוצעו: לוודא שיש להם רשומה ב-CRM ─────────────────────────────
   for (const rec of (charged.data ?? [])) {
@@ -117,6 +117,11 @@ export async function GET(req: NextRequest) {
       // פנייה אחת פתוחה לכל הורה (לא כופלים מדי יום).
       // ⚠️ limit(1) ולא maybeSingle — maybeSingle מחזיר null כשיש כמה שורות,
       //    מה שהיה גורם ליצירת כפילות אינסופית למי שכבר יש לו >1 פנייה פתוחה.
+      // ⚠️ השלמה (11.10.2026): הסנכרון היה שבור מאז הקיץ (on_conflict מול אינדקס חלקי →
+      //    42P10). כשלים שקדמו לתיקון נרשמים בלי פנייה — כדי שלא ייפתח לקורלי גל
+      //    משימות ישנות (החלטת עינת). כשל בלי תאריך קריא בתקופת ההשלמה נחשב ישן.
+      if (isBackfillFailure(rec)) { stats.failures_backfilled++; continue }
+
       const { data: openTasks } = await supabase
         .from('tasks').select('id')
         .eq('parent_id', parentId).eq('type', 'כשל תשלום').eq('status', 'פתוח').limit(1)
@@ -162,7 +167,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  console.log(`[payplus-sync] reconciled=${stats.reconciled} new_charges=${stats.new_charges} failures=${stats.failures_recorded} (nomatch=${stats.failures_nomatch}) expired=${stats.marked_expired} errors=${stats.errors}`)
+  console.log(`[payplus-sync] reconciled=${stats.reconciled} new_charges=${stats.new_charges} failures=${stats.failures_recorded} (backfilled=${stats.failures_backfilled} nomatch=${stats.failures_nomatch}) expired=${stats.marked_expired} errors=${stats.errors}`)
   return NextResponse.json({ ok: true, stats })
 }
 
@@ -225,4 +230,16 @@ function ppDateToISO(d?: string): string | undefined {
   const m = d.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
   if (!m) return undefined
   return new Date(`${m[3]}-${m[2]}-${m[1]}T00:00:00Z`).toISOString()
+}
+
+// ─── השלמת כשלים ישנים בלי פניות ──────────────────────────────────────────────
+// כשלים שתאריכם לפני תיקון הסנכרון — רישום בלבד. כשל בלי תאריך קריא נחשב ישן רק
+// בחלון ההשלמה (45 יום, כמו טווח הדו"ח); אחריו כל כשל לא-מתוארך = חדש.
+const BACKFILL_CUTOFF   = Date.parse('2026-10-12T00:00:00Z')
+const BACKFILL_WINDOW_END = BACKFILL_CUTOFF + 46 * 86400_000
+
+function isBackfillFailure(rec: ChargedRecord): boolean {
+  const iso = ppDateToISO(rec.date_of_failure) ?? ppDateToISO(rec.date_to_charge)
+  if (iso) return Date.parse(iso) < BACKFILL_CUTOFF
+  return Date.now() < BACKFILL_WINDOW_END
 }
